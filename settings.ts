@@ -12,9 +12,16 @@ export interface ProtonDriveSyncSettings {
   sessionExpiresAt: string | null;
   containerNodeUid: string | null;
   vaultRootNodeUid: string | null;
+  pathMap: Record<string, SyncMapEntry>;
+  folderMap: Record<string, SyncMapEntry>;
   enableFileLogging: boolean;
   logLevel: LogLevel;
   logMaxSizeKb: number;
+}
+
+export interface SyncMapEntry {
+  nodeUid: string;
+  updatedAt: string;
 }
 
 export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
@@ -26,6 +33,8 @@ export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
   sessionExpiresAt: null,
   containerNodeUid: null,
   vaultRootNodeUid: null,
+  pathMap: {},
+  folderMap: {},
   enableFileLogging: false,
   logLevel: 'info',
   logMaxSizeKb: 1024

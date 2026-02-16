@@ -6,10 +6,7 @@ import type {
 import type { PrivateKey, PublicKey } from "@protontech/drive-sdk/dist/crypto";
 
 import { ProtonApiClient } from "./proton-api";
-import { computeKeyPasswordFromSalt } from "./proton-srp";
 import type { PluginLogger } from "./logger";
-
-export type KeyPassphraseProvider = () => Promise<string | null>;
 
 type ProtonAddressKey = {
   ID: string;
@@ -41,15 +38,6 @@ type ProtonAddressesResponse = {
   Addresses?: ProtonAddress[];
 };
 
-type ProtonKeySaltEntry = {
-  ID?: string;
-  KeySalt?: string;
-};
-
-type ProtonKeySaltsResponse = {
-  KeySalts?: ProtonKeySaltEntry[];
-};
-
 type ProtonPublicKeyEntry = {
   PublicKey: string;
 };
@@ -70,11 +58,10 @@ export class ProtonAccount implements ProtonDriveAccount {
   private addressesCache: CachedValue<ProtonDriveAccountAddress[]> | null =
     null;
   private publicKeysCache = new Map<string, CachedValue<PublicKey[]>>();
-  private keySaltsCache: CachedValue<Map<string, string>> | null = null;
 
   constructor(
     private readonly apiClient: ProtonApiClient,
-    private readonly getKeyPassphrase: KeyPassphraseProvider,
+    private readonly keyPassphrases: Record<string, string>,
     private readonly logger?: PluginLogger,
   ) {}
 
@@ -88,6 +75,7 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 
   async getOwnAddresses(): Promise<ProtonDriveAccountAddress[]> {
+    this.logger?.debug("Fetching own Proton addresses");
     const cached = this.getCached(this.addressesCache);
     if (cached) {
       return cached;
@@ -105,26 +93,17 @@ export class ProtonAccount implements ProtonDriveAccount {
 
     const user = await this.getUser();
 
-    const passphrase = await this.getKeyPassphrase();
-    if (!passphrase) {
-      throw new Error("Missing key passphrase for decrypting Proton keys.");
-    }
-
-    const keySalts = await this.getKeySalts();
-    const mergedSalts = keySalts;
-
     const userKey = await resolveUserKey(
-      passphrase,
       user.Keys ?? [],
-      mergedSalts,
+      this.keyPassphrases,
       this.logger,
     );
 
     const mapped = await Promise.all(
-      addresses.map((address) =>
-        mapAddress(address, passphrase, mergedSalts, userKey, this.logger),
-      ),
+      addresses.map((address) => mapAddress(address, userKey!, this.logger)),
     );
+
+    this.logger?.debug("Fetched and mapped Proton addresses", { mapped });
 
     const sorted = [...mapped].sort((left, right) =>
       left.addressId.localeCompare(right.addressId),
@@ -155,7 +134,7 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 
   async hasProtonAccount(email: string): Promise<boolean> {
-    this.logger?.debug("Checking if email has a Proton account", { email });
+    //this.logger?.debug("Checking if email has a Proton account", { email });
     const response = await this.fetchPublicKeysRaw(email);
     if (typeof response.IsProtonMail === "boolean") {
       return response.IsProtonMail;
@@ -169,7 +148,7 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 
   async getPublicKeys(email: string): Promise<PublicKey[]> {
-    this.logger?.debug("Fetching public keys for email", { email });
+    //this.logger?.debug("Fetching public keys for email", { email });
     const cached = this.getCached(this.publicKeysCache.get(email) ?? null);
     if (cached) {
       return cached;
@@ -204,49 +183,6 @@ export class ProtonAccount implements ProtonDriveAccount {
     );
   }
 
-  private async getKeySalts(): Promise<Map<string, string>> {
-    const cached = this.getCached(this.keySaltsCache);
-    if (cached) {
-      return cached;
-    }
-
-    try {
-      const response = await this.apiClient.getJson<ProtonKeySaltsResponse>(
-        "/core/v4/keys/salts",
-      );
-      const entries = response.KeySalts ?? [];
-      const map = new Map<string, string>();
-      for (const entry of entries) {
-        if (!entry.ID || !entry.KeySalt) {
-          continue;
-        }
-        map.set(entry.ID, entry.KeySalt);
-      }
-
-      this.keySaltsCache = {
-        fetchedAt: Date.now(),
-        data: map,
-      };
-
-      return map;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.toLowerCase().includes("scope")) {
-        this.logger?.warn(
-          "Key salts unavailable due to missing scope; falling back to address key salts if present.",
-        );
-        const empty = new Map<string, string>();
-        this.keySaltsCache = {
-          fetchedAt: Date.now(),
-          data: empty,
-        };
-        return empty;
-      }
-
-      throw error;
-    }
-  }
-
   private async getUser(): Promise<ProtonUser> {
     const response =
       await this.apiClient.getJson<ProtonUserResponse>("/core/v4/users");
@@ -272,17 +208,21 @@ export class ProtonAccount implements ProtonDriveAccount {
 
 async function mapAddress(
   address: ProtonAddress,
-  passphrase: string,
-  keySalts: Map<string, string>,
-  userKey: openpgp.PrivateKey | null,
+  userKey: openpgp.PrivateKey,
   logger?: PluginLogger,
 ): Promise<ProtonDriveAccountAddress> {
   const keys = address.Keys ?? [];
   const parsedKeys = await Promise.all(
-    keys.map((key) =>
-      parsePrivateKey(key, passphrase, keySalts, userKey, logger),
-    ),
+    keys.map(async (key) => ({
+      id: key.ID,
+      key: await decryptKeyUsingToken(key, userKey, logger) as unknown as PrivateKey,
+    })),
   );
+
+  logger?.debug("Mapped Proton address keys", {
+    addressId: address.ID,
+    keyIds: parsedKeys,
+  });
 
   const primaryIndex = keys.findIndex(
     (key) => key.Primary === true || key.Primary === 1,
@@ -297,13 +237,77 @@ async function mapAddress(
   };
 }
 
-async function parsePrivateKey(
+async function resolveUserKey(
+  keys: ProtonAddressKey[],
+  passphrases: Record<string, string>,
+  logger?: PluginLogger,
+): Promise<openpgp.PrivateKey | null> {
+  const activeKeys = keys.filter(
+    (key) =>
+      key.Active === undefined || key.Active === true || key.Active === 1,
+  );
+
+  if (!activeKeys.length) {
+    logger?.warn("No active user keys available for token decryption");
+    return null;
+  }
+
+  const primaryKey =
+    activeKeys.find((key) => key.Primary === true || key.Primary === 1) ??
+    activeKeys[0];
+
+  return decryptKey(primaryKey, passphrases, logger);
+}
+
+async function decryptKey(
   key: ProtonAddressKey,
-  passphrase: string,
-  keySalts: Map<string, string>,
+  passphrases: Record<string, string>,
+  logger?: PluginLogger,
+): Promise<openpgp.PrivateKey | null> {
+  const privateKey = await openpgp.readPrivateKey({
+    armoredKey: key.PrivateKey,
+  });
+
+  if (privateKey.isDecrypted()) {
+    return privateKey;
+  }
+
+  logger?.debug(
+    "User key is encrypted, attempting decryption with available passphrases",
+  );
+  const passphrase = passphrases[key.ID];
+  if (!passphrase) {
+    logger?.warn("No passphrase available for decrypting user key", {
+      keyId: key.ID,
+    });
+
+    return null;
+  }
+
+  try {
+    const decrypted = await openpgp.decryptKey({
+      privateKey,
+      passphrase,
+    });
+    logger?.debug("Decrypted user key successfully", { keyId: key.ID });
+
+    return decrypted;
+  } catch (error) {
+    logger?.warn(
+      "Failed to decrypt user key with provided passphrase",
+      { keyId: key.ID },
+      error,
+    );
+
+    return null;
+  }
+}
+
+async function decryptKeyUsingToken(
+  key: ProtonAddressKey,
   userKey: openpgp.PrivateKey | null,
   logger?: PluginLogger,
-): Promise<{ id: string; key: PrivateKey }> {
+): Promise<PrivateKey> {
   logger?.debug("Parsing private key for address", { keyId: key.ID });
 
   const privateKey = await openpgp.readPrivateKey({
@@ -313,10 +317,7 @@ async function parsePrivateKey(
   if (privateKey.isDecrypted()) {
     logger?.debug("Private key is not encrypted", { keyId: key.ID });
 
-    return {
-      id: key.ID,
-      key: privateKey as unknown as PrivateKey,
-    };
+    return privateKey as unknown as PrivateKey;
   }
 
   if (key.Token && key.Signature && userKey) {
@@ -336,10 +337,7 @@ async function parsePrivateKey(
         keyId: key.ID,
       });
 
-      return {
-        id: key.ID,
-        key: decrypted as unknown as PrivateKey,
-      };
+      return decrypted as unknown as PrivateKey;
     } catch (tokenError) {
       logger?.warn(
         "Failed to decrypt key using token-derived passphrase",
@@ -349,92 +347,7 @@ async function parsePrivateKey(
     }
   }
 
-  const keySalt = keySalts.get(key.ID);
-  if (!keySalt) {
-    logger?.warn(
-      "No key salt available for deriving passphrase; cannot attempt decryption",
-      { keyId: key.ID },
-    );
-
-    throw new Error(
-      "No key salt available for deriving pas `sphrase; cannot attempt decryption",
-    );
-  }
-
-  try {
-    const derivedPassphrase = computeKeyPasswordFromSalt(passphrase, keySalt);
-    const decrypted = await openpgp.decryptKey({
-      privateKey,
-      passphrase: derivedPassphrase,
-    });
-    logger?.debug("Decrypted key using salt-derived passphrase", {
-      keyId: key.ID,
-    });
-    return {
-      id: key.ID,
-      key: decrypted as unknown as PrivateKey,
-    };
-  } catch (derivedError) {
-    logger?.warn(
-      "Failed to decrypt key with salt-derived passphrase",
-      { keyId: key.ID },
-      derivedError,
-    );
-
-    throw new Error("Failed to decrypt key with salt-derived passphrase");
-  }
-}
-
-async function resolveUserKey(
-  passphrase: string,
-  keys: ProtonAddressKey[],
-  keySalts: Map<string, string>,
-  logger?: PluginLogger,
-): Promise<openpgp.PrivateKey | null> {
-  const activeKeys = keys.filter(
-    (key) =>
-      key.Active === undefined || key.Active === true || key.Active === 1,
-  );
-  if (!activeKeys.length) {
-    logger?.warn("No active user keys available for token decryption");
-    return null;
-  }
-
-  const primaryKey =
-    activeKeys.find((key) => key.Primary === true || key.Primary === 1) ??
-    activeKeys[0];
-  const privateKey = await openpgp.readPrivateKey({
-    armoredKey: primaryKey.PrivateKey,
-  });
-  if (privateKey.isDecrypted()) {
-    return privateKey;
-  }
-
-  const keySalt = keySalts.get(primaryKey.ID);
-  if (!keySalt) {
-    logger?.warn(
-      "No key salt available for user key; cannot decrypt user key",
-      { keyId: primaryKey.ID },
-    );
-    return null;
-  }
-
-  try {
-    const derivedPassphrase = computeKeyPasswordFromSalt(passphrase, keySalt);
-    const decrypted = await openpgp.decryptKey({
-      privateKey,
-      passphrase: derivedPassphrase,
-    });
-    logger?.debug("Decrypted user key successfully", { keyId: primaryKey.ID });
-    return decrypted;
-  } catch (error) {
-    logger?.warn(
-      "Failed to decrypt user key with salt-derived passphrase",
-      { keyId: primaryKey.ID },
-      error,
-    );
-    return null;
-  }
+  throw new Error(`Decryption of key via user key failed (key ID: ${key.ID}).`);
 }
 
 async function derivePassphraseFromToken(

@@ -32,7 +32,7 @@ export class ProtonAuthService {
   private readonly logger: PluginLogger;
 
   constructor(private readonly appVersion: string, logger: PluginLogger) {
-    this.appVersionHeader = `web-drive@5.2.0+ea431b78`;
+    this.appVersionHeader = `external-drive-obsidiansync@${appVersion}`;
     this.logger = logger;
   }
 
@@ -77,7 +77,6 @@ export class ProtonAuthService {
   }
 
   async refreshSession(session: ProtonSession): Promise<ProtonSession> {
-    this.logger.debug('Auth: refreshing session');
     const state = encodeBase64(randomToken(32));
     const body = {
       UID: session.uid,
