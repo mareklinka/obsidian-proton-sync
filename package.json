@@ -1,0 +1,19 @@
+{
+  "name": "obsidian-proton-drive-sync",
+  "version": "0.1.0",
+  "description": "Sync Obsidian files with Proton Drive",
+  "author": "mareklinka",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "esbuild": "^0.24.2",
+    "obsidian": "latest",
+    "typescript": "^5.7.3"
+  }
+}
