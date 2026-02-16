@@ -1,4 +1,6 @@
-import { createHash, randomBytes } from 'crypto';
+import { md5 } from '@noble/hashes/legacy';
+import { sha512 } from '@noble/hashes/sha512';
+import { bytesToHex } from '@noble/hashes/utils';
 import bcrypt from 'bcryptjs';
 import * as openpgp from 'openpgp';
 
@@ -138,8 +140,8 @@ function hashPasswordVersion2(password: string, username: string, modulus: Uint8
 }
 
 function hashPasswordVersion1(password: string, username: string, modulus: Uint8Array): Uint8Array {
-  const md5 = createHash('md5').update(username.toLowerCase()).digest('hex');
-  const bcryptHash = bcryptHashWithSalt(password, md5);
+  const md5Hash = bytesToHex(md5(new TextEncoder().encode(username.toLowerCase())));
+  const bcryptHash = bcryptHashWithSalt(password, md5Hash);
   return expandHash(Buffer.concat([Buffer.from(bcryptHash), Buffer.from(modulus)]));
 }
 
@@ -148,7 +150,7 @@ function hashPasswordVersion0(password: string, username: string, modulus: Uint8
     Buffer.from(username.toLowerCase()),
     Buffer.from(password)
   ]);
-  const prehashed = createHash('sha512').update(userAndPass).digest();
+  const prehashed = sha512(userAndPass);
   const prehashedB64 = Buffer.from(prehashed).toString('base64');
   return hashPasswordVersion1(prehashedB64, username, modulus);
 }
@@ -160,10 +162,10 @@ function cleanUserName(userName: string): string {
 }
 
 function expandHash(data: Buffer): Uint8Array {
-  const part0 = createHash('sha512').update(Buffer.concat([data, Buffer.from([0])])).digest();
-  const part1 = createHash('sha512').update(Buffer.concat([data, Buffer.from([1])])).digest();
-  const part2 = createHash('sha512').update(Buffer.concat([data, Buffer.from([2])])).digest();
-  const part3 = createHash('sha512').update(Buffer.concat([data, Buffer.from([3])])).digest();
+  const part0 = sha512(Buffer.concat([data, Buffer.from([0])]));
+  const part1 = sha512(Buffer.concat([data, Buffer.from([1])]));
+  const part2 = sha512(Buffer.concat([data, Buffer.from([2])]));
+  const part3 = sha512(Buffer.concat([data, Buffer.from([3])]));
   return Uint8Array.from(Buffer.concat([part0, part1, part2, part3]));
 }
 
@@ -304,6 +306,12 @@ function generateClientSecret(bitLength: number, modulus: bigint): bigint {
       return candidate;
     }
   }
+}
+
+function randomBytes(byteLength: number): Uint8Array {
+  const bytes = new Uint8Array(byteLength);
+  globalThis.crypto.getRandomValues(bytes);
+  return bytes;
 }
 
 function computeMultiplier(bitLength: number, generator: bigint, modulus: bigint): bigint {

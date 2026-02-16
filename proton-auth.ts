@@ -1,4 +1,4 @@
-import { randomBytes } from 'crypto';
+
 import { requestUrl } from 'obsidian';
 
 import type { ProtonSession } from './session-store';
@@ -150,5 +150,11 @@ export class ProtonAuthService {
 }
 
 function randomToken(byteLength: number): Uint8Array {
-  return Uint8Array.from(randomBytes(byteLength));
+  return randomBytes(byteLength);
+}
+
+function randomBytes(byteLength: number): Uint8Array {
+  const bytes = new Uint8Array(byteLength);
+  globalThis.crypto.getRandomValues(bytes);
+  return bytes;
 }
