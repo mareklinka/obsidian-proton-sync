@@ -6,6 +6,7 @@ export class ProtonDriveLoginModal extends Modal {
   private readonly plugin: ProtonDriveSyncPlugin;
   private email = '';
   private password = '';
+  private mailboxPassword = '';
   private twoFactorCode = '';
 
   constructor(app: App, plugin: ProtonDriveSyncPlugin) {
@@ -45,6 +46,16 @@ export class ProtonDriveLoginModal extends Modal {
       });
 
     new Setting(contentEl)
+      .setName('Mailbox password (if enabled)')
+      .setDesc('Only required if your Proton account uses a separate mailbox password.')
+      .addText((text) => {
+        text.inputEl.type = 'password';
+        text.onChange((value) => {
+          this.mailboxPassword = value;
+        });
+      });
+
+    new Setting(contentEl)
       .setName('2FA code')
       .setDesc('If your account has 2FA enabled, enter the current code.')
       .addText((text) =>
@@ -64,6 +75,7 @@ export class ProtonDriveLoginModal extends Modal {
             await this.plugin.signIn({
               email: this.email || this.plugin.settings.accountEmail,
               password: this.password,
+              mailboxPassword: this.mailboxPassword,
               twoFactorCode: this.twoFactorCode
             });
             this.clearSensitiveInputs();
@@ -91,6 +103,7 @@ export class ProtonDriveLoginModal extends Modal {
 
   private clearSensitiveInputs(): void {
     this.password = '';
+    this.mailboxPassword = '';
     this.twoFactorCode = '';
   }
 }

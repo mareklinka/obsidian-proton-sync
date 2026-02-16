@@ -36,7 +36,7 @@ export function createProtonDriveClient(
   const apiClient = new ProtonApiClient(getSession, appVersion, 'https://mail.proton.me/api', logger);
   const entitiesCache: ProtonDriveEntitiesCache = new MemoryCache<string>();
   const cryptoCache: ProtonDriveCryptoCache = new MemoryCache<CachedCryptoMaterial>();
-  const account = new ProtonAccount(apiClient, getKeyPassphrase);
+  const account = new ProtonAccount(apiClient, getKeyPassphrase, logger);
   const openPGPCryptoModule = createOpenPgpCrypto();
   const srpModule = new PlaceholderSrpModule();
 

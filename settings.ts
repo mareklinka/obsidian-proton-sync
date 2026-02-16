@@ -10,6 +10,8 @@ export interface ProtonDriveSyncSettings {
   lastLoginError: string | null;
   lastRefreshAt: string | null;
   sessionExpiresAt: string | null;
+  containerNodeUid: string | null;
+  vaultRootNodeUid: string | null;
   enableFileLogging: boolean;
   logLevel: LogLevel;
   logMaxSizeKb: number;
@@ -22,6 +24,8 @@ export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
   lastLoginError: null,
   lastRefreshAt: null,
   sessionExpiresAt: null,
+  containerNodeUid: null,
+  vaultRootNodeUid: null,
   enableFileLogging: false,
   logLevel: 'info',
   logMaxSizeKb: 1024
@@ -89,6 +93,24 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
           })
       );
     }
+
+    new Setting(containerEl)
+      .setName('Container node UID')
+      .setDesc('UID of the shared Proton Drive container folder.')
+      .addText((text) =>
+        text
+          .setValue(this.plugin.settings.containerNodeUid ?? 'Not set')
+          .setDisabled(true)
+      );
+
+    new Setting(containerEl)
+      .setName('Vault root node UID')
+      .setDesc('UID of this vault’s root folder on Proton Drive.')
+      .addText((text) =>
+        text
+          .setValue(this.plugin.settings.vaultRootNodeUid ?? 'Not set')
+          .setDisabled(true)
+      );
 
     containerEl.createEl('h3', { text: 'Debug logging' });
 

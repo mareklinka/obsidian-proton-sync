@@ -7,6 +7,7 @@ import type { PluginLogger } from './logger';
 
 const API_BASE_URL = 'https://mail.proton.me/api';
 const DEFAULT_SESSION_TTL_MS = 50 * 60 * 1000;
+const AUTH_SCOPE = 'full locked';
 
 export interface ProtonAuthResponse {
   UserID: string;
@@ -21,6 +22,11 @@ export interface ProtonAuthResponse {
   PasswordMode?: number;
 }
 
+export interface ProtonAuthResult {
+  session: ProtonSession;
+  passwordMode: number | null;
+}
+
 export class ProtonAuthService {
   private readonly appVersionHeader: string;
   private readonly logger: PluginLogger;
@@ -30,7 +36,7 @@ export class ProtonAuthService {
     this.logger = logger;
   }
 
-  async signIn(email: string, password: string, twoFactorCode: string): Promise<ProtonSession> {
+  async signIn(email: string, password: string, twoFactorCode: string): Promise<ProtonAuthResult> {
     this.logger.debug('Auth: fetching SRP info');
     const authInfo = await this.fetchAuthInfo(email);
     this.logger.debug('Auth: building SRP proofs');
@@ -55,15 +61,18 @@ export class ProtonAuthService {
     const expiresAt = new Date(now.getTime() + DEFAULT_SESSION_TTL_MS);
 
     return {
-      uid: authResponse.UID,
-      userId: authResponse.UserID || null,
-      accessToken: authResponse.AccessToken,
-      refreshToken: authResponse.RefreshToken,
-      scope: authResponse.Scope || null,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-      lastRefreshAt: now.toISOString()
+      session: {
+        uid: authResponse.UID,
+        userId: authResponse.UserID || null,
+        accessToken: authResponse.AccessToken,
+        refreshToken: authResponse.RefreshToken,
+        scope: authResponse.Scope || null,
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+        expiresAt: expiresAt.toISOString(),
+        lastRefreshAt: now.toISOString()
+      },
+      passwordMode: authResponse.PasswordMode ?? null
     };
   }
 
@@ -77,7 +86,8 @@ export class ProtonAuthService {
       GrantType: 'refresh_token',
       RedirectURI: 'https://protonmail.ch',
       State: state,
-      AccessToken: session.accessToken
+      AccessToken: session.accessToken,
+      Scope: session.scope ?? AUTH_SCOPE
     };
 
     const response = await this.request<ProtonAuthResponse>('/auth/v4/refresh', body, {
@@ -123,7 +133,8 @@ export class ProtonAuthService {
       Username: username,
       ClientProof: encodeBase64(proofs.clientProof),
       ClientEphemeral: encodeBase64(proofs.clientEphemeral),
-      SRPSession: authInfo.SRPSession
+      SRPSession: authInfo.SRPSession,
+      Scope: AUTH_SCOPE
     });
   }
 

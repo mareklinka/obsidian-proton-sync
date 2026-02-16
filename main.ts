@@ -7,6 +7,7 @@ import { clearKeyPassphrase, loadKeyPassphrase, saveKeyPassphrase } from './key-
 import { clearSession, loadSession, saveSession, type ProtonSession } from './session-store';
 import { DEFAULT_SETTINGS, ProtonDriveSyncSettings, ProtonDriveSyncSettingTab } from './settings';
 import { createFileLogger, getDefaultLogFilePath, type PluginLogger } from './logger';
+import { ensureSyncRoots } from './sync-root';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   settings!: ProtonDriveSyncSettings;
@@ -16,6 +17,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private driveClient: ReturnType<typeof createProtonDriveClient> | null = null;
   private logger!: PluginLogger;
   private settingTab: ProtonDriveSyncSettingTab | null = null;
+  private layoutReady = false;
+  private pendingSyncRootDiscovery = false;
 
   private static readonly REFRESH_INTERVAL_MS = 15 * 60 * 1000;
   private static readonly REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
@@ -45,10 +48,19 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.initializeDriveClient(existingSession);
       await this.refreshSessionIfNeeded(existingSession, true);
       this.startRefreshLoop();
+      this.scheduleSyncRootDiscovery('startup');
     }
 
     this.settingTab = new ProtonDriveSyncSettingTab(this.app, this);
     this.addSettingTab(this.settingTab);
+
+    this.app.workspace.onLayoutReady(() => {
+      this.layoutReady = true;
+      if (this.pendingSyncRootDiscovery) {
+        this.pendingSyncRootDiscovery = false;
+        void this.initializeSyncRoots('layout');
+      }
+    });
 
     this.addRibbonIcon('refresh-ccw', 'Proton Drive Sync', () => {
       new Notice('Proton Drive Sync: scaffold loaded');
@@ -67,6 +79,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   async signIn(credentials: {
     email: string;
     password: string;
+    mailboxPassword?: string;
     twoFactorCode: string;
   }): Promise<void> {
     if (!credentials.email || !credentials.password) {
@@ -82,11 +95,17 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.settings.lastLoginError = null;
       await this.saveSettings();
 
-      const session = await this.authService.signIn(
+      const authResult = await this.authService.signIn(
         credentials.email.trim(),
         credentials.password,
         credentials.twoFactorCode
       );
+
+      if (authResult.passwordMode === 2 && !credentials.mailboxPassword) {
+        throw new Error('Mailbox password required for this Proton account.');
+      }
+
+      const session = authResult.session;
 
       await saveSession(this.app, session);
 
@@ -97,10 +116,12 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.settings.lastLoginError = null;
       await this.saveSettings();
 
-      const keyPassphrase = this.deriveKeyPassphrase(credentials.password);
+      const keyPassphrase = this.deriveKeyPassphrase(credentials);
       await saveKeyPassphrase(this.app, keyPassphrase);
 
       this.initializeDriveClient(session);
+
+      this.scheduleSyncRootDiscovery('sign-in');
 
       this.startRefreshLoop();
 
@@ -187,6 +208,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       if (!this.driveClient) {
         this.initializeDriveClient(refreshed);
       }
+
+      this.scheduleSyncRootDiscovery('refresh');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Session refresh failed.';
       this.logger.error('Session refresh failed', { force }, error);
@@ -211,8 +234,38 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     );
   }
 
-  private deriveKeyPassphrase(password: string): string {
-    return password;
+  private scheduleSyncRootDiscovery(reason: 'startup' | 'sign-in' | 'refresh'): void {
+    if (this.settings.connectionStatus !== 'connected' || !this.driveClient) {
+      return;
+    }
+
+    if (!this.layoutReady) {
+      this.pendingSyncRootDiscovery = true;
+      this.logger.debug('Deferring sync root discovery until layout ready', { reason });
+      return;
+    }
+
+    void this.initializeSyncRoots(reason);
+  }
+
+  private async initializeSyncRoots(reason: 'startup' | 'sign-in' | 'refresh' | 'layout'): Promise<void> {
+    if (!this.driveClient || this.settings.connectionStatus !== 'connected') {
+      return;
+    }
+
+    try {
+      const vaultName = this.app.vault.getName();
+      const info = await ensureSyncRoots(this.driveClient, this.settings, vaultName, this.logger);
+      await this.saveSettings();
+      this.logger.info('Sync roots ready', { reason, ...info });
+    } catch (error) {
+      this.logger.error('Failed to ensure sync roots', { reason }, error);
+      new Notice('Failed to initialize Proton Drive sync roots.');
+    }
+  }
+
+  private deriveKeyPassphrase(credentials: { password: string; mailboxPassword?: string }): string {
+    return credentials.mailboxPassword?.trim() || credentials.password;
   }
 
   async loadSettings(): Promise<void> {

@@ -107,6 +107,15 @@ export function decodeBase64(data: string): Uint8Array {
   return Uint8Array.from(Buffer.from(data, 'base64'));
 }
 
+export function computeKeyPasswordFromSalt(password: string, keySalt: string): string {
+  const saltBytes = decodeBase64(keySalt);
+  const encodedSalt = bcryptBase64Encode(saltBytes);
+  const hashed = bcryptHashWithSalt(password, encodedSalt);
+  const hashedBytes = Buffer.from(hashed, 'utf8');
+  const tail = hashedBytes.slice(-31);
+  return Buffer.from(tail).toString('utf8');
+}
+
 function hashPassword(
   authVersion: number,
   username: string,

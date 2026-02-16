@@ -21,7 +21,7 @@ export class ProtonApiClient {
     private readonly baseUrl: string = 'https://mail.proton.me/api',
     private readonly logger?: PluginLogger
   ) {
-    this.appVersionHeader = `web-drive@5.2.0+ea431b78`;
+    this.appVersionHeader = `web-drive@5.0.0`;
   }
 
   async getJson<T>(path: string, query?: ProtonApiRequestOptions['query']): Promise<T> {
@@ -55,6 +55,8 @@ export class ProtonApiClient {
       body: options.body ? JSON.stringify(options.body) : undefined,
       throw: false
     });
+
+    this.logger?.debug('API: response received', { body: response.text, status: response.status, path });
 
     if (response.status >= 400) {
       this.logger?.warn('API: request failed', { status: response.status, path }, response.json);
