@@ -1,6 +1,6 @@
 import type { App } from 'obsidian';
 
-const KEY_PASSPHRASE_STORAGE_KEY = 'proton-drive-sync.key-passphrase';
+const KEY_PASSPHRASE_STORAGE_KEY = 'proton-drive-sync-key-passphrase';
 
 export async function loadKeyPassphrase(app: App): Promise<string | null> {
   const stored = await app.secretStorage.getSecret(KEY_PASSPHRASE_STORAGE_KEY);

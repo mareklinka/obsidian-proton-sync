@@ -59,7 +59,7 @@ class ObsidianHttpClient implements ProtonDriveHTTPClient {
     appVersion: string,
     private readonly logger?: PluginLogger
   ) {
-    this.appVersionHeader = `external-drive-obsidian-proton-sync@${appVersion}`;
+    this.appVersionHeader = `web-drive@5.2.0+ea431b78`;
   }
 
   async fetchJson(request: ProtonDriveHTTPClientJsonRequest): Promise<Response> {

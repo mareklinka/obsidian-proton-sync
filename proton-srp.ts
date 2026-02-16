@@ -3,6 +3,7 @@ import { sha512 } from '@noble/hashes/sha512';
 import { bytesToHex } from '@noble/hashes/utils';
 import bcrypt from 'bcryptjs';
 import * as openpgp from 'openpgp';
+import { PluginLogger } from './logger';
 
 export interface ProtonAuthInfo {
   Version: number;
@@ -31,7 +32,7 @@ export interface ProtonSrpProofsBase64 {
 
 const MODULUS_PUBKEY = `-----BEGIN PGP PUBLIC KEY BLOCK-----
 
-xjMEXAHLgxYJKwYBBAHaRw8BQdAFurWXXwjTemqjD7CXjXVyKf0of7n9Ctm
+xjMEXAHLgxYJKwYBBAHaRw8BAQdAFurWXXwjTemqjD7CXjXVyKf0of7n9Ctm
 L8v9enkzggHNEnByb3RvbkBzcnAubW9kdWx1c8J3BBAWCgApBQJcAcuDBgsJ
 BwgDAgkQNQWFxOlRjyYEFQgKAgMWAgECGQECGwMCHgEAAPGRAP9sauJsW12U
 MnTQUZpsbJb53d0Wv55mZIIiJL2XulpWPQD/V6NglBd96lZKBmInSXX/kXat
@@ -49,7 +50,7 @@ export async function buildSrpProofs(
   username: string,
   password: string
 ): Promise<ProtonSrpProofs> {
-  const modulusBytes = await verifyAndDecodeModulus(authInfo.Modulus);
+  const modulusBytes = await decodeModulus(authInfo.Modulus);
   const saltBytes = decodeBase64(authInfo.Salt);
   const serverEphemeralBytes = decodeBase64(authInfo.ServerEphemeral);
 
@@ -70,7 +71,7 @@ export async function buildSrpProofsFromParams(
   serverEphemeral: string,
   salt: string,
   password: string,
-  username?: string
+  username?: string,
 ): Promise<ProtonSrpProofsBase64> {
   const modulusBytes = await decodeModulus(modulus);
   const saltBytes = decodeBase64(salt);
@@ -211,18 +212,30 @@ function bcryptHashWithSalt(password: string, salt: string): string {
 }
 
 async function verifyAndDecodeModulus(signedModulus: string): Promise<Uint8Array> {
+  const normalized = normalizeSignedModulus(signedModulus);
   const message = await openpgp.readCleartextMessage({
-    cleartextMessage: signedModulus
+    cleartextMessage: normalized
   });
 
-  const key = await openpgp.readKey({ armoredKey: MODULUS_PUBKEY });
+  const key = await openpgp.readKey({
+    armoredKey: normalizeArmoredKey(MODULUS_PUBKEY),
+    config: {
+      ignoreMalformedPackets: true,
+      ignoreUnsupportedPackets: true,
+      enableParsingV5Entities: true
+    }
+  });
+
   const verification = await openpgp.verify({
     message,
     verificationKeys: key
   });
 
-  const signature = verification.signatures[0];
-  await signature.verified;
+  if (!verification.signatures.length) {
+    throw new Error('No modulus signature found.');
+  }
+
+  await verification.signatures[0].verified;
 
   const modulusBase64 = message.getText().trim();
   return decodeBase64(modulusBase64);
@@ -234,6 +247,33 @@ async function decodeModulus(modulus: string): Promise<Uint8Array> {
   }
 
   return decodeBase64(modulus);
+}
+
+function normalizeSignedModulus(value: string): string {
+  let output = value.trim();
+  const hadEscapedNewlines = output.includes('\\n') || output.includes('\\r\\n');
+
+  if (hadEscapedNewlines) {
+    output = output.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n');
+  }
+
+  if (!output.endsWith('\n')) {
+    output = `${output}\n`;
+  }
+
+  if (output.includes('BEGIN PGP SIGNED MESSAGE') && !output.includes('\n\n')) {
+    const headerEnd = output.indexOf('\n');
+    if (headerEnd >= 0) {
+      output = `${output.slice(0, headerEnd)}\n\n${output.slice(headerEnd + 1)}`;
+    }
+  }
+
+  return output;
+}
+
+function normalizeArmoredKey(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.endsWith('\n') ? trimmed : `${trimmed}\n`;
 }
 
 function generateProofs(

@@ -12,7 +12,7 @@ export interface ProtonSession {
   lastRefreshAt: string;
 }
 
-const SESSION_STORAGE_KEY = 'proton-drive-sync.session';
+const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
 
 export async function loadSession(app: App): Promise<ProtonSession | null> {
   const stored = await app.secretStorage.getSecret(SESSION_STORAGE_KEY);

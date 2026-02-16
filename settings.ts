@@ -65,25 +65,30 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
     const statusDescription = this.buildStatusDescription();
 
-    new Setting(containerEl)
+    const connectionSetting = new Setting(containerEl)
       .setName('Connection status')
-      .setDesc(statusDescription)
-      .addButton((button) =>
+      .setDesc(statusDescription);
+
+    if (this.plugin.settings.connectionStatus === 'connected') {
+      connectionSetting.addButton((button) =>
         button
-          .setButtonText('Connect')
-          .onClick(() => {
-            this.plugin.openLoginModal();
-          })
-      )
-      .addExtraButton((button) =>
-        button
-          .setIcon('trash')
-          .setTooltip('Disconnect')
+          .setButtonText('Disconnect')
+          .setCta()
           .onClick(async () => {
             await this.plugin.disconnect();
             this.display();
           })
       );
+    } else {
+      connectionSetting.addButton((button) =>
+        button
+          .setButtonText('Connect')
+          .setCta()
+          .onClick(() => {
+            this.plugin.openLoginModal();
+          })
+      );
+    }
 
     containerEl.createEl('h3', { text: 'Debug logging' });
 

@@ -26,7 +26,7 @@ export class ProtonAuthService {
   private readonly logger: PluginLogger;
 
   constructor(private readonly appVersion: string, logger: PluginLogger) {
-    this.appVersionHeader = `external-drive-obsidian-proton-sync@${appVersion}`;
+    this.appVersionHeader = `web-drive@5.2.0+ea431b78`;
     this.logger = logger;
   }
 
@@ -34,7 +34,7 @@ export class ProtonAuthService {
     this.logger.debug('Auth: fetching SRP info');
     const authInfo = await this.fetchAuthInfo(email);
     this.logger.debug('Auth: building SRP proofs');
-    const proofs = await buildSrpProofs(authInfo, email, password);
+    const proofs = await buildSrpProofs(authInfo, email, password, this.logger);
 
     this.logger.debug('Auth: submitting SRP proofs');
     const authResponse = await this.authenticate(authInfo, email, proofs);
@@ -153,11 +153,27 @@ export class ProtonAuthService {
       headers: {
         'x-pm-appversion': this.appVersionHeader
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      throw: false
     });
+
+    if (response.status >= 400) {
+      const message = extractApiError(response.json) ?? `Auth request failed (${response.status}).`;
+      this.logger.warn('Auth: request failed', { path, status: response.status, message }, response.json);
+      throw new Error(message);
+    }
 
     return response.json as T;
   }
+}
+
+function extractApiError(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const record = payload as { Error?: string; Message?: string };
+  return record.Error ?? record.Message ?? null;
 }
 
 function randomToken(byteLength: number): Uint8Array {

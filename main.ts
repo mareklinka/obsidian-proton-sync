@@ -15,6 +15,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private currentSession: ProtonSession | null = null;
   private driveClient: ReturnType<typeof createProtonDriveClient> | null = null;
   private logger!: PluginLogger;
+  private settingTab: ProtonDriveSyncSettingTab | null = null;
 
   private static readonly REFRESH_INTERVAL_MS = 15 * 60 * 1000;
   private static readonly REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
@@ -46,7 +47,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.startRefreshLoop();
     }
 
-    this.addSettingTab(new ProtonDriveSyncSettingTab(this.app, this));
+    this.settingTab = new ProtonDriveSyncSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
 
     this.addRibbonIcon('refresh-ccw', 'Proton Drive Sync', () => {
       new Notice('Proton Drive Sync: scaffold loaded');
@@ -225,6 +227,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       filePath: getDefaultLogFilePath(),
       maxFileSizeBytes: this.settings.logMaxSizeKb * 1024
     });
+    this.settingTab?.display();
   }
 
 }
@@ -236,6 +239,6 @@ function maskEmail(email: string): string {
     return trimmed;
   }
 
-  const visible = user.length <= 2 ? user[0] ?? '' : `${user[0]}${user[user.length - 1]}`;
-  return `${visible}***@${domain}`;
+  const visible = user.length <= 2 ? (user[0] + '***') : `${user[0]}***${user[user.length - 1]}`;
+  return `${visible}@${domain}`;
 }

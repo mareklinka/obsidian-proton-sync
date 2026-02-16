@@ -21,7 +21,7 @@ export class ProtonApiClient {
     private readonly baseUrl: string = 'https://mail.proton.me/api',
     private readonly logger?: PluginLogger
   ) {
-    this.appVersionHeader = `external-drive-obsidian-proton-sync@${appVersion}`;
+    this.appVersionHeader = `web-drive@5.2.0+ea431b78`;
   }
 
   async getJson<T>(path: string, query?: ProtonApiRequestOptions['query']): Promise<T> {
