@@ -20,6 +20,13 @@ export interface ProtonSrpProofs {
   sharedSession: Uint8Array;
 }
 
+export interface ProtonSrpProofsBase64 {
+  clientProof: string;
+  clientEphemeral: string;
+  expectedServerProof: string;
+  sharedSession: string;
+}
+
 const MODULUS_PUBKEY = `-----BEGIN PGP PUBLIC KEY BLOCK-----
 
 xjMEXAHLgxYJKwYBBAHaRw8BQdAFurWXXwjTemqjD7CXjXVyKf0of7n9Ctm
@@ -53,6 +60,40 @@ export async function buildSrpProofs(
   );
 
   return generateProofs(modulusBytes, serverEphemeralBytes, hashedPassword);
+}
+
+export async function buildSrpProofsFromParams(
+  authVersion: number,
+  modulus: string,
+  serverEphemeral: string,
+  salt: string,
+  password: string,
+  username?: string
+): Promise<ProtonSrpProofsBase64> {
+  const modulusBytes = await decodeModulus(modulus);
+  const saltBytes = decodeBase64(salt);
+  const serverEphemeralBytes = decodeBase64(serverEphemeral);
+
+  if (authVersion < 3 && !username) {
+    throw new Error('Username is required for legacy SRP versions');
+  }
+
+  const hashedPassword = hashPassword(
+    authVersion,
+    username ?? '',
+    password,
+    saltBytes,
+    modulusBytes
+  );
+
+  const proofs = generateProofs(modulusBytes, serverEphemeralBytes, hashedPassword);
+
+  return {
+    clientProof: encodeBase64(proofs.clientProof),
+    clientEphemeral: encodeBase64(proofs.clientEphemeral),
+    expectedServerProof: encodeBase64(proofs.expectedServerProof),
+    sharedSession: encodeBase64(proofs.sharedSession)
+  };
 }
 
 export function encodeBase64(bytes: Uint8Array): string {
@@ -183,6 +224,14 @@ async function verifyAndDecodeModulus(signedModulus: string): Promise<Uint8Array
 
   const modulusBase64 = message.getText().trim();
   return decodeBase64(modulusBase64);
+}
+
+async function decodeModulus(modulus: string): Promise<Uint8Array> {
+  if (modulus.includes('BEGIN PGP PUBLIC KEY BLOCK') || modulus.includes('BEGIN PGP SIGNED MESSAGE')) {
+    return verifyAndDecodeModulus(modulus);
+  }
+
+  return decodeBase64(modulus);
 }
 
 function generateProofs(

@@ -2,13 +2,16 @@ import { Notice, Plugin } from 'obsidian';
 
 import { ProtonDriveLoginModal } from './login-modal';
 import { ProtonAuthService } from './proton-auth';
-import { clearSession, loadSession, saveSession } from './session-store';
+import { createProtonDriveClient } from './proton-drive-client';
+import { clearSession, loadSession, saveSession, type ProtonSession } from './session-store';
 import { DEFAULT_SETTINGS, ProtonDriveSyncSettings, ProtonDriveSyncSettingTab } from './settings';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   settings!: ProtonDriveSyncSettings;
   private authService!: ProtonAuthService;
   private refreshIntervalId: number | null = null;
+  private currentSession: ProtonSession | null = null;
+  private driveClient: ReturnType<typeof createProtonDriveClient> | null = null;
 
   private static readonly REFRESH_INTERVAL_MS = 15 * 60 * 1000;
   private static readonly REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
@@ -28,6 +31,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.settings.sessionExpiresAt = existingSession.expiresAt;
       await this.saveSettings();
 
+      this.initializeDriveClient(existingSession);
       await this.refreshSessionIfNeeded(existingSession, true);
       this.startRefreshLoop();
     }
@@ -80,6 +84,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.settings.lastLoginError = null;
       await this.saveSettings();
 
+      this.initializeDriveClient(session);
+
       this.startRefreshLoop();
 
       new Notice('Connected to Proton Drive.');
@@ -99,6 +105,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.settings.sessionExpiresAt = null;
     await this.saveSettings();
     await clearSession(this.app);
+    this.currentSession = null;
+    this.driveClient = null;
     this.stopRefreshLoop();
     new Notice('Disconnected from Proton Drive.');
   }
@@ -152,15 +160,27 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.settings.sessionExpiresAt = refreshed.expiresAt;
       this.settings.lastLoginError = null;
       await this.saveSettings();
+
+      this.currentSession = refreshed;
+      if (!this.driveClient) {
+        this.initializeDriveClient(refreshed);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Session refresh failed.';
       this.settings.connectionStatus = 'error';
       this.settings.lastLoginError = message;
       await this.saveSettings();
       await clearSession(this.app);
+      this.currentSession = null;
+      this.driveClient = null;
       this.stopRefreshLoop();
       new Notice(message);
     }
+  }
+
+  private initializeDriveClient(session: ProtonSession): void {
+    this.currentSession = session;
+    this.driveClient = createProtonDriveClient(() => this.currentSession, this.manifest.version);
   }
 
   async loadSettings(): Promise<void> {

@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
-    "openpgp": "^6.3.0"
+    "openpgp": "^6.3.0",
+    "@protontech/drive-sdk": "^0.9.9"
   },
   "devDependencies": {
     "@types/node": "^22.13.5",
