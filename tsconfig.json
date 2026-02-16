@@ -12,5 +12,5 @@
     "noImplicitAny": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["main.ts"]
+  "include": ["main.ts", "types/**/*.d.ts"]
 }

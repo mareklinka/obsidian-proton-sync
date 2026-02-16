@@ -1,15 +1,26 @@
 import { Notice, Plugin } from 'obsidian';
 
 import { ProtonDriveLoginModal } from './login-modal';
+import { ProtonAuthService } from './proton-auth';
+import { clearSession, loadSession, saveSession } from './session-store';
 import { DEFAULT_SETTINGS, ProtonDriveSyncSettings, ProtonDriveSyncSettingTab } from './settings';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
-  settings: ProtonDriveSyncSettings;
+  settings!: ProtonDriveSyncSettings;
+  private authService!: ProtonAuthService;
 
   async onload(): Promise<void> {
     console.log('Loading Proton Drive Sync plugin');
 
     await this.loadSettings();
+
+    this.authService = new ProtonAuthService(this.manifest.version);
+
+    const existingSession = await loadSession(this.app);
+    if (existingSession) {
+      this.settings.connectionStatus = 'connected';
+      this.settings.lastLoginAt = existingSession.updatedAt;
+    }
 
     this.addSettingTab(new ProtonDriveSyncSettingTab(this.app, this));
 
@@ -36,23 +47,41 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       return;
     }
 
-    this.settings.accountEmail = credentials.email.trim();
-    this.settings.connectionStatus = 'pending';
-    this.settings.lastLoginAt = new Date().toISOString();
-    this.settings.lastLoginError = null;
-    await this.saveSettings();
+    try {
+      this.settings.accountEmail = credentials.email.trim();
+      this.settings.connectionStatus = 'pending';
+      this.settings.lastLoginAt = new Date().toISOString();
+      this.settings.lastLoginError = null;
+      await this.saveSettings();
 
-    new Notice('Login flow not yet implemented. Credentials were not stored.');
+      const session = await this.authService.signIn(
+        credentials.email.trim(),
+        credentials.password,
+        credentials.twoFactorCode
+      );
 
-    this.settings.connectionStatus = 'disconnected';
-    this.settings.lastLoginError = 'Login flow not implemented.';
-    await this.saveSettings();
+      await saveSession(this.app, session);
+
+      this.settings.connectionStatus = 'connected';
+      this.settings.lastLoginAt = session.updatedAt;
+      this.settings.lastLoginError = null;
+      await this.saveSettings();
+
+      new Notice('Connected to Proton Drive.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Login failed.';
+      this.settings.connectionStatus = 'error';
+      this.settings.lastLoginError = message;
+      await this.saveSettings();
+      new Notice(message);
+    }
   }
 
   async disconnect(): Promise<void> {
     this.settings.connectionStatus = 'disconnected';
     this.settings.lastLoginError = null;
     await this.saveSettings();
+    await clearSession(this.app);
     new Notice('Disconnected from Proton Drive.');
   }
 
