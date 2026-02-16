@@ -3,6 +3,7 @@ import { Notice, Plugin } from 'obsidian';
 import { ProtonDriveLoginModal } from './login-modal';
 import { ProtonAuthService } from './proton-auth';
 import { createProtonDriveClient } from './proton-drive-client';
+import { clearKeyPassphrase, loadKeyPassphrase, saveKeyPassphrase } from './key-passphrase-store';
 import { clearSession, loadSession, saveSession, type ProtonSession } from './session-store';
 import { DEFAULT_SETTINGS, ProtonDriveSyncSettings, ProtonDriveSyncSettingTab } from './settings';
 
@@ -84,6 +85,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.settings.lastLoginError = null;
       await this.saveSettings();
 
+      const keyPassphrase = this.deriveKeyPassphrase(credentials.password);
+      await saveKeyPassphrase(this.app, keyPassphrase);
+
       this.initializeDriveClient(session);
 
       this.startRefreshLoop();
@@ -105,6 +109,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.settings.sessionExpiresAt = null;
     await this.saveSettings();
     await clearSession(this.app);
+    await clearKeyPassphrase(this.app);
     this.currentSession = null;
     this.driveClient = null;
     this.stopRefreshLoop();
@@ -180,7 +185,15 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   private initializeDriveClient(session: ProtonSession): void {
     this.currentSession = session;
-    this.driveClient = createProtonDriveClient(() => this.currentSession, this.manifest.version);
+    this.driveClient = createProtonDriveClient(
+      () => this.currentSession,
+      () => loadKeyPassphrase(this.app),
+      this.manifest.version
+    );
+  }
+
+  private deriveKeyPassphrase(password: string): string {
+    return password;
   }
 
   async loadSettings(): Promise<void> {
