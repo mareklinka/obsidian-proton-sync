@@ -34,7 +34,7 @@ export class ProtonAuthService {
     this.logger.debug('Auth: fetching SRP info');
     const authInfo = await this.fetchAuthInfo(email);
     this.logger.debug('Auth: building SRP proofs');
-    const proofs = await buildSrpProofs(authInfo, email, password, this.logger);
+    const proofs = await buildSrpProofs(authInfo, email, password);
 
     this.logger.debug('Auth: submitting SRP proofs');
     const authResponse = await this.authenticate(authInfo, email, proofs);
@@ -80,13 +80,17 @@ export class ProtonAuthService {
       AccessToken: session.accessToken
     };
 
-    const response = await this.request<ProtonAuthResponse>('/auth/v4/refresh', body);
+    const response = await this.request<ProtonAuthResponse>('/auth/v4/refresh', body, {
+      'x-pm-uid': session.uid,
+      authorization: `Bearer ${session.accessToken}`
+    });
 
     const refreshedAt = new Date();
     const refreshedExpiresAt = new Date(refreshedAt.getTime() + DEFAULT_SESSION_TTL_MS);
 
     return {
       ...session,
+      uid: response.UID || session.uid,
       accessToken: response.AccessToken,
       refreshToken: response.RefreshToken,
       scope: response.Scope || session.scope,
@@ -144,14 +148,15 @@ export class ProtonAuthService {
     return true;
   }
 
-  private async request<T>(path: string, body: unknown): Promise<T> {
+  private async request<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
     this.logger.debug('Auth: request', { path });
     const response = await requestUrl({
       url: `${API_BASE_URL}${path}`,
       method: 'POST',
       contentType: 'application/json',
       headers: {
-        'x-pm-appversion': this.appVersionHeader
+        'x-pm-appversion': this.appVersionHeader,
+        ...(headers ?? {})
       },
       body: JSON.stringify(body),
       throw: false
