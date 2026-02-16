@@ -1,6 +1,7 @@
 import { requestUrl } from 'obsidian';
 
 import type { ProtonSession } from './session-store';
+import type { PluginLogger } from './logger';
 
 type SessionProvider = () => ProtonSession | null;
 
@@ -17,7 +18,8 @@ export class ProtonApiClient {
   constructor(
     private readonly getSession: SessionProvider,
     appVersion: string,
-    private readonly baseUrl: string = 'https://mail.proton.me/api'
+    private readonly baseUrl: string = 'https://mail.proton.me/api',
+    private readonly logger?: PluginLogger
   ) {
     this.appVersionHeader = `external-drive-obsidian-proton-sync@${appVersion}`;
   }
@@ -38,6 +40,8 @@ export class ProtonApiClient {
 
     const url = this.buildUrl(path, options.query);
 
+    this.logger?.debug('API: request', { method: options.method ?? 'POST', path });
+
     const response = await requestUrl({
       url,
       method: options.method ?? 'POST',
@@ -53,9 +57,11 @@ export class ProtonApiClient {
     });
 
     if (response.status >= 400) {
+      this.logger?.warn('API: request failed', { status: response.status, path }, response.json);
       throw new Error(extractApiError(response.json) ?? `Proton API request failed (${response.status}).`);
     }
 
+    this.logger?.debug('API: request succeeded', { status: response.status, path });
     return response.json as T;
   }
 

@@ -19,6 +19,7 @@ import { ProtonApiClient } from './proton-api';
 import { ProtonAccount, type KeyPassphraseProvider } from './proton-account';
 import { createOpenPgpCrypto } from './proton-openpgp';
 import { buildSrpProofsFromParams } from './proton-srp';
+import type { PluginLogger } from './logger';
 
 type SessionProvider = () => ProtonSession | null;
 type SrpModule = ProtonDriveClientContructorParameters['srpModule'];
@@ -28,10 +29,11 @@ export function createProtonDriveClient(
   getSession: SessionProvider,
   getKeyPassphrase: KeyPassphraseProvider,
   appVersion: string,
+  logger?: PluginLogger,
   config?: ProtonDriveConfig
 ): ProtonDriveClient {
-  const httpClient = new ObsidianHttpClient(getSession, appVersion);
-  const apiClient = new ProtonApiClient(getSession, appVersion);
+  const httpClient = new ObsidianHttpClient(getSession, appVersion, logger);
+  const apiClient = new ProtonApiClient(getSession, appVersion, 'https://mail.proton.me/api', logger);
   const entitiesCache: ProtonDriveEntitiesCache = new MemoryCache<string>();
   const cryptoCache: ProtonDriveCryptoCache = new MemoryCache<CachedCryptoMaterial>();
   const account = new ProtonAccount(apiClient, getKeyPassphrase);
@@ -52,7 +54,11 @@ export function createProtonDriveClient(
 class ObsidianHttpClient implements ProtonDriveHTTPClient {
   private readonly appVersionHeader: string;
 
-  constructor(private readonly getSession: SessionProvider, appVersion: string) {
+  constructor(
+    private readonly getSession: SessionProvider,
+    appVersion: string,
+    private readonly logger?: PluginLogger
+  ) {
     this.appVersionHeader = `external-drive-obsidian-proton-sync@${appVersion}`;
   }
 
@@ -73,6 +79,8 @@ class ObsidianHttpClient implements ProtonDriveHTTPClient {
       throw new Error('No Proton session available for SDK requests.');
     }
 
+    this.logger?.debug('SDK: request', { method: request.method, url: request.url });
+
     const headers = this.buildHeaders(request.headers, session);
     let body: XMLHttpRequestBodyInit | undefined;
     if ('json' in request && request.json) {
@@ -92,11 +100,14 @@ class ObsidianHttpClient implements ProtonDriveHTTPClient {
     });
 
     if (isJson) {
+      this.logger?.debug('SDK: response', { status: response.status, url: request.url });
       return new Response(response.text, {
         status: response.status,
         headers: response.headers
       });
     }
+
+    this.logger?.debug('SDK: response', { status: response.status, url: request.url });
 
     return new Response(response.arrayBuffer, {
       status: response.status,

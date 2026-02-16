@@ -6,6 +6,7 @@ import { createProtonDriveClient } from './proton-drive-client';
 import { clearKeyPassphrase, loadKeyPassphrase, saveKeyPassphrase } from './key-passphrase-store';
 import { clearSession, loadSession, saveSession, type ProtonSession } from './session-store';
 import { DEFAULT_SETTINGS, ProtonDriveSyncSettings, ProtonDriveSyncSettingTab } from './settings';
+import { createFileLogger, getDefaultLogFilePath, type PluginLogger } from './logger';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   settings!: ProtonDriveSyncSettings;
@@ -13,19 +14,27 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private refreshIntervalId: number | null = null;
   private currentSession: ProtonSession | null = null;
   private driveClient: ReturnType<typeof createProtonDriveClient> | null = null;
+  private logger!: PluginLogger;
 
   private static readonly REFRESH_INTERVAL_MS = 15 * 60 * 1000;
   private static readonly REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
 
   async onload(): Promise<void> {
-    console.log('Loading Proton Drive Sync plugin');
-
     await this.loadSettings();
 
-    this.authService = new ProtonAuthService(this.manifest.version);
+    this.logger = createFileLogger(this.app, {
+      enabled: this.settings.enableFileLogging,
+      level: this.settings.logLevel,
+      filePath: getDefaultLogFilePath(),
+      maxFileSizeBytes: this.settings.logMaxSizeKb * 1024
+    });
+
+    this.logger.info('Loading Proton Drive Sync plugin', { version: this.manifest.version });
+    this.authService = new ProtonAuthService(this.manifest.version, this.logger);
 
     const existingSession = await loadSession(this.app);
     if (existingSession) {
+      this.logger.info('Loaded existing session', { expiresAt: existingSession.expiresAt });
       this.settings.connectionStatus = 'connected';
       this.settings.lastLoginAt = existingSession.updatedAt;
       this.settings.lastRefreshAt = existingSession.lastRefreshAt;
@@ -45,7 +54,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   async onunload(): Promise<void> {
-    console.log('Unloading Proton Drive Sync plugin');
+    this.logger.info('Unloading Proton Drive Sync plugin');
     this.stopRefreshLoop();
   }
 
@@ -64,6 +73,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     }
 
     try {
+      this.logger.info('Starting sign-in flow', { email: maskEmail(credentials.email) });
       this.settings.accountEmail = credentials.email.trim();
       this.settings.connectionStatus = 'pending';
       this.settings.lastLoginAt = new Date().toISOString();
@@ -92,9 +102,12 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
       this.startRefreshLoop();
 
+      this.logger.info('Sign-in successful', { expiresAt: session.expiresAt });
+
       new Notice('Connected to Proton Drive.');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
+      this.logger.error('Sign-in failed', { email: maskEmail(credentials.email) }, error);
       this.settings.connectionStatus = 'error';
       this.settings.lastLoginError = message;
       await this.saveSettings();
@@ -103,6 +116,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   async disconnect(): Promise<void> {
+    this.logger.info('Disconnecting from Proton Drive');
     this.settings.connectionStatus = 'disconnected';
     this.settings.lastLoginError = null;
     this.settings.lastRefreshAt = null;
@@ -158,6 +172,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     }
 
     try {
+      this.logger.debug('Refreshing session', { force, timeToExpiryMs: timeToExpiry });
       const refreshed = await this.authService.refreshSession(session);
       await saveSession(this.app, refreshed);
       this.settings.connectionStatus = 'connected';
@@ -172,6 +187,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Session refresh failed.';
+      this.logger.error('Session refresh failed', { force }, error);
       this.settings.connectionStatus = 'error';
       this.settings.lastLoginError = message;
       await this.saveSettings();
@@ -188,7 +204,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.driveClient = createProtonDriveClient(
       () => this.currentSession,
       () => loadKeyPassphrase(this.app),
-      this.manifest.version
+      this.manifest.version,
+      this.logger
     );
   }
 
@@ -202,5 +219,23 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
+    this.logger?.updateSettings({
+      enabled: this.settings.enableFileLogging,
+      level: this.settings.logLevel,
+      filePath: getDefaultLogFilePath(),
+      maxFileSizeBytes: this.settings.logMaxSizeKb * 1024
+    });
   }
+
+}
+
+function maskEmail(email: string): string {
+  const trimmed = email.trim();
+  const [user, domain] = trimmed.split('@');
+  if (!user || !domain) {
+    return trimmed;
+  }
+
+  const visible = user.length <= 2 ? user[0] ?? '' : `${user[0]}${user[user.length - 1]}`;
+  return `${visible}***@${domain}`;
 }

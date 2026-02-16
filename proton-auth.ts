@@ -3,6 +3,7 @@ import { requestUrl } from 'obsidian';
 
 import type { ProtonSession } from './session-store';
 import { buildSrpProofs, decodeBase64, encodeBase64, ProtonAuthInfo } from './proton-srp';
+import type { PluginLogger } from './logger';
 
 const API_BASE_URL = 'https://mail.proton.me/api';
 const DEFAULT_SESSION_TTL_MS = 50 * 60 * 1000;
@@ -22,15 +23,20 @@ export interface ProtonAuthResponse {
 
 export class ProtonAuthService {
   private readonly appVersionHeader: string;
+  private readonly logger: PluginLogger;
 
-  constructor(private readonly appVersion: string) {
+  constructor(private readonly appVersion: string, logger: PluginLogger) {
     this.appVersionHeader = `external-drive-obsidian-proton-sync@${appVersion}`;
+    this.logger = logger;
   }
 
   async signIn(email: string, password: string, twoFactorCode: string): Promise<ProtonSession> {
+    this.logger.debug('Auth: fetching SRP info');
     const authInfo = await this.fetchAuthInfo(email);
+    this.logger.debug('Auth: building SRP proofs');
     const proofs = await buildSrpProofs(authInfo, email, password);
 
+    this.logger.debug('Auth: submitting SRP proofs');
     const authResponse = await this.authenticate(authInfo, email, proofs);
 
     if (!this.verifyServerProof(authResponse.ServerProof, proofs.expectedServerProof)) {
@@ -41,6 +47,7 @@ export class ProtonAuthService {
       if (!twoFactorCode) {
         throw new Error('Two-factor authentication code required.');
       }
+      this.logger.info('Auth: submitting 2FA');
       await this.submitTwoFactor(twoFactorCode);
     }
 
@@ -61,6 +68,7 @@ export class ProtonAuthService {
   }
 
   async refreshSession(session: ProtonSession): Promise<ProtonSession> {
+    this.logger.debug('Auth: refreshing session');
     const state = encodeBase64(randomToken(32));
     const body = {
       UID: session.uid,
@@ -89,6 +97,7 @@ export class ProtonAuthService {
   }
 
   private async fetchAuthInfo(username: string): Promise<ProtonAuthInfo> {
+    this.logger.debug('Auth: requesting auth info');
     const response = await this.request<{ AuthInfo?: ProtonAuthInfo } | ProtonAuthInfo>('/auth/v4/info', {
       Username: username
     });
@@ -105,6 +114,7 @@ export class ProtonAuthService {
     username: string,
     proofs: { clientProof: Uint8Array; clientEphemeral: Uint8Array }
   ): Promise<ProtonAuthResponse> {
+    this.logger.debug('Auth: requesting tokens');
     return this.request<ProtonAuthResponse>('/auth/v4', {
       Username: username,
       ClientProof: encodeBase64(proofs.clientProof),
@@ -135,6 +145,7 @@ export class ProtonAuthService {
   }
 
   private async request<T>(path: string, body: unknown): Promise<T> {
+    this.logger.debug('Auth: request', { path });
     const response = await requestUrl({
       url: `${API_BASE_URL}${path}`,
       method: 'POST',

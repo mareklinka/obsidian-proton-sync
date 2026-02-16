@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 
 import type ProtonDriveSyncPlugin from './main';
+import type { LogLevel } from './logger';
 
 export interface ProtonDriveSyncSettings {
   accountEmail: string;
@@ -9,6 +10,9 @@ export interface ProtonDriveSyncSettings {
   lastLoginError: string | null;
   lastRefreshAt: string | null;
   sessionExpiresAt: string | null;
+  enableFileLogging: boolean;
+  logLevel: LogLevel;
+  logMaxSizeKb: number;
 }
 
 export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
@@ -17,7 +21,10 @@ export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
   lastLoginAt: null,
   lastLoginError: null,
   lastRefreshAt: null,
-  sessionExpiresAt: null
+  sessionExpiresAt: null,
+  enableFileLogging: false,
+  logLevel: 'info',
+  logMaxSizeKb: 1024
 };
 
 export class ProtonDriveSyncSettingTab extends PluginSettingTab {
@@ -75,6 +82,52 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
           .onClick(async () => {
             await this.plugin.disconnect();
             this.display();
+          })
+      );
+
+    containerEl.createEl('h3', { text: 'Debug logging' });
+
+    new Setting(containerEl)
+      .setName('Enable file logging')
+      .setDesc('Write debug logs to a file inside the vault for troubleshooting.')
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.enableFileLogging)
+          .onChange(async (value) => {
+            this.plugin.settings.enableFileLogging = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Log level')
+      .setDesc('Minimum severity to write to the log file.')
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOptions({
+            debug: 'Debug',
+            info: 'Info',
+            warn: 'Warn',
+            error: 'Error'
+          })
+          .setValue(this.plugin.settings.logLevel)
+          .onChange(async (value) => {
+            this.plugin.settings.logLevel = value as LogLevel;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Max log size (KB)')
+      .setDesc('When the log grows beyond this size it will be trimmed.')
+      .addText((text) =>
+        text
+          .setPlaceholder('1024')
+          .setValue(String(this.plugin.settings.logMaxSizeKb))
+          .onChange(async (value) => {
+            const parsed = Number(value);
+            this.plugin.settings.logMaxSizeKb = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.logMaxSizeKb;
+            await this.plugin.saveSettings();
           })
       );
   }
