@@ -7,13 +7,17 @@ export interface ProtonDriveSyncSettings {
   connectionStatus: 'disconnected' | 'pending' | 'connected' | 'error';
   lastLoginAt: string | null;
   lastLoginError: string | null;
+  lastRefreshAt: string | null;
+  sessionExpiresAt: string | null;
 }
 
 export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
   accountEmail: '',
   connectionStatus: 'disconnected',
   lastLoginAt: null,
-  lastLoginError: null
+  lastLoginError: null,
+  lastRefreshAt: null,
+  sessionExpiresAt: null
 };
 
 export class ProtonDriveSyncSettingTab extends PluginSettingTab {
@@ -82,6 +86,14 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
     if (this.plugin.settings.lastLoginAt) {
       fragment.appendText(` • Last login: ${this.plugin.settings.lastLoginAt}`);
+    }
+
+    if (this.plugin.settings.lastRefreshAt) {
+      fragment.appendText(` • Last refresh: ${this.plugin.settings.lastRefreshAt}`);
+    }
+
+    if (this.plugin.settings.sessionExpiresAt) {
+      fragment.appendText(` • Expires: ${this.plugin.settings.sessionExpiresAt}`);
     }
 
     if (this.plugin.settings.lastLoginError) {

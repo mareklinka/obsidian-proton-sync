@@ -8,6 +8,10 @@ import { DEFAULT_SETTINGS, ProtonDriveSyncSettings, ProtonDriveSyncSettingTab } 
 export default class ProtonDriveSyncPlugin extends Plugin {
   settings!: ProtonDriveSyncSettings;
   private authService!: ProtonAuthService;
+  private refreshIntervalId: number | null = null;
+
+  private static readonly REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+  private static readonly REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
 
   async onload(): Promise<void> {
     console.log('Loading Proton Drive Sync plugin');
@@ -20,6 +24,12 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     if (existingSession) {
       this.settings.connectionStatus = 'connected';
       this.settings.lastLoginAt = existingSession.updatedAt;
+      this.settings.lastRefreshAt = existingSession.lastRefreshAt;
+      this.settings.sessionExpiresAt = existingSession.expiresAt;
+      await this.saveSettings();
+
+      await this.refreshSessionIfNeeded(existingSession, true);
+      this.startRefreshLoop();
     }
 
     this.addSettingTab(new ProtonDriveSyncSettingTab(this.app, this));
@@ -31,6 +41,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     console.log('Unloading Proton Drive Sync plugin');
+    this.stopRefreshLoop();
   }
 
   openLoginModal(): void {
@@ -64,8 +75,12 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
       this.settings.connectionStatus = 'connected';
       this.settings.lastLoginAt = session.updatedAt;
+      this.settings.lastRefreshAt = session.lastRefreshAt;
+      this.settings.sessionExpiresAt = session.expiresAt;
       this.settings.lastLoginError = null;
       await this.saveSettings();
+
+      this.startRefreshLoop();
 
       new Notice('Connected to Proton Drive.');
     } catch (error) {
@@ -80,9 +95,72 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   async disconnect(): Promise<void> {
     this.settings.connectionStatus = 'disconnected';
     this.settings.lastLoginError = null;
+    this.settings.lastRefreshAt = null;
+    this.settings.sessionExpiresAt = null;
     await this.saveSettings();
     await clearSession(this.app);
+    this.stopRefreshLoop();
     new Notice('Disconnected from Proton Drive.');
+  }
+
+  private startRefreshLoop(): void {
+    if (this.refreshIntervalId !== null) {
+      return;
+    }
+
+    this.refreshIntervalId = window.setInterval(() => {
+      void this.refreshSessionOnInterval();
+    }, ProtonDriveSyncPlugin.REFRESH_INTERVAL_MS);
+  }
+
+  private stopRefreshLoop(): void {
+    if (this.refreshIntervalId === null) {
+      return;
+    }
+
+    window.clearInterval(this.refreshIntervalId);
+    this.refreshIntervalId = null;
+  }
+
+  private async refreshSessionOnInterval(): Promise<void> {
+    const session = await loadSession(this.app);
+    if (!session) {
+      return;
+    }
+
+    await this.refreshSessionIfNeeded(session, false);
+  }
+
+  private async refreshSessionIfNeeded(session: Awaited<ReturnType<typeof loadSession>>, force: boolean): Promise<void> {
+    if (!session) {
+      return;
+    }
+
+    const expiresAt = new Date(session.expiresAt).getTime();
+    const now = Date.now();
+    const timeToExpiry = expiresAt - now;
+
+    if (!force && timeToExpiry > ProtonDriveSyncPlugin.REFRESH_THRESHOLD_MS) {
+      return;
+    }
+
+    try {
+      const refreshed = await this.authService.refreshSession(session);
+      await saveSession(this.app, refreshed);
+      this.settings.connectionStatus = 'connected';
+      this.settings.lastRefreshAt = refreshed.lastRefreshAt;
+      this.settings.sessionExpiresAt = refreshed.expiresAt;
+      this.settings.lastLoginError = null;
+      await this.saveSettings();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Session refresh failed.';
+      this.settings.connectionStatus = 'error';
+      this.settings.lastLoginError = message;
+      await this.saveSettings();
+      await clearSession(this.app);
+      this.stopRefreshLoop();
+      new Notice(message);
+    }
   }
 
   async loadSettings(): Promise<void> {

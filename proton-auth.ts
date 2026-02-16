@@ -5,6 +5,7 @@ import type { ProtonSession } from './session-store';
 import { buildSrpProofs, decodeBase64, encodeBase64, ProtonAuthInfo } from './proton-srp';
 
 const API_BASE_URL = 'https://mail.proton.me/api';
+const DEFAULT_SESSION_TTL_MS = 50 * 60 * 1000;
 
 export interface ProtonAuthResponse {
   UserID: string;
@@ -43,7 +44,8 @@ export class ProtonAuthService {
       await this.submitTwoFactor(twoFactorCode);
     }
 
-    const now = new Date().toISOString();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + DEFAULT_SESSION_TTL_MS);
 
     return {
       uid: authResponse.UID,
@@ -51,8 +53,10 @@ export class ProtonAuthService {
       accessToken: authResponse.AccessToken,
       refreshToken: authResponse.RefreshToken,
       scope: authResponse.Scope || null,
-      createdAt: now,
-      updatedAt: now
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      lastRefreshAt: now.toISOString()
     };
   }
 
@@ -70,12 +74,17 @@ export class ProtonAuthService {
 
     const response = await this.request<ProtonAuthResponse>('/auth/v4/refresh', body);
 
+    const refreshedAt = new Date();
+    const refreshedExpiresAt = new Date(refreshedAt.getTime() + DEFAULT_SESSION_TTL_MS);
+
     return {
       ...session,
       accessToken: response.AccessToken,
       refreshToken: response.RefreshToken,
       scope: response.Scope || session.scope,
-      updatedAt: new Date().toISOString()
+      updatedAt: refreshedAt.toISOString(),
+      expiresAt: refreshedExpiresAt.toISOString(),
+      lastRefreshAt: refreshedAt.toISOString()
     };
   }
 

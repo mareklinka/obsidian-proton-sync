@@ -8,6 +8,8 @@ export interface ProtonSession {
   scope: string | null;
   createdAt: string;
   updatedAt: string;
+  expiresAt: string;
+  lastRefreshAt: string;
 }
 
 const SESSION_STORAGE_KEY = 'proton-drive-sync.session';
