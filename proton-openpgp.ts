@@ -3,14 +3,11 @@ import { OpenPGPCryptoWithCryptoProxy, type OpenPGPCrypto, type OpenPGPCryptoPro
 import { VERIFICATION_STATUS, type PrivateKey, type PublicKey, type SessionKey } from '@protontech/drive-sdk/dist/crypto';
 import { PluginLogger } from './logger';
 
-export function createOpenPgpCrypto(logger: PluginLogger): OpenPGPCrypto {
-  return new OpenPGPCryptoWithCryptoProxy(new OpenPgpCryptoProxy(logger));
+export function createOpenPgpCrypto(): OpenPGPCrypto {
+  return new OpenPGPCryptoWithCryptoProxy(new OpenPgpCryptoProxy());
 }
 
 class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
-
-  constructor(private readonly logger: PluginLogger) {}
-
   async generateKey(options: { userIDs: { name: string }[]; type: 'ecc'; curve: 'ed25519Legacy' }): Promise<PrivateKey> {
     const result = await openpgp.generateKey({
       type: options.type,
@@ -61,7 +58,6 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     binaryMessage?: Uint8Array;
     decryptionKeys: PrivateKey | PrivateKey[];
   }): Promise<SessionKey | undefined> {
-    this.logger.debug('Decrypting session key', { options });
     const decrypted = options.armoredMessage
       ? await openpgp.decryptSessionKeys({
           message: await openpgp.readMessage({ armoredMessage: options.armoredMessage }),

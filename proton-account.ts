@@ -103,8 +103,6 @@ export class ProtonAccount implements ProtonDriveAccount {
       addresses.map((address) => mapAddress(address, userKey!, this.logger)),
     );
 
-    this.logger?.debug("Fetched and mapped Proton addresses", { mapped });
-
     const sorted = [...mapped].sort((left, right) =>
       left.addressId.localeCompare(right.addressId),
     );
@@ -134,7 +132,6 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 
   async hasProtonAccount(email: string): Promise<boolean> {
-    //this.logger?.debug("Checking if email has a Proton account", { email });
     const response = await this.fetchPublicKeysRaw(email);
     if (typeof response.IsProtonMail === "boolean") {
       return response.IsProtonMail;
@@ -148,7 +145,6 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 
   async getPublicKeys(email: string): Promise<PublicKey[]> {
-    //this.logger?.debug("Fetching public keys for email", { email });
     const cached = this.getCached(this.publicKeysCache.get(email) ?? null);
     if (cached) {
       return cached;
@@ -219,11 +215,6 @@ async function mapAddress(
     })),
   );
 
-  logger?.debug("Mapped Proton address keys", {
-    addressId: address.ID,
-    keyIds: parsedKeys,
-  });
-
   const primaryIndex = keys.findIndex(
     (key) => key.Primary === true || key.Primary === 1,
   );
@@ -273,11 +264,12 @@ async function decryptKey(
   }
 
   logger?.debug(
-    "User key is encrypted, attempting decryption with available passphrases",
+    "Key is encrypted, attempting decryption with available passphrases",
   );
+
   const passphrase = passphrases[key.ID];
   if (!passphrase) {
-    logger?.warn("No passphrase available for decrypting user key", {
+    logger?.warn("No passphrase available for decrypting key", {
       keyId: key.ID,
     });
 
@@ -289,12 +281,13 @@ async function decryptKey(
       privateKey,
       passphrase,
     });
-    logger?.debug("Decrypted user key successfully", { keyId: key.ID });
+
+    logger?.debug("Decrypted key successfully", { keyId: key.ID });
 
     return decrypted;
   } catch (error) {
     logger?.warn(
-      "Failed to decrypt user key with provided passphrase",
+      "Failed to decrypt key with provided passphrase",
       { keyId: key.ID },
       error,
     );
@@ -308,8 +301,6 @@ async function decryptKeyUsingToken(
   userKey: openpgp.PrivateKey | null,
   logger?: PluginLogger,
 ): Promise<PrivateKey> {
-  logger?.debug("Parsing private key for address", { keyId: key.ID });
-
   const privateKey = await openpgp.readPrivateKey({
     armoredKey: key.PrivateKey,
   });

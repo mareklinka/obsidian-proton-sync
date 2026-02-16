@@ -25,7 +25,6 @@ export function createProtonDriveClient(
   appVersion: string,
   logger: PluginLogger,
 ): ProtonDriveClient {
-  logger.debug("Creating Proton Drive client", { saltedPasshphrases });
   const httpClient = new ObsidianHttpClient(getSession, appVersion, logger);
   const apiClient = new ProtonApiClient(
     getSession,
@@ -38,7 +37,7 @@ export function createProtonDriveClient(
     new MemoryCache<CachedCryptoMaterial>();
   const account = new ProtonAccount(apiClient, saltedPasshphrases, logger);
 
-  const openPGPCryptoModule = createOpenPgpCrypto(logger);
+  const openPGPCryptoModule = createOpenPgpCrypto();
   const srpModule = new PlaceholderSrpModule();
 
   return new ProtonDriveClient({

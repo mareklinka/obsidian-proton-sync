@@ -240,6 +240,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
         force,
         timeToExpiryMs: timeToExpiry,
       });
+
       const refreshed = await this.authService.refreshSession(session);
       await saveSession(this.app, refreshed);
       this.settings.connectionStatus = "connected";
