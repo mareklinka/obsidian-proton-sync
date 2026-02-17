@@ -4,6 +4,8 @@ import {
   UploadMetadata,
   type ProtonDriveClient,
 } from "@protontech/drive-sdk";
+import { sha1 } from "@noble/hashes/sha1";
+import { bytesToHex } from "@noble/hashes/utils";
 
 import type { PluginLogger } from "./logger";
 import type { ProtonDriveSyncSettings, SyncMapEntry } from "./settings";
@@ -126,8 +128,9 @@ export class SyncQueue {
     const name = file.name;
 
     const entry = this.settings.pathMap[path];
-    const metadata = await buildUploadMetadata(file, this.vault);
-    const stream = await buildFileStream(file, this.vault, metadata.mediaType);
+    const payload = await buildFilePayload(file, this.vault);
+    const metadata = payload.metadata;
+    const fileObject = payload.fileObject;
 
     this.logger.debug("Syncing file", { name, metadata });
 
@@ -137,41 +140,37 @@ export class SyncQueue {
         nodeUid: entry.nodeUid,
         metadata
       });
+
       const uploader = await this.client.getFileRevisionUploader(
         entry.nodeUid,
         metadata,
       );
-      const controller = await uploader.uploadFromStream(stream, []);
+      const controller = await uploader.uploadFromFile(fileObject, []);
       const result = await controller.completion();
-      this.settings.pathMap[path] = {
-        nodeUid: result.nodeUid,
-        updatedAt: new Date().toISOString()
-      };
-      return;
-    }
-
-    this.logger.debug("File not previously synced, creating new node", {
-      path,
-    });
-
-    const uploader = await this.client.getFileUploader(
-      parentUid,
-      name,
-      metadata,
-    );
-
-    try {
-      const controller = await uploader.uploadFromStream(stream, [], (bytes) =>
-        this.logger.debug("Upload progress", { bytesUploaded: bytes }),
-      );
-      const result = await controller.completion();
-      this.logger.debug("File synced", { path, nodeUid: result.nodeUid });
       this.settings.pathMap[path] = {
         nodeUid: result.nodeUid,
         updatedAt: new Date().toISOString(),
       };
-    } catch (error) {
-      this.logger.error("File sync failed", { path }, error);
+    } else {
+      this.logger.debug("File not previously synced, creating new node", {
+        path
+      });
+
+      const uploader = await this.client.getFileUploader(
+        parentUid,
+        name,
+        metadata,
+      );
+
+      const controller = await uploader.uploadFromFile(fileObject, []);
+      const result = await controller.completion();
+
+      this.settings.pathMap[path] = {
+        nodeUid: result.nodeUid,
+        updatedAt: new Date().toISOString(),
+      };
+
+      this.logger.debug("File synced", { path, nodeUid: result.nodeUid });
     }
   }
 
@@ -336,21 +335,6 @@ function getBasename(path: string): string {
   return index < 0 ? normalized : normalized.slice(index + 1);
 }
 
-async function buildUploadMetadata(
-  file: TFile,
-  vault: Vault,
-): Promise<UploadMetadata> {
-  const mediaType = guessMediaType(file);
-  const mtime = file.stat?.mtime ? new Date(file.stat.mtime) : undefined;
-  const size = file.stat?.size ?? (await vault.readBinary(file)).byteLength;
-
-  return {
-    mediaType,
-    expectedSize: size,
-    modificationTime: mtime,
-  };
-}
-
 function guessMediaType(file: TFile): string {
   if (file.extension === "md") {
     return "text/markdown";
@@ -361,19 +345,39 @@ function guessMediaType(file: TFile): string {
   return "application/octet-stream";
 }
 
-async function buildFileStream(
+async function buildFilePayload(
   file: TFile,
   vault: Vault,
-  mediaType: string,
-): Promise<ReadableStream> {
+): Promise<{
+  metadata: UploadMetadata;
+  fileObject: File;
+}> {
+  const mediaType = guessMediaType(file);
+  const mtime = file.stat?.mtime ? new Date(file.stat.mtime) : undefined;
+
+  let bytes: Uint8Array;
   if (file.extension === "md" || file.extension === "txt") {
     const content = await vault.read(file);
-    const bytes = new TextEncoder().encode(content);
-    return new Blob([bytes], { type: mediaType }).stream();
+    bytes = new TextEncoder().encode(content);
+  } else {
+    const buffer = await vault.readBinary(file);
+    bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   }
 
-  const buffer = await vault.readBinary(file);
-  return new Blob([buffer], { type: mediaType }).stream();
+  const metadata: UploadMetadata = {
+    mediaType,
+    expectedSize: bytes.byteLength,
+    modificationTime: mtime,
+    expectedSha1: bytesToHex(sha1(bytes)),
+  };
+
+  const blob = new Blob([Uint8Array.from(bytes)], { type: mediaType });
+  const fileObject = new File([blob], file.name, {
+    type: mediaType,
+    lastModified: mtime?.getTime(),
+  });
+
+  return { metadata, fileObject };
 }
 
 export function buildSyncEvent(
