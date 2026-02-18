@@ -1,0 +1,842 @@
+import { BehaviorSubject, Observable, Subject, Subscription, SchedulerLike, asyncScheduler, interval } from "rxjs";
+
+export type SyncChangeType =
+  | "file-created"
+  | "file-edited"
+  | "file-deleted"
+  | "file-moved"
+  | "folder-created"
+  | "folder-renamed"
+  | "folder-deleted"
+  | "folder-moved";
+
+export type EntityType = "file" | "folder";
+
+export interface SyncChangeBase {
+  type: SyncChangeType;
+  entityType: EntityType;
+  path: string;
+  oldPath?: string;
+  occurredAt?: number;
+  correlationId?: string;
+}
+
+export interface QueuedChange extends SyncChangeBase {
+  id: string;
+  enqueuedAt: number;
+  availableAt: number;
+  attempt: number;
+}
+
+export interface SyncIndexEntry {
+  cloudId: string;
+  path: string;
+  entityType: EntityType;
+  updatedAt: number;
+}
+
+export interface SyncIndexSnapshot {
+  byPath: Record<string, SyncIndexEntry>;
+  byCloudId: Record<string, SyncIndexEntry>;
+}
+
+export interface SyncIndexSnapshotEvent {
+  seq: number;
+  at: number;
+  reason: SyncChangeType | "init" | "manual";
+  snapshot: SyncIndexSnapshot;
+}
+
+export interface FileDescriptor {
+  name: string;
+  path: string;
+  modifiedAt: number;
+  content: Blob | ArrayBuffer;
+}
+
+export interface FolderDescriptor {
+  name: string;
+  path: string;
+}
+
+export interface IFileSystemReader {
+  readFile(path: string): Promise<FileDescriptor | null>;
+  readFolder(path: string): Promise<FolderDescriptor | null>;
+  exists(path: string, entityType: EntityType): Promise<boolean>;
+}
+
+export interface CloudUpsertResult {
+  cloudId: string;
+  path: string;
+  entityType: EntityType;
+}
+
+export interface ICloudStorageApi {
+  createFile(input: FileDescriptor, parentPath?: string): Promise<CloudUpsertResult>;
+  updateFile(cloudId: string, input: FileDescriptor): Promise<CloudUpsertResult>;
+  deleteFile(cloudId: string): Promise<void>;
+  moveFile(cloudId: string, newPath: string): Promise<CloudUpsertResult>;
+
+  createFolder(input: FolderDescriptor, parentPath?: string): Promise<CloudUpsertResult>;
+  renameFolder(cloudId: string, newName: string, newPath: string): Promise<CloudUpsertResult>;
+  deleteFolder(cloudId: string): Promise<void>;
+  moveFolder(cloudId: string, newPath: string): Promise<CloudUpsertResult>;
+}
+
+export interface SyncQueueStats {
+  totalPending: number;
+  queueCount: number;
+  inFlight: boolean;
+  droppedByCompaction: number;
+  retried: number;
+  failedTerminal: number;
+}
+
+export interface SyncDispatchResult {
+  changeId: string;
+  success: boolean;
+  retryScheduled: boolean;
+  errorMessage?: string;
+  retryable?: boolean;
+}
+
+export interface SyncServiceOptions {
+  debounceMs?: number;
+  sendIntervalMs?: number;
+  maxOpsPerTick?: number;
+  retryMaxAttempts?: number;
+  retryBaseDelayMs?: number;
+  jitterRatio?: number;
+  maxPendingTotal?: number;
+  maxPendingPerEntity?: number;
+  now?: () => number;
+  caseInsensitivePaths?: boolean;
+  classifyError?: (error: unknown) => "retryable" | "non-retryable";
+}
+
+export interface ISyncService {
+  initializeIndex(snapshot: SyncIndexSnapshot): void;
+  start(): void;
+  stop(): void;
+  dispose(): void;
+
+  enqueueChange(change: SyncChangeBase): string;
+  clearPending(entityKey?: string): void;
+
+  readonly mapChanges$: Observable<SyncIndexSnapshotEvent>;
+  readonly dispatchResults$: Observable<SyncDispatchResult>;
+  readonly stats$: Observable<SyncQueueStats>;
+}
+
+type LifecycleState = "idle" | "initialized" | "running" | "stopped" | "disposed";
+
+type QueueRecord = {
+  entityKey: string;
+  items: QueuedChange[];
+};
+
+export const DEFAULT_DEBOUNCE_MS = 1500;
+export const DEFAULT_SEND_INTERVAL_MS = 500;
+export const DEFAULT_MAX_OPS_PER_TICK = 1;
+export const DEFAULT_RETRY_MAX_ATTEMPTS = 5;
+export const DEFAULT_RETRY_BASE_DELAY_MS = 1000;
+export const DEFAULT_JITTER_RATIO = 0.2;
+export const DEFAULT_MAX_PENDING_TOTAL = 5000;
+export const DEFAULT_MAX_PENDING_PER_ENTITY = 500;
+
+export class RxSyncService implements ISyncService {
+  public readonly mapChanges$: Observable<SyncIndexSnapshotEvent>;
+  public readonly dispatchResults$: Observable<SyncDispatchResult>;
+  public readonly stats$: Observable<SyncQueueStats>;
+
+  private readonly mapChangesSubject = new Subject<SyncIndexSnapshotEvent>();
+  private readonly dispatchResultsSubject = new Subject<SyncDispatchResult>();
+  private readonly statsSubject = new BehaviorSubject<SyncQueueStats>({
+    totalPending: 0,
+    queueCount: 0,
+    inFlight: false,
+    droppedByCompaction: 0,
+    retried: 0,
+    failedTerminal: 0,
+  });
+
+  private readonly byPath = new Map<string, SyncIndexEntry>();
+  private readonly byCloudId = new Map<string, SyncIndexEntry>();
+  private readonly queueMap = new Map<string, QueueRecord>();
+  private readonly scheduler: SchedulerLike;
+
+  private state: LifecycleState = "idle";
+  private isInitialized = false;
+  private isInFlight = false;
+  private tickerSub: Subscription | null = null;
+
+  private seq = 0;
+  private droppedByCompaction = 0;
+  private retried = 0;
+  private failedTerminal = 0;
+  private idCounter = 0;
+
+  private readonly debounceMs: number;
+  private readonly sendIntervalMs: number;
+  private readonly maxOpsPerTick: number;
+  private readonly retryMaxAttempts: number;
+  private readonly retryBaseDelayMs: number;
+  private readonly jitterRatio: number;
+  private readonly maxPendingTotal: number;
+  private readonly maxPendingPerEntity: number;
+  private readonly now: () => number;
+  private readonly caseInsensitivePaths: boolean;
+  private readonly classifyError: (error: unknown) => "retryable" | "non-retryable";
+
+  constructor(
+    private readonly fsReader: IFileSystemReader,
+    private readonly cloudApi: ICloudStorageApi,
+    options: SyncServiceOptions = {},
+    scheduler?: SchedulerLike,
+  ) {
+    this.scheduler = scheduler ?? asyncScheduler;
+    this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.sendIntervalMs = options.sendIntervalMs ?? DEFAULT_SEND_INTERVAL_MS;
+    this.maxOpsPerTick = options.maxOpsPerTick ?? DEFAULT_MAX_OPS_PER_TICK;
+    this.retryMaxAttempts = options.retryMaxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS;
+    this.retryBaseDelayMs = options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
+    this.jitterRatio = options.jitterRatio ?? DEFAULT_JITTER_RATIO;
+    this.maxPendingTotal = options.maxPendingTotal ?? DEFAULT_MAX_PENDING_TOTAL;
+    this.maxPendingPerEntity = options.maxPendingPerEntity ?? DEFAULT_MAX_PENDING_PER_ENTITY;
+    this.now = options.now ?? (() => Date.now());
+    this.caseInsensitivePaths = options.caseInsensitivePaths ?? true;
+    this.classifyError = options.classifyError ?? defaultClassifyError;
+
+    this.mapChanges$ = this.mapChangesSubject.asObservable();
+    this.dispatchResults$ = this.dispatchResultsSubject.asObservable();
+    this.stats$ = this.statsSubject.asObservable();
+  }
+
+  initializeIndex(snapshot: SyncIndexSnapshot): void {
+    if (this.state === "running") {
+      throw new Error("Cannot initialize index while service is running.");
+    }
+    if (this.state === "disposed") {
+      throw new Error("Service is disposed.");
+    }
+
+    this.byPath.clear();
+    this.byCloudId.clear();
+
+    for (const entry of Object.values(snapshot.byPath ?? {})) {
+      const normalized = this.normalizePath(entry.path);
+      const canonical = this.toCanonicalKey(normalized);
+      const normalizedEntry: SyncIndexEntry = {
+        cloudId: entry.cloudId,
+        path: normalized,
+        entityType: entry.entityType,
+        updatedAt: entry.updatedAt,
+      };
+      this.byPath.set(canonical, normalizedEntry);
+      this.byCloudId.set(entry.cloudId, normalizedEntry);
+    }
+
+    for (const entry of Object.values(snapshot.byCloudId ?? {})) {
+      if (!this.byCloudId.has(entry.cloudId)) {
+        const normalized = this.normalizePath(entry.path);
+        const canonical = this.toCanonicalKey(normalized);
+        const normalizedEntry: SyncIndexEntry = {
+          cloudId: entry.cloudId,
+          path: normalized,
+          entityType: entry.entityType,
+          updatedAt: entry.updatedAt,
+        };
+        this.byPath.set(canonical, normalizedEntry);
+        this.byCloudId.set(entry.cloudId, normalizedEntry);
+      }
+    }
+
+    this.isInitialized = true;
+    this.state = "initialized";
+    this.emitSnapshot("init");
+  }
+
+  start(): void {
+    if (this.state === "disposed") {
+      throw new Error("Service is disposed.");
+    }
+    if (!this.isInitialized) {
+      throw new Error("Index must be initialized before start().");
+    }
+    if (this.state === "running") {
+      return;
+    }
+
+    this.state = "running";
+    this.tickerSub = interval(this.sendIntervalMs, this.scheduler).subscribe(() => {
+      void this.processTick();
+    });
+    this.publishStats();
+  }
+
+  stop(): void {
+    if (this.state === "disposed") {
+      return;
+    }
+
+    this.tickerSub?.unsubscribe();
+    this.tickerSub = null;
+
+    if (this.state !== "idle") {
+      this.state = "stopped";
+    }
+    this.publishStats();
+  }
+
+  dispose(): void {
+    if (this.state === "disposed") {
+      return;
+    }
+
+    this.stop();
+    this.queueMap.clear();
+    this.byPath.clear();
+    this.byCloudId.clear();
+
+    this.state = "disposed";
+
+    this.publishStats();
+    this.mapChangesSubject.complete();
+    this.dispatchResultsSubject.complete();
+    this.statsSubject.complete();
+  }
+
+  enqueueChange(change: SyncChangeBase): string {
+    if (this.state === "disposed") {
+      throw new Error("Cannot enqueue into a disposed service.");
+    }
+
+    const normalized = this.normalizeAndValidate(change);
+    const queued: QueuedChange = {
+      ...normalized,
+      id: this.nextChangeId(),
+      enqueuedAt: this.now(),
+      availableAt: this.now(),
+      attempt: 0,
+    };
+
+    const entityKey = this.resolveEntityKey(queued);
+    const queue = this.getOrCreateQueue(entityKey);
+
+    if (this.getTotalPending() >= this.maxPendingTotal) {
+      this.dispatchResultsSubject.next({
+        changeId: queued.id,
+        success: false,
+        retryScheduled: false,
+        errorMessage: `Max pending total (${this.maxPendingTotal}) exceeded.`,
+        retryable: false,
+      });
+      return queued.id;
+    }
+
+    if (queue.items.length >= this.maxPendingPerEntity) {
+      this.dispatchResultsSubject.next({
+        changeId: queued.id,
+        success: false,
+        retryScheduled: false,
+        errorMessage: `Max pending per entity (${this.maxPendingPerEntity}) exceeded.`,
+        retryable: false,
+      });
+      return queued.id;
+    }
+
+    this.insertWithCompaction(queue, queued);
+    this.publishStats();
+    return queued.id;
+  }
+
+  clearPending(entityKey?: string): void {
+    if (typeof entityKey === "string" && entityKey.length > 0) {
+      this.queueMap.delete(entityKey);
+      this.publishStats();
+      return;
+    }
+
+    this.queueMap.clear();
+    this.publishStats();
+  }
+
+  private async processTick(): Promise<void> {
+    if (this.state !== "running" || this.isInFlight) {
+      return;
+    }
+
+    this.isInFlight = true;
+    this.publishStats();
+
+    try {
+      for (let i = 0; i < this.maxOpsPerTick; i += 1) {
+        const selected = this.selectNextQueue();
+        if (!selected) {
+          break;
+        }
+
+        const change = selected.items.shift();
+        if (!change) {
+          this.deleteQueueIfEmpty(selected.entityKey);
+          continue;
+        }
+
+        const result = await this.dispatchChange(change);
+
+        if (!result.success && result.retryScheduled) {
+          selected.items.unshift(change);
+        }
+
+        this.deleteQueueIfEmpty(selected.entityKey);
+      }
+    } finally {
+      this.isInFlight = false;
+      this.publishStats();
+    }
+  }
+
+  private async dispatchChange(change: QueuedChange): Promise<SyncDispatchResult> {
+    try {
+      await this.executeChange(change);
+      const success: SyncDispatchResult = {
+        changeId: change.id,
+        success: true,
+        retryScheduled: false,
+      };
+      this.dispatchResultsSubject.next(success);
+      return success;
+    } catch (error) {
+      const classification = this.classifyError(error);
+      const retryable = classification === "retryable";
+
+      if (retryable && change.attempt < this.retryMaxAttempts) {
+        change.attempt += 1;
+        change.availableAt = this.now() + this.computeBackoffMs(change.attempt);
+        this.retried += 1;
+
+        const retryResult: SyncDispatchResult = {
+          changeId: change.id,
+          success: false,
+          retryScheduled: true,
+          retryable: true,
+          errorMessage: this.toErrorMessage(error),
+        };
+        this.dispatchResultsSubject.next(retryResult);
+        return retryResult;
+      }
+
+      this.failedTerminal += 1;
+      const failure: SyncDispatchResult = {
+        changeId: change.id,
+        success: false,
+        retryScheduled: false,
+        retryable,
+        errorMessage: this.toErrorMessage(error),
+      };
+      this.dispatchResultsSubject.next(failure);
+      return failure;
+    }
+  }
+
+  private async executeChange(change: QueuedChange): Promise<void> {
+    switch (change.type) {
+      case "file-created":
+      case "file-edited": {
+        const descriptor = await this.fsReader.readFile(change.path);
+        if (!descriptor) {
+          throw new Error(`File not found: ${change.path}`);
+        }
+        const known = this.lookupByPath(change.path);
+        const result = known
+          ? await this.cloudApi.updateFile(known.cloudId, descriptor)
+          : await this.cloudApi.createFile(descriptor, getParentPath(change.path));
+        this.upsertIndex(result, change.type);
+        return;
+      }
+
+      case "file-deleted": {
+        const cloudId = this.resolveCloudId(change.path, change.oldPath);
+        if (cloudId) {
+          await this.cloudApi.deleteFile(cloudId);
+          this.removeIndexByCloudId(cloudId, change.type);
+        }
+        return;
+      }
+
+      case "file-moved": {
+        if (!change.oldPath) {
+          throw new Error("file-moved requires oldPath");
+        }
+        const cloudId = this.resolveCloudId(change.oldPath, change.path);
+        if (!cloudId) {
+          throw new Error(`Unknown cloud ID for moved file: ${change.oldPath}`);
+        }
+        const result = await this.cloudApi.moveFile(cloudId, change.path);
+        this.upsertIndex(result, change.type, change.oldPath);
+        return;
+      }
+
+      case "folder-created": {
+        const descriptor = await this.fsReader.readFolder(change.path);
+        if (!descriptor) {
+          throw new Error(`Folder not found: ${change.path}`);
+        }
+        const result = await this.cloudApi.createFolder(descriptor, getParentPath(change.path));
+        this.upsertIndex(result, change.type);
+        return;
+      }
+
+      case "folder-renamed": {
+        if (!change.oldPath) {
+          throw new Error("folder-renamed requires oldPath");
+        }
+        const cloudId = this.resolveCloudId(change.oldPath, change.path);
+        if (!cloudId) {
+          throw new Error(`Unknown cloud ID for renamed folder: ${change.oldPath}`);
+        }
+        const newName = getBaseName(change.path);
+        const result = await this.cloudApi.renameFolder(cloudId, newName, change.path);
+        this.upsertIndex(result, change.type, change.oldPath);
+        return;
+      }
+
+      case "folder-deleted": {
+        const cloudId = this.resolveCloudId(change.path, change.oldPath);
+        if (cloudId) {
+          await this.cloudApi.deleteFolder(cloudId);
+          this.removeIndexByCloudId(cloudId, change.type);
+        }
+        return;
+      }
+
+      case "folder-moved": {
+        if (!change.oldPath) {
+          throw new Error("folder-moved requires oldPath");
+        }
+        const cloudId = this.resolveCloudId(change.oldPath, change.path);
+        if (!cloudId) {
+          throw new Error(`Unknown cloud ID for moved folder: ${change.oldPath}`);
+        }
+        const result = await this.cloudApi.moveFolder(cloudId, change.path);
+        this.upsertIndex(result, change.type, change.oldPath);
+        return;
+      }
+
+      default:
+        throw new Error(`Unsupported change type: ${(change as { type: string }).type}`);
+    }
+  }
+
+  private upsertIndex(
+    result: CloudUpsertResult,
+    reason: SyncChangeType,
+    oldPath?: string,
+  ): void {
+    const normalizedPath = this.normalizePath(result.path);
+    const canonicalPath = this.toCanonicalKey(normalizedPath);
+
+    const existing = this.byCloudId.get(result.cloudId);
+    if (existing && this.toCanonicalKey(existing.path) !== canonicalPath) {
+      this.byPath.delete(this.toCanonicalKey(existing.path));
+    }
+
+    if (oldPath) {
+      this.byPath.delete(this.toCanonicalKey(oldPath));
+    }
+
+    const next: SyncIndexEntry = {
+      cloudId: result.cloudId,
+      path: normalizedPath,
+      entityType: result.entityType,
+      updatedAt: this.now(),
+    };
+
+    this.byPath.set(canonicalPath, next);
+    this.byCloudId.set(result.cloudId, next);
+
+    this.emitSnapshot(reason);
+  }
+
+  private removeIndexByCloudId(cloudId: string, reason: SyncChangeType): void {
+    const existing = this.byCloudId.get(cloudId);
+    if (!existing) {
+      return;
+    }
+
+    this.byCloudId.delete(cloudId);
+    this.byPath.delete(this.toCanonicalKey(existing.path));
+    this.emitSnapshot(reason);
+  }
+
+  private emitSnapshot(reason: SyncIndexSnapshotEvent["reason"]): void {
+    this.seq += 1;
+    this.mapChangesSubject.next({
+      seq: this.seq,
+      at: this.now(),
+      reason,
+      snapshot: this.snapshot(),
+    });
+  }
+
+  private snapshot(): SyncIndexSnapshot {
+    const byPath: Record<string, SyncIndexEntry> = {};
+    const byCloudId: Record<string, SyncIndexEntry> = {};
+
+    for (const entry of this.byPath.values()) {
+      byPath[entry.path] = { ...entry };
+    }
+
+    for (const entry of this.byCloudId.values()) {
+      byCloudId[entry.cloudId] = { ...entry };
+    }
+
+    return { byPath, byCloudId };
+  }
+
+  private normalizeAndValidate(change: SyncChangeBase): SyncChangeBase {
+    const path = this.normalizePath(change.path);
+    if (!path) {
+      throw new Error("Path must not be empty.");
+    }
+
+    const oldPath = change.oldPath ? this.normalizePath(change.oldPath) : undefined;
+
+    if (requiresOldPath(change.type) && !oldPath) {
+      throw new Error(`${change.type} requires oldPath.`);
+    }
+
+    return {
+      ...change,
+      path,
+      oldPath,
+    };
+  }
+
+  private normalizePath(path: string): string {
+    const cleaned = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/").replace(/^\/+|\/+$/g, "");
+    if (!cleaned) {
+      return "";
+    }
+    return cleaned;
+  }
+
+  private toCanonicalKey(path: string): string {
+    const normalized = this.normalizePath(path);
+    return this.caseInsensitivePaths ? normalized.toLocaleLowerCase() : normalized;
+  }
+
+  private resolveEntityKey(change: SyncChangeBase): string {
+    const byPath = this.lookupByPath(change.path);
+    if (byPath) {
+      return `cloud:${byPath.cloudId}`;
+    }
+
+    if (change.oldPath) {
+      const byOldPath = this.lookupByPath(change.oldPath);
+      if (byOldPath) {
+        return `cloud:${byOldPath.cloudId}`;
+      }
+      return `path:${this.toCanonicalKey(change.oldPath)}`;
+    }
+
+    return `path:${this.toCanonicalKey(change.path)}`;
+  }
+
+  private resolveCloudId(path: string, oldPath?: string): string | null {
+    const current = this.lookupByPath(path);
+    if (current) {
+      return current.cloudId;
+    }
+    if (oldPath) {
+      const previous = this.lookupByPath(oldPath);
+      if (previous) {
+        return previous.cloudId;
+      }
+    }
+    return null;
+  }
+
+  private lookupByPath(path: string): SyncIndexEntry | null {
+    return this.byPath.get(this.toCanonicalKey(path)) ?? null;
+  }
+
+  private insertWithCompaction(queue: QueueRecord, incoming: QueuedChange): void {
+    const items = queue.items;
+    const last = items[items.length - 1];
+
+    if (last) {
+      if (
+        incoming.type === "file-edited" &&
+        last.type === "file-edited" &&
+        incoming.enqueuedAt - last.enqueuedAt <= this.debounceMs
+      ) {
+        items[items.length - 1] = incoming;
+        this.droppedByCompaction += 1;
+        return;
+      }
+
+      if (last.type === "file-created" && incoming.type === "file-edited") {
+        this.droppedByCompaction += 1;
+        return;
+      }
+
+      if (last.type === "file-created" && incoming.type === "file-deleted") {
+        items.pop();
+        this.droppedByCompaction += 1;
+        return;
+      }
+
+      if (
+        (last.type === "file-moved" && incoming.type === "file-moved") ||
+        (last.type === "folder-moved" && incoming.type === "folder-moved") ||
+        (last.type === "folder-renamed" && incoming.type === "folder-renamed")
+      ) {
+        const merged: QueuedChange = {
+          ...incoming,
+          oldPath: last.oldPath ?? incoming.oldPath,
+          enqueuedAt: last.enqueuedAt,
+        };
+        items[items.length - 1] = merged;
+        this.droppedByCompaction += 1;
+        return;
+      }
+
+      if ((incoming.type === "file-deleted" || incoming.type === "folder-deleted") && items.length > 0) {
+        queue.items = [incoming];
+        this.droppedByCompaction += items.length;
+        return;
+      }
+    }
+
+    items.push(incoming);
+  }
+
+  private selectNextQueue(): QueueRecord | null {
+    const now = this.now();
+    const eligible: QueueRecord[] = [];
+
+    for (const queue of this.queueMap.values()) {
+      if (queue.items.length === 0) {
+        continue;
+      }
+
+      const head = queue.items[0];
+      if (head.availableAt <= now) {
+        eligible.push(queue);
+      }
+    }
+
+    if (eligible.length === 0) {
+      return null;
+    }
+
+    eligible.sort((a, b) => {
+      const aHead = a.items[0];
+      const bHead = b.items[0];
+      if (aHead.enqueuedAt !== bHead.enqueuedAt) {
+        return aHead.enqueuedAt - bHead.enqueuedAt;
+      }
+      return a.entityKey.localeCompare(b.entityKey);
+    });
+
+    return eligible[0];
+  }
+
+  private getOrCreateQueue(entityKey: string): QueueRecord {
+    const existing = this.queueMap.get(entityKey);
+    if (existing) {
+      return existing;
+    }
+
+    const created: QueueRecord = {
+      entityKey,
+      items: [],
+    };
+    this.queueMap.set(entityKey, created);
+    return created;
+  }
+
+  private deleteQueueIfEmpty(entityKey: string): void {
+    const queue = this.queueMap.get(entityKey);
+    if (queue && queue.items.length === 0) {
+      this.queueMap.delete(entityKey);
+    }
+  }
+
+  private publishStats(): void {
+    this.statsSubject.next({
+      totalPending: this.getTotalPending(),
+      queueCount: this.queueMap.size,
+      inFlight: this.isInFlight,
+      droppedByCompaction: this.droppedByCompaction,
+      retried: this.retried,
+      failedTerminal: this.failedTerminal,
+    });
+  }
+
+  private getTotalPending(): number {
+    let total = 0;
+    for (const queue of this.queueMap.values()) {
+      total += queue.items.length;
+    }
+    return total;
+  }
+
+  private computeBackoffMs(attempt: number): number {
+    const base = this.retryBaseDelayMs * Math.pow(2, Math.max(0, attempt - 1));
+    const jitterMultiplier = 1 + this.randomInRange(-this.jitterRatio, this.jitterRatio);
+    return Math.max(0, Math.round(base * jitterMultiplier));
+  }
+
+  private randomInRange(min: number, max: number): number {
+    return min + Math.random() * (max - min);
+  }
+
+  private toErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
+  }
+
+  private nextChangeId(): string {
+    this.idCounter += 1;
+    return `chg_${this.idCounter}`;
+  }
+}
+
+function getParentPath(path: string): string {
+  const index = path.lastIndexOf("/");
+  if (index <= 0) {
+    return "";
+  }
+  return path.slice(0, index);
+}
+
+function getBaseName(path: string): string {
+  const index = path.lastIndexOf("/");
+  if (index < 0) {
+    return path;
+  }
+  return path.slice(index + 1);
+}
+
+function requiresOldPath(type: SyncChangeType): boolean {
+  return type === "file-moved" || type === "folder-moved" || type === "folder-renamed";
+}
+
+function defaultClassifyError(error: unknown): "retryable" | "non-retryable" {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (
+    message.includes("timeout") ||
+    message.includes("network") ||
+    message.includes("temporar") ||
+    message.includes("429") ||
+    message.includes("5xx")
+  ) {
+    return "retryable";
+  }
+
+  return "non-retryable";
+}
