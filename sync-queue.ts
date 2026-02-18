@@ -4,8 +4,8 @@ import {
   UploadMetadata,
   type ProtonDriveClient,
 } from "@protontech/drive-sdk";
-import { sha1 } from "@noble/hashes/sha1";
-import { bytesToHex } from "@noble/hashes/utils";
+import { sha1 } from "@noble/hashes/legacy.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 
 import type { PluginLogger } from "./logger";
 import type { ProtonDriveSyncSettings, SyncMapEntry } from "./settings";
