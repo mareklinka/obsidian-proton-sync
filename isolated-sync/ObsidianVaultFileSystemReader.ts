@@ -1,17 +1,11 @@
 import { Observable, Subject } from "rxjs";
 import type { EventRef, TAbstractFile, TFile, TFolder, Vault } from "obsidian";
+import type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from "./shared-types";
+import { getParentPath, normalizePath, toCanonicalPathKey } from "./path-utils";
 
-export type EntityType = "file" | "folder";
+export type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from "./shared-types";
 
-export type ReaderChangeType =
-  | "file-created"
-  | "file-edited"
-  | "file-deleted"
-  | "file-moved"
-  | "folder-created"
-  | "folder-renamed"
-  | "folder-deleted"
-  | "folder-moved";
+export type ReaderChangeType = FileSystemChangeType;
 
 export interface ReaderChangeEvent {
   type: ReaderChangeType;
@@ -21,22 +15,10 @@ export interface ReaderChangeEvent {
   occurredAt: number;
 }
 
-export interface FileDescriptor {
-  name: string;
-  path: string;
-  modifiedAt: number;
-  content: Blob | ArrayBuffer;
-}
-
 export interface FileMetadataDescriptor {
   name: string;
   path: string;
   modifiedAt: number;
-}
-
-export interface FolderDescriptor {
-  name: string;
-  path: string;
 }
 
 type VaultEventName = "create" | "modify" | "rename" | "delete";
@@ -390,28 +372,12 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
   }
 
   private normalizePath(path: string): string {
-    const cleaned = path
-      .trim()
-      .replace(/\\+/g, "/")
-      .replace(/\/+/g, "/")
-      .replace(/^\/+|\/+$/g, "");
-
-    return cleaned;
+    return normalizePath(path);
   }
 
   private toCanonicalKey(path: string): string {
-    const normalized = this.normalizePath(path);
-    return this.caseInsensitivePaths ? normalized.toLocaleLowerCase() : normalized;
+    return toCanonicalPathKey(path, this.caseInsensitivePaths);
   }
-}
-
-function getParentPath(path: string): string {
-  const index = path.lastIndexOf("/");
-  if (index < 0) {
-    return "";
-  }
-
-  return path.slice(0, index);
 }
 
 function isLikelyFile(entry: unknown): entry is TFile {

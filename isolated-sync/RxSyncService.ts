@@ -1,16 +1,10 @@
 import { BehaviorSubject, Observable, Subject, Subscription, SchedulerLike, asyncScheduler, interval } from "rxjs";
+import type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from "./shared-types";
+import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from "./path-utils";
 
-export type SyncChangeType =
-  | "file-created"
-  | "file-edited"
-  | "file-deleted"
-  | "file-moved"
-  | "folder-created"
-  | "folder-renamed"
-  | "folder-deleted"
-  | "folder-moved";
+export type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from "./shared-types";
 
-export type EntityType = "file" | "folder";
+export type SyncChangeType = FileSystemChangeType;
 
 export interface SyncChangeBase {
   type: SyncChangeType;
@@ -45,18 +39,6 @@ export interface SyncIndexSnapshotEvent {
   at: number;
   reason: SyncChangeType | "init" | "manual";
   snapshot: SyncIndexSnapshot;
-}
-
-export interface FileDescriptor {
-  name: string;
-  path: string;
-  modifiedAt: number;
-  content: Blob | ArrayBuffer;
-}
-
-export interface FolderDescriptor {
-  name: string;
-  path: string;
 }
 
 export interface IFileSystemReader {
@@ -614,16 +596,11 @@ export class RxSyncService implements ISyncService {
   }
 
   private normalizePath(path: string): string {
-    const cleaned = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/").replace(/^\/+|\/+$/g, "");
-    if (!cleaned) {
-      return "";
-    }
-    return cleaned;
+    return normalizePath(path);
   }
 
   private toCanonicalKey(path: string): string {
-    const normalized = this.normalizePath(path);
-    return this.caseInsensitivePaths ? normalized.toLocaleLowerCase() : normalized;
+    return toCanonicalPathKey(path, this.caseInsensitivePaths);
   }
 
   private resolveEntityKey(change: SyncChangeBase): string {
@@ -804,22 +781,6 @@ export class RxSyncService implements ISyncService {
     this.idCounter += 1;
     return `chg_${this.idCounter}`;
   }
-}
-
-function getParentPath(path: string): string {
-  const index = path.lastIndexOf("/");
-  if (index <= 0) {
-    return "";
-  }
-  return path.slice(0, index);
-}
-
-function getBaseName(path: string): string {
-  const index = path.lastIndexOf("/");
-  if (index < 0) {
-    return path;
-  }
-  return path.slice(index + 1);
 }
 
 function requiresOldPath(type: SyncChangeType): boolean {
