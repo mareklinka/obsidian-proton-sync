@@ -1,0 +1,454 @@
+import { Observable, Subject } from "rxjs";
+import type { EventRef, TAbstractFile, TFile, TFolder, Vault } from "obsidian";
+
+export type EntityType = "file" | "folder";
+
+export type ReaderChangeType =
+  | "file-created"
+  | "file-edited"
+  | "file-deleted"
+  | "file-moved"
+  | "folder-created"
+  | "folder-renamed"
+  | "folder-deleted"
+  | "folder-moved";
+
+export interface ReaderChangeEvent {
+  type: ReaderChangeType;
+  entityType: EntityType;
+  path: string;
+  oldPath?: string;
+  occurredAt: number;
+}
+
+export interface FileDescriptor {
+  name: string;
+  path: string;
+  modifiedAt: number;
+  content: Blob | ArrayBuffer;
+}
+
+export interface FileMetadataDescriptor {
+  name: string;
+  path: string;
+  modifiedAt: number;
+}
+
+export interface FolderDescriptor {
+  name: string;
+  path: string;
+}
+
+type VaultEventName = "create" | "modify" | "rename" | "delete";
+
+interface VaultAdapter {
+  getAbstractFileByPath(path: string): TAbstractFile | null;
+  getAllLoadedFiles(): TAbstractFile[];
+  readBinary(file: TFile): Promise<ArrayBuffer>;
+  on(name: VaultEventName, callback: (...args: unknown[]) => void): EventRef;
+  offref(ref: EventRef): void;
+}
+
+export interface FileSystemReaderOptions {
+  ignoredPathPrefixes?: string[];
+  ignorePredicate?: (path: string, entityType: EntityType) => boolean;
+  caseInsensitivePaths?: boolean;
+  now?: () => number;
+  binaryAsBlob?: boolean;
+  // Test seam; when omitted, real Vault is used.
+  vaultAdapter?: VaultAdapter;
+  isFile?: (entry: unknown) => entry is TFile;
+  isFolder?: (entry: unknown) => entry is TFolder;
+}
+
+export interface IFileSystemReaderService {
+  start(): void;
+  stop(): void;
+  dispose(): void;
+
+  readFile(path: string): Promise<FileDescriptor | null>;
+  readFolder(path: string): Promise<FolderDescriptor | null>;
+  exists(path: string, entityType: EntityType): Promise<boolean>;
+
+  listFilesMetadata(): Promise<FileMetadataDescriptor[]>;
+  listFolders(): Promise<FolderDescriptor[]>;
+
+  readonly changes$: Observable<ReaderChangeEvent>;
+}
+
+export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
+  public readonly changes$: Observable<ReaderChangeEvent>;
+
+  private readonly changesSubject = new Subject<ReaderChangeEvent>();
+  private readonly adapter: VaultAdapter;
+  private readonly now: () => number;
+  private readonly binaryAsBlob: boolean;
+  private readonly caseInsensitivePaths: boolean;
+  private readonly ignoredPrefixes: string[];
+  private readonly ignorePredicate?: (path: string, entityType: EntityType) => boolean;
+  private readonly isFileGuard: (entry: unknown) => entry is TFile;
+  private readonly isFolderGuard: (entry: unknown) => entry is TFolder;
+
+  private refs: EventRef[] = [];
+  private started = false;
+  private disposed = false;
+
+  constructor(
+    vault: Vault,
+    options: FileSystemReaderOptions = {},
+  ) {
+    this.adapter = options.vaultAdapter ?? (vault as unknown as VaultAdapter);
+    this.now = options.now ?? (() => Date.now());
+    this.binaryAsBlob = options.binaryAsBlob ?? false;
+    this.caseInsensitivePaths = options.caseInsensitivePaths ?? true;
+    this.ignoredPrefixes = (options.ignoredPathPrefixes ?? [])
+      .map((path) => this.normalizePath(path))
+      .filter((path) => path.length > 0);
+    this.ignorePredicate = options.ignorePredicate;
+    this.isFileGuard = options.isFile ?? ((entry: unknown): entry is TFile => isLikelyFile(entry));
+    this.isFolderGuard = options.isFolder ?? ((entry: unknown): entry is TFolder => isLikelyFolder(entry));
+
+    this.changes$ = this.changesSubject.asObservable();
+  }
+
+  start(): void {
+    if (this.disposed || this.started) {
+      return;
+    }
+
+    this.refs.push(this.adapter.on("create", (...args) => this.handleCreate(args[0])));
+    this.refs.push(this.adapter.on("modify", (...args) => this.handleModify(args[0])));
+    this.refs.push(this.adapter.on("rename", (...args) => this.handleRename(args[0], args[1])));
+    this.refs.push(this.adapter.on("delete", (...args) => this.handleDelete(args[0])));
+
+    this.started = true;
+  }
+
+  stop(): void {
+    if (!this.started) {
+      return;
+    }
+
+    for (const ref of this.refs) {
+      this.adapter.offref(ref);
+    }
+
+    this.refs = [];
+    this.started = false;
+  }
+
+  dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+
+    this.stop();
+    this.disposed = true;
+    this.changesSubject.complete();
+  }
+
+  async readFile(path: string): Promise<FileDescriptor | null> {
+    const normalizedPath = this.normalizePath(path);
+    if (!normalizedPath) {
+      return null;
+    }
+
+    const entry = this.adapter.getAbstractFileByPath(normalizedPath);
+    if (!entry || !this.isFileGuard(entry)) {
+      return null;
+    }
+
+    const bytes = await this.adapter.readBinary(entry);
+    const content: Blob | ArrayBuffer = this.binaryAsBlob
+      ? new Blob([bytes], { type: "application/octet-stream" })
+      : bytes;
+
+    return {
+      name: entry.name,
+      path: this.normalizePath(entry.path),
+      modifiedAt: entry.stat?.mtime ?? this.now(),
+      content,
+    };
+  }
+
+  async readFolder(path: string): Promise<FolderDescriptor | null> {
+    const normalizedPath = this.normalizePath(path);
+    if (!normalizedPath) {
+      return null;
+    }
+
+    const entry = this.adapter.getAbstractFileByPath(normalizedPath);
+    if (!entry || !this.isFolderGuard(entry)) {
+      return null;
+    }
+
+    return {
+      name: entry.name,
+      path: this.normalizePath(entry.path),
+    };
+  }
+
+  async exists(path: string, entityType: EntityType): Promise<boolean> {
+    const normalizedPath = this.normalizePath(path);
+    if (!normalizedPath) {
+      return false;
+    }
+
+    const entry = this.adapter.getAbstractFileByPath(normalizedPath);
+    if (!entry) {
+      return false;
+    }
+
+    if (entityType === "file") {
+      return this.isFileGuard(entry);
+    }
+
+    return this.isFolderGuard(entry);
+  }
+
+  async listFilesMetadata(): Promise<FileMetadataDescriptor[]> {
+    const entries = this.adapter.getAllLoadedFiles();
+    const files: FileMetadataDescriptor[] = [];
+
+    for (const entry of entries) {
+      if (!this.isFileGuard(entry)) {
+        continue;
+      }
+
+      const path = this.normalizePath(entry.path);
+      if (!path || this.isIgnored(path, "file")) {
+        continue;
+      }
+
+      files.push({
+        name: entry.name,
+        path,
+        modifiedAt: entry.stat?.mtime ?? this.now(),
+      });
+    }
+
+    return files;
+  }
+
+  async listFolders(): Promise<FolderDescriptor[]> {
+    const entries = this.adapter.getAllLoadedFiles();
+    const folders: FolderDescriptor[] = [];
+
+    for (const entry of entries) {
+      if (!this.isFolderGuard(entry)) {
+        continue;
+      }
+
+      const path = this.normalizePath(entry.path);
+      if (!path || this.isIgnored(path, "folder")) {
+        continue;
+      }
+
+      folders.push({
+        name: entry.name,
+        path,
+      });
+    }
+
+    return folders;
+  }
+
+  private handleCreate(rawEntry: unknown): void {
+    const event = this.mapCreateEvent(rawEntry);
+    if (event) {
+      this.changesSubject.next(event);
+    }
+  }
+
+  private handleModify(rawEntry: unknown): void {
+    const event = this.mapModifyEvent(rawEntry);
+    if (event) {
+      this.changesSubject.next(event);
+    }
+  }
+
+  private handleRename(rawEntry: unknown, oldPathRaw: unknown): void {
+    const event = this.mapRenameEvent(rawEntry, oldPathRaw);
+    if (event) {
+      this.changesSubject.next(event);
+    }
+  }
+
+  private handleDelete(rawEntry: unknown): void {
+    const event = this.mapDeleteEvent(rawEntry);
+    if (event) {
+      this.changesSubject.next(event);
+    }
+  }
+
+  private mapCreateEvent(rawEntry: unknown): ReaderChangeEvent | null {
+    if (this.isFileGuard(rawEntry)) {
+      return this.createEvent("file-created", "file", rawEntry.path);
+    }
+
+    if (this.isFolderGuard(rawEntry)) {
+      return this.createEvent("folder-created", "folder", rawEntry.path);
+    }
+
+    return null;
+  }
+
+  private mapModifyEvent(rawEntry: unknown): ReaderChangeEvent | null {
+    if (this.isFileGuard(rawEntry)) {
+      return this.createEvent("file-edited", "file", rawEntry.path);
+    }
+
+    return null;
+  }
+
+  private mapRenameEvent(rawEntry: unknown, oldPathRaw: unknown): ReaderChangeEvent | null {
+    if (typeof oldPathRaw !== "string" || oldPathRaw.trim().length === 0) {
+      return null;
+    }
+
+    const oldPath = this.normalizePath(oldPathRaw);
+    if (!oldPath) {
+      return null;
+    }
+
+    if (this.isFileGuard(rawEntry)) {
+      return this.createEvent("file-moved", "file", rawEntry.path, oldPath);
+    }
+
+    if (this.isFolderGuard(rawEntry)) {
+      const newPath = this.normalizePath(rawEntry.path);
+      if (!newPath || this.isIgnored(newPath, "folder")) {
+        return null;
+      }
+
+      const type = getParentPath(newPath) === getParentPath(oldPath)
+        ? "folder-renamed"
+        : "folder-moved";
+
+      return {
+        type,
+        entityType: "folder",
+        path: newPath,
+        oldPath,
+        occurredAt: this.now(),
+      };
+    }
+
+    return null;
+  }
+
+  private mapDeleteEvent(rawEntry: unknown): ReaderChangeEvent | null {
+    if (this.isFileGuard(rawEntry)) {
+      return this.createEvent("file-deleted", "file", rawEntry.path);
+    }
+
+    if (this.isFolderGuard(rawEntry)) {
+      return this.createEvent("folder-deleted", "folder", rawEntry.path);
+    }
+
+    return null;
+  }
+
+  private createEvent(
+    type: ReaderChangeType,
+    entityType: EntityType,
+    pathRaw: string,
+    oldPathRaw?: string,
+  ): ReaderChangeEvent | null {
+    const path = this.normalizePath(pathRaw);
+    const oldPath = oldPathRaw ? this.normalizePath(oldPathRaw) : undefined;
+
+    if (!path || this.isIgnored(path, entityType)) {
+      return null;
+    }
+
+    return {
+      type,
+      entityType,
+      path,
+      oldPath,
+      occurredAt: this.now(),
+    };
+  }
+
+  private isIgnored(path: string, entityType: EntityType): boolean {
+    const normalized = this.normalizePath(path);
+    if (!normalized) {
+      return false;
+    }
+
+    const canonical = this.toCanonicalKey(normalized);
+
+    for (const prefix of this.ignoredPrefixes) {
+      const canonicalPrefix = this.toCanonicalKey(prefix);
+      if (canonical === canonicalPrefix || canonical.startsWith(`${canonicalPrefix}/`)) {
+        return true;
+      }
+    }
+
+    return this.ignorePredicate?.(normalized, entityType) ?? false;
+  }
+
+  private normalizePath(path: string): string {
+    const cleaned = path
+      .trim()
+      .replace(/\\+/g, "/")
+      .replace(/\/+/g, "/")
+      .replace(/^\/+|\/+$/g, "");
+
+    return cleaned;
+  }
+
+  private toCanonicalKey(path: string): string {
+    const normalized = this.normalizePath(path);
+    return this.caseInsensitivePaths ? normalized.toLocaleLowerCase() : normalized;
+  }
+}
+
+function getParentPath(path: string): string {
+  const index = path.lastIndexOf("/");
+  if (index < 0) {
+    return "";
+  }
+
+  return path.slice(0, index);
+}
+
+function isLikelyFile(entry: unknown): entry is TFile {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+
+  const value = entry as {
+    path?: unknown;
+    name?: unknown;
+    stat?: unknown;
+    extension?: unknown;
+    children?: unknown;
+  };
+
+  return (
+    typeof value.path === "string" &&
+    typeof value.name === "string" &&
+    typeof value.extension === "string" &&
+    value.children === undefined
+  );
+}
+
+function isLikelyFolder(entry: unknown): entry is TFolder {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+
+  const value = entry as {
+    path?: unknown;
+    name?: unknown;
+    children?: unknown;
+  };
+
+  return (
+    typeof value.path === "string" &&
+    typeof value.name === "string" &&
+    Array.isArray(value.children)
+  );
+}
