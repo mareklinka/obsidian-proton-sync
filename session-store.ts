@@ -1,4 +1,5 @@
 import type { App } from 'obsidian';
+import { SALTED_PASSPHRASES_SECRET_KEY } from './proton-integration/domain/models';
 
 export interface ProtonSession {
   uid: string;
@@ -32,5 +33,6 @@ export async function saveSession(app: App, session: ProtonSession): Promise<voi
 }
 
 export async function clearSession(app: App): Promise<void> {
-  await app.secretStorage.setSecret(SESSION_STORAGE_KEY, '');
+  app.secretStorage.setSecret(SESSION_STORAGE_KEY, '');
+  app.secretStorage.setSecret(SALTED_PASSPHRASES_SECRET_KEY, '{}');
 }

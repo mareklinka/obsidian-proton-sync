@@ -40,7 +40,9 @@ type ProtonPublicKeyEntry = {
 };
 
 type ProtonPublicKeysResponse = {
-  Keys?: ProtonPublicKeyEntry[];
+  Address: {
+    Keys?: ProtonPublicKeyEntry[];
+  };
   IsProtonMail?: number | boolean;
 };
 
@@ -114,15 +116,8 @@ export class ProtonAccount implements ProtonDriveAccount {
 
   async hasProtonAccount(email: string): Promise<boolean> {
     const response = await this.fetchPublicKeysRaw(email);
-    if (typeof response.IsProtonMail === 'boolean') {
-      return response.IsProtonMail;
-    }
 
-    if (typeof response.IsProtonMail === 'number') {
-      return response.IsProtonMail !== 0;
-    }
-
-    return (response.Keys ?? []).length > 0;
+    return (response.Address?.Keys ?? []).length > 0;
   }
 
   async getPublicKeys(email: string): Promise<PublicKey[]> {
@@ -132,7 +127,7 @@ export class ProtonAccount implements ProtonDriveAccount {
     }
 
     const response = await this.fetchPublicKeysRaw(email);
-    const keys = response.Keys ?? [];
+    const keys = response?.Address?.Keys ?? [];
 
     const parsed = await Promise.all(
       keys.map(
