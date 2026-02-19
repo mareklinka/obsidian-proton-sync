@@ -1,13 +1,8 @@
 import { Notice, Plugin, TFolder } from "obsidian";
 
 import { ProtonDriveLoginModal } from "./login-modal";
-import { ProtonAuthService } from "./proton-auth";
 import { createProtonDriveClient } from "./proton-drive-client";
-import {
-  clearKeyPassphrase,
-  loadKeyPassphrase,
-  saveKeyPassphrase,
-} from "./key-passphrase-store";
+import { ProtonAuthService } from "./proton-auth";
 import {
   clearSession,
   loadSession,
@@ -26,15 +21,21 @@ import {
 } from "./logger";
 import { ensureSyncRoots } from "./sync-root";
 import { buildSyncEvent, SyncQueue } from "./sync-queue";
-import { ObsidianHttpClient } from "./ObsidianHttpClient";
-import { ProtonApiClient } from "./proton-api";
-import { computeKeyPasswordFromSalt } from "./proton-srp";
+import {
+  createProtonIntegration,
+  type SecretStore,
+  type SessionStore,
+  type ProtonIntegrationHandle,
+} from "./proton-integration/public";
+
+const PROTON_SALTED_PASSPHRASES_SECRET_KEY =
+  "proton-drive-sync-salted-passphrases";
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   settings!: ProtonDriveSyncSettings;
-  private authService!: ProtonAuthService;
+  private proton!: ProtonIntegrationHandle;
+  private secretStore!: SecretStore;
   private refreshIntervalId: number | null = null;
-  private currentSession: ProtonSession | null = null;
   private driveClient: ReturnType<typeof createProtonDriveClient> | null = null;
   private logger!: PluginLogger;
   private settingTab: ProtonDriveSyncSettingTab | null = null;
@@ -43,7 +44,6 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private syncQueue: SyncQueue | null = null;
 
   private static readonly REFRESH_INTERVAL_MS = 15 * 60 * 1000;
-  private static readonly REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -58,24 +58,42 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.logger.info("Loading Proton Drive Sync plugin", {
       version: this.manifest.version,
     });
-    this.authService = new ProtonAuthService(
+
+    this.secretStore = this.createSecretStore();
+    const authService = new ProtonAuthService(
       this.manifest.version,
       this.logger,
     );
 
-    const existingSession = await loadSession(this.app);
-    if (existingSession) {
-      this.logger.info("Loaded existing session", {
-        expiresAt: existingSession.expiresAt,
-      });
-      this.settings.connectionStatus = "connected";
-      this.settings.lastLoginAt = existingSession.updatedAt;
-      this.settings.lastRefreshAt = existingSession.lastRefreshAt;
-      this.settings.sessionExpiresAt = existingSession.expiresAt;
-      await this.saveSettings();
+    const sessionStore: SessionStore = {
+      load: () => loadSession(this.app),
+      save: (session: ProtonSession) => saveSession(this.app, session),
+      clear: () => clearSession(this.app),
+    };
 
+    this.proton = createProtonIntegration({
+      appVersion: this.manifest.version,
+      logger: this.logger,
+      sessionStore,
+      secretStore: this.secretStore,
+      authGateway: {
+        signIn: (credentials) =>
+          authService.signIn(
+            credentials.email,
+            credentials.password,
+            credentials.twoFactorCode ?? "",
+          ),
+        refresh: (session) => authService.refreshSession(session),
+      },
+    });
+
+    const restored = await this.proton.restoreFromStorage({
+      forceRefreshOnRestore: true,
+    });
+    await this.syncSettingsWithIntegration();
+
+    if (restored && this.proton.getSession()) {
       this.initializeDriveClient();
-      await this.refreshSessionIfNeeded(existingSession, true);
       this.startRefreshLoop();
       this.scheduleSyncRootDiscovery("startup");
     }
@@ -110,7 +128,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     email: string;
     password: string;
     mailboxPassword?: string;
-    twoFactorCode: string;
+    twoFactorCode?: string;
   }): Promise<void> {
     if (!credentials.email || !credentials.password) {
       new Notice("Email and password are required to connect.");
@@ -121,71 +139,44 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.logger.info("Starting sign-in flow", {
         email: maskEmail(credentials.email),
       });
-      this.settings.accountEmail = credentials.email.trim();
-      this.settings.connectionStatus = "pending";
-      this.settings.lastLoginAt = new Date().toISOString();
-      this.settings.lastLoginError = null;
-      await this.saveSettings();
+      await this.proton.signIn({
+        email: credentials.email.trim(),
+        password: credentials.password,
+        mailboxPassword: credentials.mailboxPassword,
+        twoFactorCode: credentials.twoFactorCode,
+      });
 
-      const authResult = await this.authService.signIn(
-        credentials.email.trim(),
-        credentials.password,
-        credentials.twoFactorCode,
-      );
-
-      if (authResult.passwordMode === 2 && !credentials.mailboxPassword) {
-        throw new Error("Mailbox password required for this Proton account.");
-      }
-
-      const session = authResult.session;
-
-      await saveSession(this.app, session);
-      this.currentSession = session;
-
-      this.settings.connectionStatus = "connected";
-      this.settings.lastLoginAt = session.updatedAt;
-      this.settings.lastRefreshAt = session.lastRefreshAt;
-      this.settings.sessionExpiresAt = session.expiresAt;
-      this.settings.lastLoginError = null;
-      await this.saveSettings();
-
-      this.app.secretStorage.setSecret(
-        "proton-drive-sync-salted-passphrases",
-        JSON.stringify(await this.deriveSaltedPassphrases(this.getBasePassword(credentials))),
-      );
+      await this.syncSettingsWithIntegration();
       this.initializeDriveClient();
 
       this.scheduleSyncRootDiscovery("sign-in");
 
       this.startRefreshLoop();
 
-      this.logger.info("Sign-in successful", { expiresAt: session.expiresAt });
+      this.logger.info("Sign-in successful", {
+        expiresAt: this.proton.getSession()?.expiresAt,
+      });
 
       new Notice("Connected to Proton Drive.");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Login failed.";
+      await this.syncSettingsWithIntegration();
+      const integrationError = this.proton.getStatus().lastError;
+      const message =
+        integrationError ||
+        (error instanceof Error ? error.message : "Login failed.");
       this.logger.error(
         "Sign-in failed",
         { email: maskEmail(credentials.email) },
         error,
       );
-      this.settings.connectionStatus = "error";
-      this.settings.lastLoginError = message;
-      await this.saveSettings();
       new Notice(message);
     }
   }
 
   async disconnect(): Promise<void> {
     this.logger.info("Disconnecting from Proton Drive");
-    this.settings.connectionStatus = "disconnected";
-    this.settings.lastLoginError = null;
-    this.settings.lastRefreshAt = null;
-    this.settings.sessionExpiresAt = null;
-    await this.saveSettings();
-    await clearSession(this.app);
-    await clearKeyPassphrase(this.app);
-    this.currentSession = null;
+    await this.proton.disconnect();
+    await this.syncSettingsWithIntegration();
     this.driveClient = null;
     this.stopRefreshLoop();
     new Notice("Disconnected from Proton Drive.");
@@ -211,89 +202,33 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   private async refreshSessionOnInterval(): Promise<void> {
-    const session = await loadSession(this.app);
-    if (!session) {
-      return;
-    }
+    const refreshed = await this.proton.refreshIfNeeded(false);
+    await this.syncSettingsWithIntegration();
 
-    await this.refreshSessionIfNeeded(session, false);
-  }
-
-  private async refreshSessionIfNeeded(
-    session: Awaited<ReturnType<typeof loadSession>>,
-    force: boolean,
-  ): Promise<void> {
-    if (!session) {
-      return;
-    }
-
-    const expiresAt = new Date(session.expiresAt).getTime();
-    const now = Date.now();
-    const timeToExpiry = expiresAt - now;
-
-    if (!force && timeToExpiry > ProtonDriveSyncPlugin.REFRESH_THRESHOLD_MS) {
-      return;
-    }
-
-    try {
-      this.logger.debug("Refreshing session", {
-        force,
-        timeToExpiryMs: timeToExpiry,
-      });
-
-      const refreshed = await this.authService.refreshSession(session);
-      await saveSession(this.app, refreshed);
-      this.settings.connectionStatus = "connected";
-      this.settings.lastRefreshAt = refreshed.lastRefreshAt;
-      this.settings.sessionExpiresAt = refreshed.expiresAt;
-      this.settings.lastLoginError = null;
-      await this.saveSettings();
-
-      this.currentSession = refreshed;
-      if (!this.driveClient) {
-        this.initializeDriveClient();
+    if (!refreshed) {
+      const status = this.proton.getStatus();
+      if (status.state === "error") {
+        this.driveClient = null;
+        this.stopRefreshLoop();
+        if (status.lastError) {
+          new Notice(status.lastError);
+        }
       }
-
-      this.scheduleSyncRootDiscovery("refresh");
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Session refresh failed.";
-      this.logger.error("Session refresh failed", { force }, error);
-      this.settings.connectionStatus = "error";
-      this.settings.lastLoginError = message;
-      await this.saveSettings();
-      await clearSession(this.app);
-      this.currentSession = null;
-      this.driveClient = null;
-      this.stopRefreshLoop();
-      new Notice(message);
+      return;
     }
+
+    if (!this.driveClient) {
+      this.initializeDriveClient();
+    }
+
+    this.scheduleSyncRootDiscovery("refresh");
   }
 
-  private async deriveSaltedPassphrases(
-    password: string,
-  ): Promise<Record<string, string>> {
-    const apiClient = new ProtonApiClient(
-      () => this.currentSession,
-      this.manifest.version,
-      "https://mail.proton.me/api",
-      this.logger,
-    );
-
-    const salts = await getKeySalts(apiClient, this.logger);
-    var saltedPasshphrases = deriveKeyPassphrasesFromSalts(password, salts);
-
-    return saltedPasshphrases;
-  }
-
-  private async initializeDriveClient(): Promise<void> {
+  private initializeDriveClient(): void {
+    const sessionProvider = () => this.proton.getSession();
     this.driveClient = createProtonDriveClient(
-      () => this.currentSession,
-      JSON.parse(
-        this.app.secretStorage.getSecret(
-          "proton-drive-sync-salted-passphrases",
-        ) || "{}",
-      ) as Record<string, string>,
+      sessionProvider,
+      this.loadSaltedPassphrases(),
       this.manifest.version,
       this.logger,
     );
@@ -387,11 +322,71 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     }
   }
 
-  private getBasePassword(credentials: {
-    password: string;
-    mailboxPassword?: string;
-  }): string {
-    return credentials.mailboxPassword?.trim() || credentials.password;
+  private loadSaltedPassphrases(): Record<string, string> {
+    try {
+      const raw = this.secretStore.get(PROTON_SALTED_PASSPHRASES_SECRET_KEY);
+      if (!raw) {
+        return {};
+      }
+
+      return JSON.parse(raw) as Record<string, string>;
+    } catch {
+      return {};
+    }
+  }
+
+  private createSecretStore(): SecretStore {
+    const cache = new Map<string, string>();
+
+    const getSecret = this.app.secretStorage.getSecret.bind(
+      this.app.secretStorage,
+    ) as (key: string) => string | Promise<string>;
+    const setSecret = this.app.secretStorage.setSecret.bind(
+      this.app.secretStorage,
+    ) as (key: string, value: string) => void | Promise<void>;
+
+    return {
+      get: (key: string): string | null => {
+        if (cache.has(key)) {
+          return cache.get(key) ?? null;
+        }
+
+        const value = getSecret(key);
+        if (typeof value === "string") {
+          cache.set(key, value);
+          return value || null;
+        }
+
+        void value.then((resolved) => {
+          cache.set(key, resolved ?? "");
+        });
+        return null;
+      },
+      set: (key: string, value: string): void => {
+        cache.set(key, value);
+        void setSecret(key, value);
+      },
+      clear: (key: string): void => {
+        cache.delete(key);
+        void setSecret(key, "");
+      },
+    };
+  }
+
+  private async syncSettingsWithIntegration(): Promise<void> {
+    const status = this.proton.getStatus();
+    const session = this.proton.getSession();
+
+    this.settings.accountEmail =
+      status.accountEmail ?? this.settings.accountEmail;
+    this.settings.connectionStatus = status.state;
+    this.settings.lastLoginError = status.lastError ?? null;
+    this.settings.lastLoginAt = session?.updatedAt ?? this.settings.lastLoginAt;
+    this.settings.lastRefreshAt = session?.lastRefreshAt ?? null;
+    this.settings.sessionExpiresAt =
+      status.expiresAt ?? session?.expiresAt ?? null;
+
+    await this.saveSettings();
   }
 
   async loadSettings(): Promise<void> {
@@ -422,60 +417,4 @@ function maskEmail(email: string): string {
       ? user[0] + "***"
       : `${user[0]}***${user[user.length - 1]}`;
   return `${visible}@${domain}`;
-}
-
-type ProtonKeySaltEntry = {
-  ID?: string;
-  KeySalt?: string;
-};
-
-type ProtonKeySaltsResponse = {
-  KeySalts?: ProtonKeySaltEntry[];
-};
-
-async function getKeySalts(
-  apiClient: ProtonApiClient,
-  logger?: PluginLogger,
-): Promise<Map<string, string>> {
-  try {
-    const response = await apiClient.getJson<ProtonKeySaltsResponse>(
-      "/core/v4/keys/salts",
-    );
-
-    const entries = response.KeySalts ?? [];
-    const map = new Map<string, string>();
-
-    for (const entry of entries) {
-      if (!entry.ID || !entry.KeySalt) {
-        continue;
-      }
-
-      map.set(entry.ID, entry.KeySalt);
-    }
-
-    return map;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.toLowerCase().includes("scope")) {
-      logger?.warn(
-        "Key salts unavailable due to missing scope; falling back to address key salts if present.",
-      );
-
-      return new Map<string, string>();
-    }
-
-    throw error;
-  }
-}
-
-function deriveKeyPassphrasesFromSalts(
-  passphrase: string,
-  keySalts: Map<string, string>,
-) {
-  const result: Record<string, string> = {};
-  for (const [keyId, keySalt] of keySalts.entries()) {
-    result[keyId] = computeKeyPasswordFromSalt(passphrase, keySalt);
-  }
-
-  return result;
 }
