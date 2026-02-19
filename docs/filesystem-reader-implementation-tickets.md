@@ -14,9 +14,11 @@ This document translates `docs/filesystem-reader-prd.md` into atomic implementat
 ## Ticket FR-01 — Create service skeleton and types
 
 ### Objective
+
 Create the isolated service file and all public types/interfaces required by the PRD.
 
 ### Scope
+
 - Add file: `isolated-sync/ObsidianVaultFileSystemReader.ts`
 - Define and export:
   - `EntityType`
@@ -30,10 +32,12 @@ Create the isolated service file and all public types/interfaces required by the
   - class `ObsidianVaultFileSystemReader`
 
 ### Notes
+
 - `changes$` should be present as observable, even if initially no event wiring logic.
 - Constructor should accept `vault: Vault` and `options?`.
 
 ### Acceptance criteria
+
 - File compiles.
 - All types and class signatures match PRD.
 
@@ -42,9 +46,11 @@ Create the isolated service file and all public types/interfaces required by the
 ## Ticket FR-02 — Implement path helpers and ignore policy
 
 ### Objective
+
 Implement minimal helper logic for normalization and ignore filtering.
 
 ### Scope
+
 - Add internal helpers:
   - `normalizePath(path: string): string`
   - canonical key helper (case-insensitive option)
@@ -55,6 +61,7 @@ Implement minimal helper logic for normalization and ignore filtering.
   - case-insensitive true
 
 ### Acceptance criteria
+
 - Unit tests cover path normalization and ignore decision matrix.
 - Ignore defaults do not suppress events/reads.
 
@@ -63,9 +70,11 @@ Implement minimal helper logic for normalization and ignore filtering.
 ## Ticket FR-03 — Implement read methods
 
 ### Objective
+
 Provide file/folder read and existence APIs using Vault.
 
 ### Scope
+
 - Implement:
   - `readFile(path)`
   - `readFolder(path)`
@@ -77,6 +86,7 @@ Provide file/folder read and existence APIs using Vault.
 - Return `null` when path is missing or wrong type.
 
 ### Acceptance criteria
+
 - Tests validate:
   - text file descriptor
   - binary file descriptor
@@ -89,15 +99,18 @@ Provide file/folder read and existence APIs using Vault.
 ## Ticket FR-04 — Implement snapshot listing methods
 
 ### Objective
+
 Expose bootstrap/reconciliation list APIs.
 
 ### Scope
+
 - Implement:
   - `listFilesMetadata()` using `vault.getAllLoadedFiles()` + `TFile` filter
   - `listFolders()` using `vault.getAllLoadedFiles()` + `TFolder` filter
 - Apply ignore filtering.
 
 ### Acceptance criteria
+
 - Tests verify listing accuracy, type filtering, and ignore behavior.
 
 ---
@@ -105,9 +118,11 @@ Expose bootstrap/reconciliation list APIs.
 ## Ticket FR-05 — Add lifecycle management
 
 ### Objective
+
 Implement idempotent lifecycle (`start`, `stop`, `dispose`) and event stream completion.
 
 ### Scope
+
 - Internal state flags:
   - started/running
   - disposed
@@ -119,6 +134,7 @@ Implement idempotent lifecycle (`start`, `stop`, `dispose`) and event stream com
   - stop, mark terminal, complete stream
 
 ### Acceptance criteria
+
 - Tests verify:
   - `start()` idempotency
   - `stop()` idempotency
@@ -130,9 +146,11 @@ Implement idempotent lifecycle (`start`, `stop`, `dispose`) and event stream com
 ## Ticket FR-06 — Implement Vault event mapping
 
 ### Objective
+
 Map raw Vault events to normalized reader change events.
 
 ### Scope
+
 - Handle events:
   - `create`
   - `modify`
@@ -150,6 +168,7 @@ Map raw Vault events to normalized reader change events.
 - Include `occurredAt` from injected `now()`.
 
 ### Acceptance criteria
+
 - Unit tests for all mapping permutations, especially rename classification.
 
 ---
@@ -157,14 +176,17 @@ Map raw Vault events to normalized reader change events.
 ## Ticket FR-07 — Error handling hardening
 
 ### Objective
+
 Ensure malformed inputs/events do not crash service.
 
 ### Scope
+
 - Guard invalid/empty paths.
 - Guard unexpected event payloads.
 - Ensure handler exceptions don’t break future emissions.
 
 ### Acceptance criteria
+
 - Tests assert graceful handling of malformed payload cases.
 
 ---
@@ -172,9 +194,11 @@ Ensure malformed inputs/events do not crash service.
 ## Ticket FR-08 — Add dedicated test harness for Vault adapter
 
 ### Objective
+
 Make tests deterministic without Obsidian runtime.
 
 ### Scope
+
 - Add test-only fake adapter or mocked Vault wrapper to simulate:
   - file tree lookup
   - text/binary reads
@@ -183,6 +207,7 @@ Make tests deterministic without Obsidian runtime.
 - Keep this harness lightweight and reusable.
 
 ### Acceptance criteria
+
 - All service tests run in Node test environment without Obsidian app runtime.
 
 ---
@@ -190,15 +215,18 @@ Make tests deterministic without Obsidian runtime.
 ## Ticket FR-09 — Coverage and quality gate
 
 ### Objective
+
 Meet quality target and verify build/test stability.
 
 ### Scope
+
 - Run:
   - `npm test`
   - `npm run test:coverage`
 - Ensure service file coverage target is met (>= 90% lines/branches).
 
 ### Acceptance criteria
+
 - Coverage report demonstrates target for reader service file.
 - Tests all pass.
 

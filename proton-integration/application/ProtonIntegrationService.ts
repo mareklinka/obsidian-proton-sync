@@ -1,26 +1,22 @@
-import type { ProtonApiClient } from "../../proton-api";
-import type { ProtonSession } from "../../session-store";
-import {
-  NoSessionError,
-  SessionRefreshError,
-  toSafeError,
-} from "../domain/errors";
-import { OPERATION_PREFIX } from "../domain/models";
-import { redactMeta, sanitizeErrorMessage } from "../domain/redaction";
-import { defaultProtonApiClientFactory } from "../infrastructure/ProtonApiClientFactory";
+import type { ProtonApiClient } from '../../proton-api';
+import type { ProtonSession } from '../../session-store';
+import { NoSessionError, SessionRefreshError, toSafeError } from '../domain/errors';
+import { OPERATION_PREFIX } from '../domain/models';
+import { redactMeta, sanitizeErrorMessage } from '../domain/redaction';
+import { defaultProtonApiClientFactory } from '../infrastructure/ProtonApiClientFactory';
 import type {
   CreateProtonIntegration,
   ProtonBootstrapOptions,
   ProtonIntegrationDeps,
   ProtonIntegrationHandle,
-  ProtonIntegrationStatus,
-} from "../public/types";
-import { runLoginFlow } from "./LoginFlow";
-import { runRestoreFlow } from "./RestoreFlow";
-import { SessionLifecycle } from "./SessionLifecycle";
+  ProtonIntegrationStatus
+} from '../public/types';
+import { runLoginFlow } from './LoginFlow';
+import { runRestoreFlow } from './RestoreFlow';
+import { SessionLifecycle } from './SessionLifecycle';
 
 export const createProtonIntegration: CreateProtonIntegration = (
-  deps: ProtonIntegrationDeps,
+  deps: ProtonIntegrationDeps
 ): ProtonIntegrationHandle => {
   const logger = deps.logger;
   const clock = deps.clock ?? { now: () => Date.now() };
@@ -28,20 +24,13 @@ export const createProtonIntegration: CreateProtonIntegration = (
 
   let session: ProtonSession | null = null;
   let apiClient: ProtonApiClient | null = null;
-  let status: ProtonIntegrationStatus = { state: "disconnected" };
+  let status: ProtonIntegrationStatus = { state: 'disconnected' };
 
   const apiClientFactory = deps.apiClientFactory ?? defaultProtonApiClientFactory;
 
-  const setStatus = (
-    next: ProtonIntegrationStatus,
-    event: string,
-    meta?: Record<string, unknown>,
-  ): void => {
+  const setStatus = (next: ProtonIntegrationStatus, event: string, meta?: Record<string, unknown>): void => {
     status = next;
-    logger.info(
-      `Integration state changed: ${event}`,
-      redactMeta({ nextState: next.state, ...meta }),
-    );
+    logger.info(`Integration state changed: ${event}`, redactMeta({ nextState: next.state, ...meta }));
   };
 
   const ensureApiClient = (): ProtonApiClient => {
@@ -49,38 +38,30 @@ export const createProtonIntegration: CreateProtonIntegration = (
       apiClient = apiClientFactory({
         appVersion: deps.appVersion,
         logger,
-        getSession: () => session,
+        getSession: () => session
       });
     }
 
     return apiClient;
   };
 
-  const failWithStatus = (
-    source: string,
-    error: unknown,
-    extraMeta?: Record<string, unknown>,
-  ): void => {
+  const failWithStatus = (source: string, error: unknown, extraMeta?: Record<string, unknown>): void => {
     const safeError = toSafeError(error);
     const message = sanitizeErrorMessage(safeError.message);
 
     status = {
-      state: "error",
+      state: 'error',
       accountEmail: status.accountEmail,
       expiresAt: session?.expiresAt,
-      lastError: message,
+      lastError: message
     };
 
-    logger.error(
-      `${source} failed`,
-      redactMeta({ ...extraMeta, message, state: status.state }),
-      safeError,
-    );
+    logger.error(`${source} failed`, redactMeta({ ...extraMeta, message, state: status.state }), safeError);
   };
 
   const nextOperationId = (operation: string): string => {
     const random =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `${Math.floor(Math.random() * 1_000_000)}`;
     return `${OPERATION_PREFIX}:${operation}:${random}`;
@@ -100,14 +81,14 @@ export const createProtonIntegration: CreateProtonIntegration = (
     },
 
     async signIn(credentials): Promise<void> {
-      const correlationId = nextOperationId("signin");
+      const correlationId = nextOperationId('signin');
       setStatus(
         {
-          state: "pending",
-          accountEmail: credentials.email.trim(),
+          state: 'pending',
+          accountEmail: credentials.email.trim()
         },
-        "signin-start",
-        { correlationId, email: credentials.email },
+        'signin-start',
+        { correlationId, email: credentials.email }
       );
 
       try {
@@ -116,38 +97,38 @@ export const createProtonIntegration: CreateProtonIntegration = (
           authGateway: deps.authGateway,
           sessionStore: deps.sessionStore,
           secretStore: deps.secretStore,
-          createApiClient: (resolved) =>
+          createApiClient: resolved =>
             apiClientFactory({
               appVersion: deps.appVersion,
               logger,
-              getSession: () => resolved,
+              getSession: () => resolved
             }),
           logger,
-          correlationId,
+          correlationId
         });
 
         session = resolvedSession;
         ensureApiClient();
         setStatus(
           {
-            state: "connected",
+            state: 'connected',
             accountEmail: credentials.email.trim(),
-            expiresAt: resolvedSession.expiresAt,
+            expiresAt: resolvedSession.expiresAt
           },
-          "signin-success",
-          { correlationId, expiresAt: resolvedSession.expiresAt },
+          'signin-success',
+          { correlationId, expiresAt: resolvedSession.expiresAt }
         );
       } catch (error) {
-        failWithStatus("Sign-in", error, { correlationId });
-        throw new Error(status.lastError ?? "Login failed.");
+        failWithStatus('Sign-in', error, { correlationId });
+        throw new Error(status.lastError ?? 'Login failed.');
       }
     },
 
     async restoreFromStorage(options?: ProtonBootstrapOptions): Promise<boolean> {
-      const correlationId = nextOperationId("restore");
+      const correlationId = nextOperationId('restore');
       logger.info(
-        "Restore operation started",
-        redactMeta({ correlationId, forceRefreshOnRestore: options?.forceRefreshOnRestore }),
+        'Restore operation started',
+        redactMeta({ correlationId, forceRefreshOnRestore: options?.forceRefreshOnRestore })
       );
 
       try {
@@ -156,7 +137,7 @@ export const createProtonIntegration: CreateProtonIntegration = (
           authGateway: deps.authGateway,
           forceRefreshOnRestore: options?.forceRefreshOnRestore ?? true,
           logger,
-          correlationId,
+          correlationId
         });
 
         session = resolvedSession;
@@ -164,19 +145,19 @@ export const createProtonIntegration: CreateProtonIntegration = (
 
         setStatus(
           {
-            state: "connected",
+            state: 'connected',
             accountEmail: status.accountEmail,
-            expiresAt: resolvedSession.expiresAt,
+            expiresAt: resolvedSession.expiresAt
           },
-          "restore-success",
-          { correlationId, expiresAt: resolvedSession.expiresAt },
+          'restore-success',
+          { correlationId, expiresAt: resolvedSession.expiresAt }
         );
 
         return true;
       } catch (error) {
         if (error instanceof NoSessionError) {
-          setStatus({ state: "disconnected" }, "restore-no-session", {
-            correlationId,
+          setStatus({ state: 'disconnected' }, 'restore-no-session', {
+            correlationId
           });
           return false;
         }
@@ -185,31 +166,31 @@ export const createProtonIntegration: CreateProtonIntegration = (
         apiClient = null;
 
         if (error instanceof SessionRefreshError) {
-          setStatus({ state: "disconnected" }, "restore-refresh-invalid", {
-            correlationId,
+          setStatus({ state: 'disconnected' }, 'restore-refresh-invalid', {
+            correlationId
           });
           return false;
         }
 
-        failWithStatus("Restore", error, { correlationId });
+        failWithStatus('Restore', error, { correlationId });
         return false;
       }
     },
 
     async refreshIfNeeded(force = false): Promise<boolean> {
-      const correlationId = nextOperationId("refresh");
+      const correlationId = nextOperationId('refresh');
       if (!session) {
-        logger.debug("Refresh skipped - no session", redactMeta({ correlationId }));
+        logger.debug('Refresh skipped - no session', redactMeta({ correlationId }));
         return false;
       }
 
       if (!lifecycle.shouldRefresh(session, force)) {
         logger.debug(
-          "Refresh skipped - threshold not reached",
+          'Refresh skipped - threshold not reached',
           redactMeta({
             correlationId,
-            timeToExpiryMs: lifecycle.timeToExpiryMs(session),
-          }),
+            timeToExpiryMs: lifecycle.timeToExpiryMs(session)
+          })
         );
         return true;
       }
@@ -223,15 +204,15 @@ export const createProtonIntegration: CreateProtonIntegration = (
 
         setStatus(
           {
-            state: "connected",
+            state: 'connected',
             accountEmail: status.accountEmail,
-            expiresAt: refreshed.expiresAt,
+            expiresAt: refreshed.expiresAt
           },
-          "refresh-success",
+          'refresh-success',
           {
             correlationId,
-            expiresAt: refreshed.expiresAt,
-          },
+            expiresAt: refreshed.expiresAt
+          }
         );
 
         return true;
@@ -240,24 +221,24 @@ export const createProtonIntegration: CreateProtonIntegration = (
         session = null;
         apiClient = null;
 
-        failWithStatus("Refresh", error, { correlationId });
+        failWithStatus('Refresh', error, { correlationId });
         return false;
       }
     },
 
     async disconnect(): Promise<void> {
-      const correlationId = nextOperationId("disconnect");
-      logger.info("Disconnect operation started", redactMeta({ correlationId }));
+      const correlationId = nextOperationId('disconnect');
+      logger.info('Disconnect operation started', redactMeta({ correlationId }));
 
       await deps.sessionStore.clear();
-      deps.secretStore.clear("proton-drive-sync-key-passphrase");
-      deps.secretStore.clear("proton-drive-sync-salted-passphrases");
+      deps.secretStore.clear('proton-drive-sync-key-passphrase');
+      deps.secretStore.clear('proton-drive-sync-salted-passphrases');
 
       session = null;
       apiClient = null;
-      setStatus({ state: "disconnected" }, "disconnect-success", {
-        correlationId,
+      setStatus({ state: 'disconnected' }, 'disconnect-success', {
+        correlationId
       });
-    },
+    }
   };
 };

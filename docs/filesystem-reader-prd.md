@@ -5,6 +5,7 @@
 This document specifies a **simple, testable file system reader service** for an Obsidian plugin.
 
 The service is responsible for:
+
 - reading file/folder metadata and file content through `Vault` APIs,
 - emitting normalized file-system change events based on `Vault` events,
 - exposing snapshot APIs (`listFiles`, `listFolders`) for bootstrap/reconciliation,
@@ -54,6 +55,7 @@ No other dependency is required for v1.
 ### 5.1 Read APIs
 
 The service must provide:
+
 - `readFile(path)` -> returns file descriptor (name, path, modifiedAt, content) or `null`.
 - `readFolder(path)` -> returns folder descriptor (name, path) or `null`.
 - `exists(path, entityType)` -> boolean.
@@ -63,10 +65,12 @@ File content output type must be `Blob | ArrayBuffer` (ArrayBuffer recommended f
 ### 5.2 Snapshot APIs
 
 The service must provide:
+
 - `listFiles()` -> complete list of readable file descriptors (or metadata-only variant + opt-in content loading).
 - `listFolders()` -> complete list of folder descriptors.
 
 For simplicity/performance, v1 should expose:
+
 - `listFilesMetadata()` (name, path, modifiedAt)
 - `listFolders()`
 
@@ -77,12 +81,14 @@ and keep full-content file reads to `readFile(path)`.
 Service must subscribe to Vault events and emit normalized domain events.
 
 Required events to handle:
+
 - create
 - modify
 - rename
 - delete
 
 Mapping expectations:
+
 - file create -> `file-created`
 - file modify -> `file-edited`
 - file delete -> `file-deleted`
@@ -96,6 +102,7 @@ Mapping expectations:
 ### 5.4 Delete payload rule
 
 For delete events, emit only:
+
 - normalized path,
 - entity type,
 - timestamp,
@@ -121,6 +128,7 @@ No content lookup or cache dependency is required for deletes.
 ### 5.7 Lifecycle
 
 Service must support:
+
 - `start()` (register listeners, idempotent)
 - `stop()` (unregister listeners, idempotent)
 - `dispose()` (terminal stop + complete streams)
@@ -132,17 +140,17 @@ Events must not emit when stopped/disposed.
 ## 6) Data Contracts
 
 ```ts
-export type EntityType = "file" | "folder";
+export type EntityType = 'file' | 'folder';
 
 export type ReaderChangeType =
-  | "file-created"
-  | "file-edited"
-  | "file-deleted"
-  | "file-moved"
-  | "folder-created"
-  | "folder-renamed"
-  | "folder-deleted"
-  | "folder-moved";
+  | 'file-created'
+  | 'file-edited'
+  | 'file-deleted'
+  | 'file-moved'
+  | 'folder-created'
+  | 'folder-renamed'
+  | 'folder-deleted'
+  | 'folder-moved';
 
 export interface ReaderChangeEvent {
   type: ReaderChangeType;
@@ -176,7 +184,7 @@ export interface FolderDescriptor {
 ## 7) Service Interface
 
 ```ts
-import type { Observable } from "rxjs";
+import type { Observable } from 'rxjs';
 
 export interface FileSystemReaderOptions {
   ignoredPathPrefixes?: string[];
@@ -255,7 +263,7 @@ interface VaultAdapter {
   getAllLoadedFiles(): TAbstractFile[];
   read(file: TFile): Promise<string>;
   readBinary(file: TFile): Promise<ArrayBuffer>;
-  on(name: "create" | "modify" | "rename" | "delete", cb: (...args: any[]) => void): EventRef;
+  on(name: 'create' | 'modify' | 'rename' | 'delete', cb: (...args: any[]) => void): EventRef;
   offref(ref: EventRef): void;
 }
 ```
@@ -305,22 +313,22 @@ Production class may wrap real `Vault`; tests inject fake adapter.
 ## 13) Usage Example
 
 ```ts
-import { ObsidianVaultFileSystemReader } from "./ObsidianVaultFileSystemReader";
+import { ObsidianVaultFileSystemReader } from './ObsidianVaultFileSystemReader';
 
 const reader = new ObsidianVaultFileSystemReader(this.app.vault, {
   ignoredPathPrefixes: [],
   caseInsensitivePaths: true,
-  binaryAsBlob: false,
+  binaryAsBlob: false
 });
 
 reader.start();
 
-const sub = reader.changes$.subscribe((event) => {
+const sub = reader.changes$.subscribe(event => {
   // Forward to sync service enqueue
   // syncService.enqueueChange(event)
 });
 
-const file = await reader.readFile("notes/today.md");
+const file = await reader.readFile('notes/today.md');
 if (file) {
   // file.content -> ArrayBuffer (or Blob if configured)
 }
@@ -346,6 +354,7 @@ reader.dispose();
 ## 15) Open decisions for implementation (none blocking)
 
 Resolved for v1:
+
 - Event shape: normalized domain events.
 - Bootstrap API: include file/folder listing.
 - Delete payload: path + type + timestamp only.
@@ -356,6 +365,7 @@ Resolved for v1:
 ## 16) Done Definition
 
 Implementation is done when:
+
 - class compiles,
 - required unit tests pass,
 - coverage target is met,

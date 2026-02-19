@@ -54,13 +54,7 @@ export async function buildSrpProofs(
   const saltBytes = decodeBase64(authInfo.Salt);
   const serverEphemeralBytes = decodeBase64(authInfo.ServerEphemeral);
 
-  const hashedPassword = hashPassword(
-    authInfo.Version,
-    username,
-    password,
-    saltBytes,
-    modulusBytes
-  );
+  const hashedPassword = hashPassword(authInfo.Version, username, password, saltBytes, modulusBytes);
 
   return generateProofs(modulusBytes, serverEphemeralBytes, hashedPassword);
 }
@@ -71,7 +65,7 @@ export async function buildSrpProofsFromParams(
   serverEphemeral: string,
   salt: string,
   password: string,
-  username?: string,
+  username?: string
 ): Promise<ProtonSrpProofsBase64> {
   const modulusBytes = await decodeModulus(modulus);
   const saltBytes = decodeBase64(salt);
@@ -81,13 +75,7 @@ export async function buildSrpProofsFromParams(
     throw new Error('Username is required for legacy SRP versions');
   }
 
-  const hashedPassword = hashPassword(
-    authVersion,
-    username ?? '',
-    password,
-    saltBytes,
-    modulusBytes
-  );
+  const hashedPassword = hashPassword(authVersion, username ?? '', password, saltBytes, modulusBytes);
 
   const proofs = generateProofs(modulusBytes, serverEphemeralBytes, hashedPassword);
 
@@ -156,19 +144,14 @@ function hashPasswordVersion1(password: string, username: string, modulus: Uint8
 }
 
 function hashPasswordVersion0(password: string, username: string, modulus: Uint8Array): Uint8Array {
-  const userAndPass = Buffer.concat([
-    Buffer.from(username.toLowerCase()),
-    Buffer.from(password)
-  ]);
+  const userAndPass = Buffer.concat([Buffer.from(username.toLowerCase()), Buffer.from(password)]);
   const prehashed = sha512(userAndPass);
   const prehashedB64 = Buffer.from(prehashed).toString('base64');
   return hashPasswordVersion1(prehashedB64, username, modulus);
 }
 
 function cleanUserName(userName: string): string {
-  return userName
-    .replace(/[-._]/g, '')
-    .toLowerCase();
+  return userName.replace(/[-._]/g, '').toLowerCase();
 }
 
 function expandHash(data: Buffer): Uint8Array {
@@ -193,7 +176,7 @@ function bcryptBase64Encode(input: Uint8Array): string {
       break;
     }
 
-    let c2 = input[index++];
+    const c2 = input[index++];
     c1 |= (c2 >> 4) & 0x0f;
     output += BCRYPT_BASE64_ALPHABET[c1 & 0x3f];
     c1 = (c2 & 0x0f) << 2;
@@ -300,10 +283,9 @@ function generateProofs(
   const clientEphemeral = modPow(generator, clientSecret, modulus);
   const clientEphemeralBytes = fromBigIntLE(bitLength, clientEphemeral);
 
-  let scramblingParam = toBigIntLE(expandHash(Buffer.concat([
-    Buffer.from(clientEphemeralBytes),
-    Buffer.from(serverEphemeralBytes)
-  ])));
+  let scramblingParam = toBigIntLE(
+    expandHash(Buffer.concat([Buffer.from(clientEphemeralBytes), Buffer.from(serverEphemeralBytes)]))
+  );
 
   if (scramblingParam === 0n) {
     scramblingParam = 1n;
@@ -311,30 +293,20 @@ function generateProofs(
 
   const multiplier = computeMultiplier(bitLength, generator, modulus);
   const gx = modPow(generator, hashedPasswordInt, modulus);
-  const base = mod(
-    serverEphemeral - (multiplier * gx),
-    modulus
-  );
+  const base = mod(serverEphemeral - multiplier * gx, modulus);
 
-  const exponent = mod(
-    clientSecret + (scramblingParam * hashedPasswordInt),
-    modulus - 1n
-  );
+  const exponent = mod(clientSecret + scramblingParam * hashedPasswordInt, modulus - 1n);
 
   const sharedSecret = modPow(base, exponent, modulus);
   const sharedSession = fromBigIntLE(bitLength, sharedSecret);
 
-  const clientProof = expandHash(Buffer.concat([
-    Buffer.from(clientEphemeralBytes),
-    Buffer.from(serverEphemeralBytes),
-    Buffer.from(sharedSession)
-  ]));
+  const clientProof = expandHash(
+    Buffer.concat([Buffer.from(clientEphemeralBytes), Buffer.from(serverEphemeralBytes), Buffer.from(sharedSession)])
+  );
 
-  const expectedServerProof = expandHash(Buffer.concat([
-    Buffer.from(clientEphemeralBytes),
-    Buffer.from(clientProof),
-    Buffer.from(sharedSession)
-  ]));
+  const expectedServerProof = expandHash(
+    Buffer.concat([Buffer.from(clientEphemeralBytes), Buffer.from(clientProof), Buffer.from(sharedSession)])
+  );
 
   return {
     clientProof,
@@ -366,10 +338,7 @@ function randomBytes(byteLength: number): Uint8Array {
 function computeMultiplier(bitLength: number, generator: bigint, modulus: bigint): bigint {
   const generatorBytes = fromBigIntLE(bitLength, generator);
   const modulusBytes = fromBigIntLE(bitLength, modulus);
-  const multiplierBytes = expandHash(Buffer.concat([
-    Buffer.from(generatorBytes),
-    Buffer.from(modulusBytes)
-  ]));
+  const multiplierBytes = expandHash(Buffer.concat([Buffer.from(generatorBytes), Buffer.from(modulusBytes)]));
 
   return mod(toBigIntLE(multiplierBytes), modulus);
 }

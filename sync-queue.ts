@@ -1,20 +1,12 @@
-import { TAbstractFile, TFile, TFolder, Vault } from "obsidian";
-import {
-  NodeType,
-  UploadMetadata,
-  type ProtonDriveClient,
-} from "@protontech/drive-sdk";
-import { sha1 } from "@noble/hashes/legacy.js";
-import { bytesToHex } from "@noble/hashes/utils.js";
+import { TAbstractFile, TFile, TFolder, Vault } from 'obsidian';
+import { NodeType, UploadMetadata, type ProtonDriveClient } from '@protontech/drive-sdk';
+import { sha1 } from '@noble/hashes/legacy.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 
-import type { PluginLogger } from "./logger";
-import type { ProtonDriveSyncSettings, SyncMapEntry } from "./settings";
+import type { PluginLogger } from './logger';
+import type { ProtonDriveSyncSettings, SyncMapEntry } from './settings';
 
-export type SyncEventType =
-  | "file-create"
-  | "file-modify"
-  | "folder-create"
-  | "rename";
+export type SyncEventType = 'file-create' | 'file-modify' | 'folder-create' | 'rename';
 
 export interface SyncEvent {
   type: SyncEventType;
@@ -34,16 +26,16 @@ export class SyncQueue {
     private readonly settings: ProtonDriveSyncSettings,
     private readonly logger: PluginLogger,
     private readonly persistSettings: () => Promise<void>,
-    private readonly flushDelayMs: number = 1500,
+    private readonly flushDelayMs: number = 1500
   ) {
     this.vault = vault;
   }
 
   enqueue(event: SyncEvent): void {
-    this.logger.debug("Enqueuing sync event", { event });
+    this.logger.debug('Enqueuing sync event', { event });
 
     const key =
-      event.type === "rename" && event.oldPath
+      event.type === 'rename' && event.oldPath
         ? `${event.type}:${event.oldPath}->${event.path}`
         : `${event.type}:${event.path}`;
 
@@ -64,20 +56,16 @@ export class SyncQueue {
       window.clearTimeout(this.flushTimer);
     }
 
-    this.flushTimer = window.setTimeout(
-      () => void this.flush(),
-      this.flushDelayMs,
-    );
+    this.flushTimer = window.setTimeout(() => void this.flush(), this.flushDelayMs);
   }
 
   private async flush(): Promise<void> {
-    this.logger;
     this.flushTimer = null;
     const events = Array.from(this.pending.values());
     this.pending.clear();
 
     if (!this.settings.vaultRootNodeUid) {
-      this.logger.warn("Sync queue flush skipped: vault root not ready");
+      this.logger.warn('Sync queue flush skipped: vault root not ready');
       return;
     }
 
@@ -85,7 +73,7 @@ export class SyncQueue {
       try {
         await this.processEvent(event);
       } catch (error) {
-        this.logger.error("Sync event failed", { event }, error);
+        this.logger.error('Sync event failed', { event }, error);
       }
     }
 
@@ -98,19 +86,15 @@ export class SyncQueue {
     }
 
     switch (event.type) {
-      case "folder-create":
+      case 'folder-create':
         await this.ensureFolderPath(event.path);
         return;
-      case "file-create":
-      case "file-modify":
+      case 'file-create':
+      case 'file-modify':
         await this.syncFile(event.path);
         return;
-      case "rename":
-        await this.renamePath(
-          event.oldPath ?? "",
-          event.path,
-          event.isFolder ?? false,
-        );
+      case 'rename':
+        await this.renamePath(event.oldPath ?? '', event.path, event.isFolder ?? false);
         return;
       default:
         return;
@@ -132,65 +116,52 @@ export class SyncQueue {
     const metadata = payload.metadata;
     const fileObject = payload.fileObject;
 
-    this.logger.debug("Syncing file", { name, metadata });
+    this.logger.debug('Syncing file', { name, metadata });
 
     if (entry?.nodeUid) {
-      this.logger.debug("File previously synced, uploading new revision", {
+      this.logger.debug('File previously synced, uploading new revision', {
         path,
         nodeUid: entry.nodeUid,
         metadata
       });
 
-      const uploader = await this.client.getFileRevisionUploader(
-        entry.nodeUid,
-        metadata,
-      );
+      const uploader = await this.client.getFileRevisionUploader(entry.nodeUid, metadata);
       const controller = await uploader.uploadFromFile(fileObject, []);
       const result = await controller.completion();
       this.settings.pathMap[path] = {
         nodeUid: result.nodeUid,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
     } else {
-      this.logger.debug("File not previously synced, creating new node", {
+      this.logger.debug('File not previously synced, creating new node', {
         path
       });
 
-      const uploader = await this.client.getFileUploader(
-        parentUid,
-        name,
-        metadata,
-      );
+      const uploader = await this.client.getFileUploader(parentUid, name, metadata);
 
       const controller = await uploader.uploadFromFile(fileObject, []);
       const result = await controller.completion();
 
       this.settings.pathMap[path] = {
         nodeUid: result.nodeUid,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
 
-      this.logger.debug("File synced", { path, nodeUid: result.nodeUid });
+      this.logger.debug('File synced', { path, nodeUid: result.nodeUid });
     }
   }
 
-  private async renamePath(
-    oldPath: string,
-    newPath: string,
-    isFolder: boolean,
-  ): Promise<void> {
-    this.logger.debug("Renaming path", { oldPath, newPath, isFolder });
+  private async renamePath(oldPath: string, newPath: string, isFolder: boolean): Promise<void> {
+    this.logger.debug('Renaming path', { oldPath, newPath, isFolder });
 
     if (!oldPath || !newPath || !this.settings.vaultRootNodeUid) {
       return;
     }
 
-    const entry = isFolder
-      ? this.settings.folderMap[oldPath]
-      : this.settings.pathMap[oldPath];
+    const entry = isFolder ? this.settings.folderMap[oldPath] : this.settings.pathMap[oldPath];
     if (!entry?.nodeUid) {
-      this.logger.warn("Rename skipped: file not previously synced", {
-        oldPath,
+      this.logger.warn('Rename skipped: file not previously synced', {
+        oldPath
       });
       return;
     }
@@ -228,7 +199,7 @@ export class SyncQueue {
 
       this.settings.pathMap[newPath] = {
         nodeUid: entry.nodeUid,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
     }
   }
@@ -237,7 +208,7 @@ export class SyncQueue {
     map: Record<string, SyncMapEntry>,
     oldPath: string,
     newPath: string,
-    prefixMatch: boolean = false,
+    prefixMatch: boolean = false
   ): void {
     const entries = Object.entries(map);
     for (const [path, entry] of entries) {
@@ -262,15 +233,15 @@ export class SyncQueue {
   private async ensureFolderPath(path: string): Promise<string> {
     const normalized = normalizePath(path);
     if (!normalized || !this.settings.vaultRootNodeUid) {
-      return this.settings.vaultRootNodeUid ?? "";
+      return this.settings.vaultRootNodeUid ?? '';
     }
 
     if (this.settings.folderMap[normalized]?.nodeUid) {
       return this.settings.folderMap[normalized].nodeUid;
     }
 
-    const segments = normalized.split("/").filter(Boolean);
-    let currentPath = "";
+    const segments = normalized.split('/').filter(Boolean);
+    let currentPath = '';
     let parentUid = this.settings.vaultRootNodeUid;
 
     for (const segment of segments) {
@@ -284,7 +255,7 @@ export class SyncQueue {
       const childUid = await this.findOrCreateFolder(parentUid, segment);
       this.settings.folderMap[currentPath] = {
         nodeUid: childUid,
-        updatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
       parentUid = childUid;
     }
@@ -292,12 +263,9 @@ export class SyncQueue {
     return parentUid;
   }
 
-  private async findOrCreateFolder(
-    parentUid: string,
-    name: string,
-  ): Promise<string> {
+  private async findOrCreateFolder(parentUid: string, name: string): Promise<string> {
     for await (const child of this.client.iterateFolderChildren(parentUid, {
-      type: NodeType.Folder,
+      type: NodeType.Folder
     })) {
       if (!child.ok) {
         continue;
@@ -309,7 +277,7 @@ export class SyncQueue {
 
     const created = await this.client.createFolder(parentUid, name);
     if (!created.ok) {
-      throw new Error("Failed to create folder.");
+      throw new Error('Failed to create folder.');
     }
 
     return created.value.uid;
@@ -317,37 +285,37 @@ export class SyncQueue {
 }
 
 function normalizePath(path: string): string {
-  return path.replace(/\\/g, "/");
+  return path.replace(/\\/g, '/');
 }
 
 function getParentPath(path: string): string {
   const normalized = normalizePath(path);
-  const index = normalized.lastIndexOf("/");
+  const index = normalized.lastIndexOf('/');
   if (index < 0) {
-    return "";
+    return '';
   }
   return normalized.slice(0, index);
 }
 
 function getBasename(path: string): string {
   const normalized = normalizePath(path);
-  const index = normalized.lastIndexOf("/");
+  const index = normalized.lastIndexOf('/');
   return index < 0 ? normalized : normalized.slice(index + 1);
 }
 
 function guessMediaType(file: TFile): string {
-  if (file.extension === "md") {
-    return "text/markdown";
+  if (file.extension === 'md') {
+    return 'text/markdown';
   }
-  if (file.extension === "txt") {
-    return "text/plain";
+  if (file.extension === 'txt') {
+    return 'text/plain';
   }
-  return "application/octet-stream";
+  return 'application/octet-stream';
 }
 
 async function buildFilePayload(
   file: TFile,
-  vault: Vault,
+  vault: Vault
 ): Promise<{
   metadata: UploadMetadata;
   fileObject: File;
@@ -356,7 +324,7 @@ async function buildFilePayload(
   const mtime = file.stat?.mtime ? new Date(file.stat.mtime) : undefined;
 
   let bytes: Uint8Array;
-  if (file.extension === "md" || file.extension === "txt") {
+  if (file.extension === 'md' || file.extension === 'txt') {
     const content = await vault.read(file);
     bytes = new TextEncoder().encode(content);
   } else {
@@ -368,34 +336,30 @@ async function buildFilePayload(
     mediaType,
     expectedSize: bytes.byteLength,
     modificationTime: mtime,
-    expectedSha1: bytesToHex(sha1(bytes)),
+    expectedSha1: bytesToHex(sha1(bytes))
   };
 
   const blob = new Blob([Uint8Array.from(bytes)], { type: mediaType });
   const fileObject = new File([blob], file.name, {
     type: mediaType,
-    lastModified: mtime?.getTime(),
+    lastModified: mtime?.getTime()
   });
 
   return { metadata, fileObject };
 }
 
-export function buildSyncEvent(
-  file: TAbstractFile,
-  type: SyncEventType,
-  oldPath?: string,
-): SyncEvent | null {
-  if (type === "rename") {
+export function buildSyncEvent(file: TAbstractFile, type: SyncEventType, oldPath?: string): SyncEvent | null {
+  if (type === 'rename') {
     return {
       type,
       path: file.path,
       oldPath,
-      isFolder: file instanceof TFolder,
+      isFolder: file instanceof TFolder
     };
   }
 
   if (file instanceof TFolder) {
-    if (type === "folder-create") {
+    if (type === 'folder-create') {
       return { type, path: file.path, isFolder: true };
     }
     return null;

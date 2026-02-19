@@ -1,23 +1,23 @@
 const SENSITIVE_KEY_PARTS = [
-  "password",
-  "passphrase",
-  "token",
-  "proof",
-  "secret",
-  "refresh",
-  "access",
-  "2fa",
-  "twofactor",
-  "two_factor",
-  "srp",
-  "authorization",
+  'password',
+  'passphrase',
+  'token',
+  'proof',
+  'secret',
+  'refresh',
+  'access',
+  '2fa',
+  'twofactor',
+  'two_factor',
+  'srp',
+  'authorization'
 ];
 
-const REDACTED = "[REDACTED]";
+const REDACTED = '[REDACTED]';
 
 export function maskEmail(email: string): string {
   const trimmed = email.trim();
-  const [user, domain] = trimmed.split("@");
+  const [user, domain] = trimmed.split('@');
   if (!user || !domain) {
     return trimmed;
   }
@@ -35,29 +35,29 @@ export function maskEmail(email: string): string {
 
 export function redactValue(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map((entry) => redactValue(entry));
+    return value.map(entry => redactValue(entry));
   }
 
-  if (!value || typeof value !== "object") {
+  if (!value || typeof value !== 'object') {
     return value;
   }
 
   if (value instanceof Error) {
     return {
       name: value.name,
-      message: sanitizeErrorMessage(value.message),
+      message: sanitizeErrorMessage(value.message)
     };
   }
 
   const output: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
     const keyLower = key.toLowerCase();
-    if (SENSITIVE_KEY_PARTS.some((part) => keyLower.includes(part))) {
+    if (SENSITIVE_KEY_PARTS.some(part => keyLower.includes(part))) {
       output[key] = REDACTED;
       continue;
     }
 
-    if (keyLower.includes("email") && typeof entry === "string") {
+    if (keyLower.includes('email') && typeof entry === 'string') {
       output[key] = maskEmail(entry);
       continue;
     }
@@ -68,9 +68,7 @@ export function redactValue(value: unknown): unknown {
   return output;
 }
 
-export function redactMeta(
-  meta?: Record<string, unknown>,
-): Record<string, unknown> | undefined {
+export function redactMeta(meta?: Record<string, unknown>): Record<string, unknown> | undefined {
   if (!meta) {
     return undefined;
   }
@@ -80,11 +78,11 @@ export function redactMeta(
 
 export function sanitizeErrorMessage(message: string): string {
   if (!message) {
-    return "Operation failed.";
+    return 'Operation failed.';
   }
 
   if (/token|password|passphrase|proof|secret|authorization|2fa/i.test(message)) {
-    return "Operation failed due to a secure authentication error.";
+    return 'Operation failed due to a secure authentication error.';
   }
 
   return message;

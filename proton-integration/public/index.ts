@@ -1,4 +1,4 @@
-export { createProtonIntegration } from "../application/ProtonIntegrationService";
+export { createProtonIntegration } from '../application/ProtonIntegrationService';
 export type {
   CreateProtonIntegration,
   ProtonApiClientFactory,
@@ -10,5 +10,5 @@ export type {
   ProtonIntegrationStatus,
   ProtonLogger,
   SecretStore,
-  SessionStore,
-} from "./types";
+  SessionStore
+} from './types';

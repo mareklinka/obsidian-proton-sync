@@ -21,7 +21,7 @@ tools:
     search,
     web,
     todo,
-    memory,
+    memory
   ]
 model: GPT-5.2-Codex (copilot)
 ---

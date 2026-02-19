@@ -1,5 +1,5 @@
-import type { ProtonApiClient } from "../../proton-api";
-import type { ProtonSession } from "../../session-store";
+import type { ProtonApiClient } from '../../proton-api';
+import type { ProtonSession } from '../../session-store';
 
 export interface ProtonCredentials {
   email: string;
@@ -13,7 +13,7 @@ export interface ProtonBootstrapOptions {
 }
 
 export interface ProtonIntegrationStatus {
-  state: "disconnected" | "pending" | "connected" | "error";
+  state: 'disconnected' | 'pending' | 'connected' | 'error';
   accountEmail?: string;
   expiresAt?: string;
   lastError?: string;
@@ -73,6 +73,4 @@ export interface ProtonIntegrationDeps {
   clock?: { now(): number };
 }
 
-export type CreateProtonIntegration = (
-  deps: ProtonIntegrationDeps,
-) => ProtonIntegrationHandle;
+export type CreateProtonIntegration = (deps: ProtonIntegrationDeps) => ProtonIntegrationHandle;

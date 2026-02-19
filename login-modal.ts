@@ -24,23 +24,21 @@ export class ProtonDriveLoginModal extends Modal {
       text: 'This is an unofficial integration. Your password and 2FA code are never stored.'
     });
 
-    new Setting(contentEl)
-      .setName('Email')
-      .addText((text) =>
-        text
-          .setPlaceholder('you@example.com')
-          .setValue(this.plugin.settings.accountEmail)
-          .onChange((value) => {
-            this.email = value.trim();
-          })
-      );
+    new Setting(contentEl).setName('Email').addText(text =>
+      text
+        .setPlaceholder('you@example.com')
+        .setValue(this.plugin.settings.accountEmail)
+        .onChange(value => {
+          this.email = value.trim();
+        })
+    );
 
     new Setting(contentEl)
       .setName('Password')
       .setDesc('Never stored. Used only for this login attempt.')
-      .addText((text) => {
+      .addText(text => {
         text.inputEl.type = 'password';
-        text.onChange((value) => {
+        text.onChange(value => {
           this.password = value;
         });
       });
@@ -48,9 +46,9 @@ export class ProtonDriveLoginModal extends Modal {
     new Setting(contentEl)
       .setName('Mailbox password (if enabled)')
       .setDesc('Only required if your Proton account uses a separate mailbox password.')
-      .addText((text) => {
+      .addText(text => {
         text.inputEl.type = 'password';
-        text.onChange((value) => {
+        text.onChange(value => {
           this.mailboxPassword = value;
         });
       });
@@ -58,16 +56,14 @@ export class ProtonDriveLoginModal extends Modal {
     new Setting(contentEl)
       .setName('2FA code')
       .setDesc('If your account has 2FA enabled, enter the current code.')
-      .addText((text) =>
-        text
-          .setPlaceholder('123456')
-          .onChange((value) => {
-            this.twoFactorCode = value.trim();
-          })
+      .addText(text =>
+        text.setPlaceholder('123456').onChange(value => {
+          this.twoFactorCode = value.trim();
+        })
       );
 
     new Setting(contentEl)
-      .addButton((button) =>
+      .addButton(button =>
         button
           .setButtonText('Connect')
           .setCta()
@@ -82,7 +78,7 @@ export class ProtonDriveLoginModal extends Modal {
             this.close();
           })
       )
-      .addExtraButton((button) =>
+      .addExtraButton(button =>
         button
           .setIcon('cross')
           .setTooltip('Cancel')

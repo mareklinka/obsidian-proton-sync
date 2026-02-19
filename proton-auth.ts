@@ -1,4 +1,3 @@
-
 import { requestUrl } from 'obsidian';
 
 import type { ProtonSession } from './session-store';
@@ -31,7 +30,10 @@ export class ProtonAuthService {
   private readonly appVersionHeader: string;
   private readonly logger: PluginLogger;
 
-  constructor(private readonly appVersion: string, logger: PluginLogger) {
+  constructor(
+    private readonly appVersion: string,
+    logger: PluginLogger
+  ) {
     this.appVersionHeader = `external-drive-obsidiansync@${appVersion}`;
     this.logger = logger;
   }

@@ -1,12 +1,7 @@
-import type { App } from "obsidian";
+import type { App } from 'obsidian';
 
-import {
-  clearSession,
-  loadSession,
-  saveSession,
-  type ProtonSession,
-} from "../../../session-store";
-import type { SessionStore } from "../../public/types";
+import { clearSession, loadSession, saveSession, type ProtonSession } from '../../../session-store';
+import type { SessionStore } from '../../public/types';
 
 export class SessionRepository implements SessionStore {
   constructor(private readonly app: App) {}

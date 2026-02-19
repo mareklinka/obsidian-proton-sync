@@ -5,6 +5,7 @@
 This PRD defines a **self-contained Proton integration module** for the Obsidian plugin.
 
 The module must:
+
 - encapsulate Proton auth/session/bootstrap logic in its own folder,
 - expose a minimal public API,
 - keep most implementation details private/internal,
@@ -104,7 +105,7 @@ export interface ProtonBootstrapOptions {
 }
 
 export interface ProtonIntegrationStatus {
-  state: "disconnected" | "pending" | "connected" | "error";
+  state: 'disconnected' | 'pending' | 'connected' | 'error';
   accountEmail?: string;
   expiresAt?: string;
   lastError?: string;
@@ -131,22 +132,20 @@ export interface ProtonIntegrationDeps {
   clock?: { now(): number };
 }
 
-export type CreateProtonIntegration = (
-  deps: ProtonIntegrationDeps
-) => ProtonIntegrationHandle;
+export type CreateProtonIntegration = (deps: ProtonIntegrationDeps) => ProtonIntegrationHandle;
 ```
 
 ```ts
 // proton-integration/public/index.ts
-export { createProtonIntegration } from "../application/ProtonIntegrationService";
+export { createProtonIntegration } from '../application/ProtonIntegrationService';
 export type {
   ProtonCredentials,
   ProtonBootstrapOptions,
   ProtonIntegrationStatus,
   ProtonIntegrationHandle,
   ProtonIntegrationDeps,
-  CreateProtonIntegration,
-} from "./types";
+  CreateProtonIntegration
+} from './types';
 ```
 
 ### Public API requirements
@@ -212,6 +211,7 @@ export type ProtonApiClientFactory = (args: {
 6. Set status = `connected`.
 
 Failure path:
+
 - Set status = `error`.
 - Keep redacted error message only.
 - No partial secret writes unless atomic write succeeded.
@@ -226,6 +226,7 @@ Failure path:
 6. Set status = `connected`, return `true`.
 
 Failure path:
+
 - clear invalid session,
 - status = `error` or `disconnected` depending on error class,
 - return `false`.
@@ -257,12 +258,14 @@ Failure path:
 ### Logging policy examples
 
 Allowed:
+
 - masked email (`m***a@domain.com`),
 - status transitions,
 - refresh timing,
 - endpoint path class (`/auth/v4/...`) without payload content.
 
 Disallowed:
+
 - raw response body if it can contain token/session data.
 
 ---
@@ -270,6 +273,7 @@ Disallowed:
 ## 10) Error model
 
 Define typed internal errors:
+
 - `NoSessionError`
 - `AuthFailedError`
 - `TwoFactorRequiredError`
@@ -284,6 +288,7 @@ Public API should map internal errors to safe status + sanitized message.
 ## 11) State model
 
 Internal finite states:
+
 - `disconnected`
 - `pending`
 - `connected`
@@ -327,6 +332,7 @@ The module must be testable without Obsidian runtime.
 ## 14) Migration mapping (existing files -> target module)
 
 Likely migration candidates:
+
 - `proton-auth.ts` -> `infrastructure/ProtonAuthGateway.ts`
 - `proton-api.ts` -> remains core API client, instantiated via `ProtonApiClientFactory`
 - `proton-drive-client.ts` -> optional infra factory retained but hidden behind integration boundary
@@ -340,6 +346,7 @@ Likely migration candidates:
 ## 15) Suggested implementation phases
 
 Phase 1:
+
 - create folder structure,
 - define public contracts,
 - implement `createProtonIntegration` orchestrator,
@@ -347,10 +354,12 @@ Phase 1:
 - keep existing behavior parity.
 
 Phase 2:
+
 - migrate refresh loop policy into module,
 - migrate key salt/passphrase derivation orchestration.
 
 Phase 3:
+
 - tighten redaction and typed errors,
 - remove direct Proton orchestration from plugin root.
 
@@ -359,14 +368,14 @@ Phase 3:
 ## 16) Example usage from caller
 
 ```ts
-import { createProtonIntegration } from "./proton-integration/public";
+import { createProtonIntegration } from './proton-integration/public';
 
 const proton = createProtonIntegration({
   appVersion: this.manifest.version,
   logger,
   sessionStore,
   secretStore,
-  authGateway,
+  authGateway
 });
 
 const restored = await proton.restoreFromStorage({ forceRefreshOnRestore: true });
@@ -376,16 +385,16 @@ if (!restored) {
     email,
     password,
     mailboxPassword,
-    twoFactorCode,
+    twoFactorCode
   });
 }
 
 const api = proton.getApiClient();
 if (!api) {
-  throw new Error("Proton API client unavailable after bootstrap");
+  throw new Error('Proton API client unavailable after bootstrap');
 }
 
-const me = await api.getJson("/core/v4/users");
+const me = await api.getJson('/core/v4/users');
 ```
 
 ---
@@ -401,6 +410,7 @@ const me = await api.getJson("/core/v4/users");
 ## 18) Definition of done
 
 Implementation is done when:
+
 - Proton integration code is encapsulated in dedicated folder,
 - public API surface is minimal and documented,
 - login + restore flows initialize usable `ProtonApiClient`,

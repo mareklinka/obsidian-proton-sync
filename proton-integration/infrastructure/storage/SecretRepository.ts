@@ -1,11 +1,10 @@
-import type { App } from "obsidian";
+import type { App } from 'obsidian';
 
-import type { SecretStore } from "../../public/types";
+import type { SecretStore } from '../../public/types';
 
-export const PROTON_SESSION_SECRET_KEY = "proton-drive-sync-session";
-export const PROTON_KEY_PASSPHRASE_SECRET_KEY = "proton-drive-sync-key-passphrase";
-export const PROTON_SALTED_PASSPHRASES_SECRET_KEY =
-  "proton-drive-sync-salted-passphrases";
+export const PROTON_SESSION_SECRET_KEY = 'proton-drive-sync-session';
+export const PROTON_KEY_PASSPHRASE_SECRET_KEY = 'proton-drive-sync-key-passphrase';
+export const PROTON_SALTED_PASSPHRASES_SECRET_KEY = 'proton-drive-sync-salted-passphrases';
 
 type ObsidianSecretStorage = {
   getSecret: (key: string) => string | Promise<string>;
@@ -24,13 +23,13 @@ export class SecretRepository implements SecretStore {
 
     const storage = this.app.secretStorage as ObsidianSecretStorage;
     const value = storage.getSecret(key);
-    if (typeof value === "string") {
+    if (typeof value === 'string') {
       this.cache.set(key, value);
       return value || null;
     }
 
-    void value.then((resolved) => {
-      this.cache.set(key, resolved ?? "");
+    void value.then(resolved => {
+      this.cache.set(key, resolved ?? '');
     });
 
     return null;
@@ -45,6 +44,6 @@ export class SecretRepository implements SecretStore {
   clear(key: string): void {
     this.cache.delete(key);
     const storage = this.app.secretStorage as ObsidianSecretStorage;
-    void storage.setSecret(key, "");
+    void storage.setSecret(key, '');
   }
 }

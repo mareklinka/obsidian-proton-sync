@@ -5,6 +5,7 @@
 This document specifies a **single TypeScript class** that accepts local file/folder change events and synchronizes them to a cloud storage provider through an injected API wrapper.
 
 The service is designed for:
+
 - deterministic event handling,
 - bounded send rate (rate-limit friendly),
 - per-entity ordering,
@@ -144,16 +145,16 @@ This class is intended to replace existing ad-hoc queue behavior with a robust R
 
 ```ts
 export type SyncChangeType =
-  | "file-created"
-  | "file-edited"
-  | "file-deleted"
-  | "file-moved"
-  | "folder-created"
-  | "folder-renamed"
-  | "folder-deleted"
-  | "folder-moved";
+  | 'file-created'
+  | 'file-edited'
+  | 'file-deleted'
+  | 'file-moved'
+  | 'folder-created'
+  | 'folder-renamed'
+  | 'folder-deleted'
+  | 'folder-moved';
 
-export type EntityType = "file" | "folder";
+export type EntityType = 'file' | 'folder';
 
 export interface SyncChangeBase {
   type: SyncChangeType;
@@ -190,10 +191,7 @@ export interface SyncIndexSnapshot {
 ### 6.2 Map mutation events
 
 ```ts
-export type MapMutationType =
-  | "upsert"
-  | "remove"
-  | "path-changed";
+export type MapMutationType = 'upsert' | 'remove' | 'path-changed';
 
 export interface MapMutationEvent {
   type: MapMutationType;
@@ -202,7 +200,7 @@ export interface MapMutationEvent {
   path?: string;
   oldPath?: string;
   at: number;
-  reason: SyncChangeType | "reconcile" | "init";
+  reason: SyncChangeType | 'reconcile' | 'init';
 }
 ```
 
@@ -213,7 +211,7 @@ export interface MapMutationEvent {
 > These dependencies are in scope only as interfaces; concrete implementations are out of scope.
 
 ```ts
-import type { Observable } from "rxjs";
+import type { Observable } from 'rxjs';
 
 export interface FileDescriptor {
   name: string;
@@ -266,8 +264,8 @@ export interface SyncServiceOptions {
 ## 8) Class interface definition
 
 ```ts
-import type { Observable } from "rxjs";
-import type { SchedulerLike } from "rxjs";
+import type { Observable } from 'rxjs';
+import type { SchedulerLike } from 'rxjs';
 
 export interface SyncQueueStats {
   totalPending: number;
@@ -304,7 +302,7 @@ export class RxSyncService implements ISyncService {
     fsReader: IFileSystemReader,
     cloudApi: ICloudStorageApi,
     options?: SyncServiceOptions,
-    scheduler?: SchedulerLike,
+    scheduler?: SchedulerLike
   );
 
   initializeIndex(snapshot: SyncIndexSnapshot): void;
@@ -334,6 +332,7 @@ export class RxSyncService implements ISyncService {
 ### 9.1 Entity key resolution
 
 Given a change:
+
 1. If path exists in index and has cloud ID, entity key = `cloud:{cloudId}`.
 2. Else fallback key = `path:{normalizedPath}`.
 3. For move/rename, old/new path must remap queue ownership to preserve continuity.
@@ -409,11 +408,13 @@ Analogous to file operations, using folder methods and `fsReader.readFolder` whe
 ## 12) Observability requirements
 
 Expose these observables:
+
 - `mapChanges$`: all index mutations.
 - `dispatchResults$`: per-operation success/failure/retry.
 - `stats$`: queue and throughput metrics snapshots.
 
 Optional (nice-to-have):
+
 - `lifecycle$` for start/stop/dispose events.
 
 ---
@@ -463,7 +464,8 @@ All defaults should be exported constants to make tuning straightforward.
 9. **Stop/resume**
    - stop pauses dispatch, resume continues pending.
 10. **Dispose behavior**
-   - subscriptions complete, pending cleared, no further dispatch.
+
+- subscriptions complete, pending cleared, no further dispatch.
 
 Use RxJS `TestScheduler` (or injected virtual scheduler) to avoid real-time sleeps.
 
@@ -483,12 +485,8 @@ Use RxJS `TestScheduler` (or injected virtual scheduler) to avoid real-time slee
 ## 17) Usage example
 
 ```ts
-import { RxSyncService } from "./RxSyncService";
-import type {
-  ICloudStorageApi,
-  IFileSystemReader,
-  SyncIndexSnapshot,
-} from "./RxSyncService";
+import { RxSyncService } from './RxSyncService';
+import type { ICloudStorageApi, IFileSystemReader, SyncIndexSnapshot } from './RxSyncService';
 
 const fsReader: IFileSystemReader = /* concrete impl */ null as any;
 const cloudApi: ICloudStorageApi = /* concrete impl */ null as any;
@@ -499,46 +497,46 @@ const service = new RxSyncService(fsReader, cloudApi, {
   maxOpsPerTick: 1,
   retryMaxAttempts: 5,
   retryBaseDelayMs: 1000,
-  jitterRatio: 0.2,
+  jitterRatio: 0.2
 });
 
 const initialIndex: SyncIndexSnapshot = {
   byPath: {},
-  byCloudId: {},
+  byCloudId: {}
 };
 
 service.initializeIndex(initialIndex);
 
-const mapSub = service.mapChanges$.subscribe((event) => {
+const mapSub = service.mapChanges$.subscribe(event => {
   // Persist externally (settings/db/file)
   // Example: append event to write-ahead log or apply directly to durable map.
 });
 
-const resultSub = service.dispatchResults$.subscribe((r) => {
+const resultSub = service.dispatchResults$.subscribe(r => {
   if (!r.success) {
-    console.warn("Sync dispatch failed", r);
+    console.warn('Sync dispatch failed', r);
   }
 });
 
 service.start();
 
 service.enqueueChange({
-  type: "file-created",
-  entityType: "file",
-  path: "notes/today.md",
+  type: 'file-created',
+  entityType: 'file',
+  path: 'notes/today.md'
 });
 
 service.enqueueChange({
-  type: "file-edited",
-  entityType: "file",
-  path: "notes/today.md",
+  type: 'file-edited',
+  entityType: 'file',
+  path: 'notes/today.md'
 });
 
 service.enqueueChange({
-  type: "folder-moved",
-  entityType: "folder",
-  oldPath: "notes/archive",
-  path: "archive/notes",
+  type: 'folder-moved',
+  entityType: 'folder',
+  oldPath: 'notes/archive',
+  path: 'archive/notes'
 });
 
 // later
@@ -572,6 +570,7 @@ service.dispose();
 ## 20) Done definition
 
 Implementation is considered done when:
+
 - class compiles,
 - all acceptance tests above pass,
 - class operates with injected fake filesystem/cloud dependencies,
@@ -649,25 +648,32 @@ These were not explicitly requested but are strongly recommended to avoid common
 ## 22) Additional acceptance tests (recommended)
 
 11. **Path normalization/case handling**
-  - same logical path in different separator/case forms maps to one canonical entity key.
+
+- same logical path in different separator/case forms maps to one canonical entity key.
 
 12. **Invalid payload handling**
-  - move/rename without `oldPath` is rejected as non-retryable and does not crash loop.
+
+- move/rename without `oldPath` is rejected as non-retryable and does not crash loop.
 
 13. **Parent dependency scheduling**
-  - child file create waits until parent folder creation succeeds.
+
+- child file create waits until parent folder creation succeeds.
 
 14. **Persistence ordering**
-  - `mapChanges$` sequence numbers are monotonic and replay reproduces index exactly.
+
+- `mapChanges$` sequence numbers are monotonic and replay reproduces index exactly.
 
 15. **Backpressure limits**
-  - when pending limits are exceeded, service emits explicit overflow result and remains operational.
+
+- when pending limits are exceeded, service emits explicit overflow result and remains operational.
 
 16. **Lifecycle terminal behavior**
-  - after `dispose()`, enqueue attempts fail predictably and no new dispatch occurs.
+
+- after `dispose()`, enqueue attempts fail predictably and no new dispatch occurs.
 
 17. **At-least-once semantics**
-  - retryable failure followed by success may invoke cloud API more than once; final state remains correct.
+
+- retryable failure followed by success may invoke cloud API more than once; final state remains correct.
 
 ---
 

@@ -1,9 +1,5 @@
-import { ProtonAuthService } from "../../proton-auth";
-import type {
-  ProtonAuthGateway,
-  ProtonCredentials,
-  ProtonLogger,
-} from "../public/types";
+import { ProtonAuthService } from '../../proton-auth';
+import type { ProtonAuthGateway, ProtonCredentials, ProtonLogger } from '../public/types';
 
 export class DefaultProtonAuthGateway implements ProtonAuthGateway {
   private readonly authService: ProtonAuthService;
@@ -12,15 +8,11 @@ export class DefaultProtonAuthGateway implements ProtonAuthGateway {
     this.authService = new ProtonAuthService(appVersion, logger);
   }
 
-  async signIn(credentials: ProtonCredentials): ReturnType<ProtonAuthGateway["signIn"]> {
-    return this.authService.signIn(
-      credentials.email,
-      credentials.password,
-      credentials.twoFactorCode ?? "",
-    );
+  async signIn(credentials: ProtonCredentials): ReturnType<ProtonAuthGateway['signIn']> {
+    return this.authService.signIn(credentials.email, credentials.password, credentials.twoFactorCode ?? '');
   }
 
-  async refresh(session: Parameters<ProtonAuthGateway["refresh"]>[0]): ReturnType<ProtonAuthGateway["refresh"]> {
+  async refresh(session: Parameters<ProtonAuthGateway['refresh']>[0]): ReturnType<ProtonAuthGateway['refresh']> {
     return this.authService.refreshSession(session);
   }
 }

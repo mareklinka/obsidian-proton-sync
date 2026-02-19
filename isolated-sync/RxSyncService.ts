@@ -1,8 +1,8 @@
-import { BehaviorSubject, Observable, Subject, Subscription, SchedulerLike, asyncScheduler, interval } from "rxjs";
-import type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from "./shared-types";
-import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from "./path-utils";
+import { BehaviorSubject, Observable, Subject, Subscription, SchedulerLike, asyncScheduler, interval } from 'rxjs';
+import type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from './shared-types';
+import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from './path-utils';
 
-export type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from "./shared-types";
+export type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from './shared-types';
 
 export type SyncChangeType = FileSystemChangeType;
 
@@ -37,7 +37,7 @@ export interface SyncIndexSnapshot {
 export interface SyncIndexSnapshotEvent {
   seq: number;
   at: number;
-  reason: SyncChangeType | "init" | "manual";
+  reason: SyncChangeType | 'init' | 'manual';
   snapshot: SyncIndexSnapshot;
 }
 
@@ -93,7 +93,7 @@ export interface SyncServiceOptions {
   maxPendingPerEntity?: number;
   now?: () => number;
   caseInsensitivePaths?: boolean;
-  classifyError?: (error: unknown) => "retryable" | "non-retryable";
+  classifyError?: (error: unknown) => 'retryable' | 'non-retryable';
 }
 
 export interface ISyncService {
@@ -110,7 +110,7 @@ export interface ISyncService {
   readonly stats$: Observable<SyncQueueStats>;
 }
 
-type LifecycleState = "idle" | "initialized" | "running" | "stopped" | "disposed";
+type LifecycleState = 'idle' | 'initialized' | 'running' | 'stopped' | 'disposed';
 
 type QueueRecord = {
   entityKey: string;
@@ -139,7 +139,7 @@ export class RxSyncService implements ISyncService {
     inFlight: false,
     droppedByCompaction: 0,
     retried: 0,
-    failedTerminal: 0,
+    failedTerminal: 0
   });
 
   private readonly byPath = new Map<string, SyncIndexEntry>();
@@ -147,7 +147,7 @@ export class RxSyncService implements ISyncService {
   private readonly queueMap = new Map<string, QueueRecord>();
   private readonly scheduler: SchedulerLike;
 
-  private state: LifecycleState = "idle";
+  private state: LifecycleState = 'idle';
   private isInitialized = false;
   private isInFlight = false;
   private tickerSub: Subscription | null = null;
@@ -168,13 +168,13 @@ export class RxSyncService implements ISyncService {
   private readonly maxPendingPerEntity: number;
   private readonly now: () => number;
   private readonly caseInsensitivePaths: boolean;
-  private readonly classifyError: (error: unknown) => "retryable" | "non-retryable";
+  private readonly classifyError: (error: unknown) => 'retryable' | 'non-retryable';
 
   constructor(
     private readonly fsReader: IFileSystemReader,
     private readonly cloudApi: ICloudStorageApi,
     options: SyncServiceOptions = {},
-    scheduler?: SchedulerLike,
+    scheduler?: SchedulerLike
   ) {
     this.scheduler = scheduler ?? asyncScheduler;
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
@@ -195,11 +195,11 @@ export class RxSyncService implements ISyncService {
   }
 
   initializeIndex(snapshot: SyncIndexSnapshot): void {
-    if (this.state === "running") {
-      throw new Error("Cannot initialize index while service is running.");
+    if (this.state === 'running') {
+      throw new Error('Cannot initialize index while service is running.');
     }
-    if (this.state === "disposed") {
-      throw new Error("Service is disposed.");
+    if (this.state === 'disposed') {
+      throw new Error('Service is disposed.');
     }
 
     this.byPath.clear();
@@ -212,7 +212,7 @@ export class RxSyncService implements ISyncService {
         cloudId: entry.cloudId,
         path: normalized,
         entityType: entry.entityType,
-        updatedAt: entry.updatedAt,
+        updatedAt: entry.updatedAt
       };
       this.byPath.set(canonical, normalizedEntry);
       this.byCloudId.set(entry.cloudId, normalizedEntry);
@@ -226,7 +226,7 @@ export class RxSyncService implements ISyncService {
           cloudId: entry.cloudId,
           path: normalized,
           entityType: entry.entityType,
-          updatedAt: entry.updatedAt,
+          updatedAt: entry.updatedAt
         };
         this.byPath.set(canonical, normalizedEntry);
         this.byCloudId.set(entry.cloudId, normalizedEntry);
@@ -234,22 +234,22 @@ export class RxSyncService implements ISyncService {
     }
 
     this.isInitialized = true;
-    this.state = "initialized";
-    this.emitSnapshot("init");
+    this.state = 'initialized';
+    this.emitSnapshot('init');
   }
 
   start(): void {
-    if (this.state === "disposed") {
-      throw new Error("Service is disposed.");
+    if (this.state === 'disposed') {
+      throw new Error('Service is disposed.');
     }
     if (!this.isInitialized) {
-      throw new Error("Index must be initialized before start().");
+      throw new Error('Index must be initialized before start().');
     }
-    if (this.state === "running") {
+    if (this.state === 'running') {
       return;
     }
 
-    this.state = "running";
+    this.state = 'running';
     this.tickerSub = interval(this.sendIntervalMs, this.scheduler).subscribe(() => {
       void this.processTick();
     });
@@ -257,21 +257,21 @@ export class RxSyncService implements ISyncService {
   }
 
   stop(): void {
-    if (this.state === "disposed") {
+    if (this.state === 'disposed') {
       return;
     }
 
     this.tickerSub?.unsubscribe();
     this.tickerSub = null;
 
-    if (this.state !== "idle") {
-      this.state = "stopped";
+    if (this.state !== 'idle') {
+      this.state = 'stopped';
     }
     this.publishStats();
   }
 
   dispose(): void {
-    if (this.state === "disposed") {
+    if (this.state === 'disposed') {
       return;
     }
 
@@ -280,7 +280,7 @@ export class RxSyncService implements ISyncService {
     this.byPath.clear();
     this.byCloudId.clear();
 
-    this.state = "disposed";
+    this.state = 'disposed';
 
     this.publishStats();
     this.mapChangesSubject.complete();
@@ -289,8 +289,8 @@ export class RxSyncService implements ISyncService {
   }
 
   enqueueChange(change: SyncChangeBase): string {
-    if (this.state === "disposed") {
-      throw new Error("Cannot enqueue into a disposed service.");
+    if (this.state === 'disposed') {
+      throw new Error('Cannot enqueue into a disposed service.');
     }
 
     const normalized = this.normalizeAndValidate(change);
@@ -299,7 +299,7 @@ export class RxSyncService implements ISyncService {
       id: this.nextChangeId(),
       enqueuedAt: this.now(),
       availableAt: this.now(),
-      attempt: 0,
+      attempt: 0
     };
 
     const entityKey = this.resolveEntityKey(queued);
@@ -311,7 +311,7 @@ export class RxSyncService implements ISyncService {
         success: false,
         retryScheduled: false,
         errorMessage: `Max pending total (${this.maxPendingTotal}) exceeded.`,
-        retryable: false,
+        retryable: false
       });
       return queued.id;
     }
@@ -322,7 +322,7 @@ export class RxSyncService implements ISyncService {
         success: false,
         retryScheduled: false,
         errorMessage: `Max pending per entity (${this.maxPendingPerEntity}) exceeded.`,
-        retryable: false,
+        retryable: false
       });
       return queued.id;
     }
@@ -333,7 +333,7 @@ export class RxSyncService implements ISyncService {
   }
 
   clearPending(entityKey?: string): void {
-    if (typeof entityKey === "string" && entityKey.length > 0) {
+    if (typeof entityKey === 'string' && entityKey.length > 0) {
       this.queueMap.delete(entityKey);
       this.publishStats();
       return;
@@ -344,7 +344,7 @@ export class RxSyncService implements ISyncService {
   }
 
   private async processTick(): Promise<void> {
-    if (this.state !== "running" || this.isInFlight) {
+    if (this.state !== 'running' || this.isInFlight) {
       return;
     }
 
@@ -384,13 +384,13 @@ export class RxSyncService implements ISyncService {
       const success: SyncDispatchResult = {
         changeId: change.id,
         success: true,
-        retryScheduled: false,
+        retryScheduled: false
       };
       this.dispatchResultsSubject.next(success);
       return success;
     } catch (error) {
       const classification = this.classifyError(error);
-      const retryable = classification === "retryable";
+      const retryable = classification === 'retryable';
 
       if (retryable && change.attempt < this.retryMaxAttempts) {
         change.attempt += 1;
@@ -402,7 +402,7 @@ export class RxSyncService implements ISyncService {
           success: false,
           retryScheduled: true,
           retryable: true,
-          errorMessage: this.toErrorMessage(error),
+          errorMessage: this.toErrorMessage(error)
         };
         this.dispatchResultsSubject.next(retryResult);
         return retryResult;
@@ -414,7 +414,7 @@ export class RxSyncService implements ISyncService {
         success: false,
         retryScheduled: false,
         retryable,
-        errorMessage: this.toErrorMessage(error),
+        errorMessage: this.toErrorMessage(error)
       };
       this.dispatchResultsSubject.next(failure);
       return failure;
@@ -423,8 +423,8 @@ export class RxSyncService implements ISyncService {
 
   private async executeChange(change: QueuedChange): Promise<void> {
     switch (change.type) {
-      case "file-created":
-      case "file-edited": {
+      case 'file-created':
+      case 'file-edited': {
         const descriptor = await this.fsReader.readFile(change.path);
         if (!descriptor) {
           throw new Error(`File not found: ${change.path}`);
@@ -437,7 +437,7 @@ export class RxSyncService implements ISyncService {
         return;
       }
 
-      case "file-deleted": {
+      case 'file-deleted': {
         const cloudId = this.resolveCloudId(change.path, change.oldPath);
         if (cloudId) {
           await this.cloudApi.deleteFile(cloudId);
@@ -446,9 +446,9 @@ export class RxSyncService implements ISyncService {
         return;
       }
 
-      case "file-moved": {
+      case 'file-moved': {
         if (!change.oldPath) {
-          throw new Error("file-moved requires oldPath");
+          throw new Error('file-moved requires oldPath');
         }
         const cloudId = this.resolveCloudId(change.oldPath, change.path);
         if (!cloudId) {
@@ -459,7 +459,7 @@ export class RxSyncService implements ISyncService {
         return;
       }
 
-      case "folder-created": {
+      case 'folder-created': {
         const descriptor = await this.fsReader.readFolder(change.path);
         if (!descriptor) {
           throw new Error(`Folder not found: ${change.path}`);
@@ -469,9 +469,9 @@ export class RxSyncService implements ISyncService {
         return;
       }
 
-      case "folder-renamed": {
+      case 'folder-renamed': {
         if (!change.oldPath) {
-          throw new Error("folder-renamed requires oldPath");
+          throw new Error('folder-renamed requires oldPath');
         }
         const cloudId = this.resolveCloudId(change.oldPath, change.path);
         if (!cloudId) {
@@ -483,7 +483,7 @@ export class RxSyncService implements ISyncService {
         return;
       }
 
-      case "folder-deleted": {
+      case 'folder-deleted': {
         const cloudId = this.resolveCloudId(change.path, change.oldPath);
         if (cloudId) {
           await this.cloudApi.deleteFolder(cloudId);
@@ -492,9 +492,9 @@ export class RxSyncService implements ISyncService {
         return;
       }
 
-      case "folder-moved": {
+      case 'folder-moved': {
         if (!change.oldPath) {
-          throw new Error("folder-moved requires oldPath");
+          throw new Error('folder-moved requires oldPath');
         }
         const cloudId = this.resolveCloudId(change.oldPath, change.path);
         if (!cloudId) {
@@ -510,11 +510,7 @@ export class RxSyncService implements ISyncService {
     }
   }
 
-  private upsertIndex(
-    result: CloudUpsertResult,
-    reason: SyncChangeType,
-    oldPath?: string,
-  ): void {
+  private upsertIndex(result: CloudUpsertResult, reason: SyncChangeType, oldPath?: string): void {
     const normalizedPath = this.normalizePath(result.path);
     const canonicalPath = this.toCanonicalKey(normalizedPath);
 
@@ -531,7 +527,7 @@ export class RxSyncService implements ISyncService {
       cloudId: result.cloudId,
       path: normalizedPath,
       entityType: result.entityType,
-      updatedAt: this.now(),
+      updatedAt: this.now()
     };
 
     this.byPath.set(canonicalPath, next);
@@ -551,13 +547,13 @@ export class RxSyncService implements ISyncService {
     this.emitSnapshot(reason);
   }
 
-  private emitSnapshot(reason: SyncIndexSnapshotEvent["reason"]): void {
+  private emitSnapshot(reason: SyncIndexSnapshotEvent['reason']): void {
     this.seq += 1;
     this.mapChangesSubject.next({
       seq: this.seq,
       at: this.now(),
       reason,
-      snapshot: this.snapshot(),
+      snapshot: this.snapshot()
     });
   }
 
@@ -579,7 +575,7 @@ export class RxSyncService implements ISyncService {
   private normalizeAndValidate(change: SyncChangeBase): SyncChangeBase {
     const path = this.normalizePath(change.path);
     if (!path) {
-      throw new Error("Path must not be empty.");
+      throw new Error('Path must not be empty.');
     }
 
     const oldPath = change.oldPath ? this.normalizePath(change.oldPath) : undefined;
@@ -591,7 +587,7 @@ export class RxSyncService implements ISyncService {
     return {
       ...change,
       path,
-      oldPath,
+      oldPath
     };
   }
 
@@ -644,8 +640,8 @@ export class RxSyncService implements ISyncService {
 
     if (last) {
       if (
-        incoming.type === "file-edited" &&
-        last.type === "file-edited" &&
+        incoming.type === 'file-edited' &&
+        last.type === 'file-edited' &&
         incoming.enqueuedAt - last.enqueuedAt <= this.debounceMs
       ) {
         items[items.length - 1] = incoming;
@@ -653,33 +649,33 @@ export class RxSyncService implements ISyncService {
         return;
       }
 
-      if (last.type === "file-created" && incoming.type === "file-edited") {
+      if (last.type === 'file-created' && incoming.type === 'file-edited') {
         this.droppedByCompaction += 1;
         return;
       }
 
-      if (last.type === "file-created" && incoming.type === "file-deleted") {
+      if (last.type === 'file-created' && incoming.type === 'file-deleted') {
         items.pop();
         this.droppedByCompaction += 1;
         return;
       }
 
       if (
-        (last.type === "file-moved" && incoming.type === "file-moved") ||
-        (last.type === "folder-moved" && incoming.type === "folder-moved") ||
-        (last.type === "folder-renamed" && incoming.type === "folder-renamed")
+        (last.type === 'file-moved' && incoming.type === 'file-moved') ||
+        (last.type === 'folder-moved' && incoming.type === 'folder-moved') ||
+        (last.type === 'folder-renamed' && incoming.type === 'folder-renamed')
       ) {
         const merged: QueuedChange = {
           ...incoming,
           oldPath: last.oldPath ?? incoming.oldPath,
-          enqueuedAt: last.enqueuedAt,
+          enqueuedAt: last.enqueuedAt
         };
         items[items.length - 1] = merged;
         this.droppedByCompaction += 1;
         return;
       }
 
-      if ((incoming.type === "file-deleted" || incoming.type === "folder-deleted") && items.length > 0) {
+      if ((incoming.type === 'file-deleted' || incoming.type === 'folder-deleted') && items.length > 0) {
         queue.items = [incoming];
         this.droppedByCompaction += items.length;
         return;
@@ -728,7 +724,7 @@ export class RxSyncService implements ISyncService {
 
     const created: QueueRecord = {
       entityKey,
-      items: [],
+      items: []
     };
     this.queueMap.set(entityKey, created);
     return created;
@@ -748,7 +744,7 @@ export class RxSyncService implements ISyncService {
       inFlight: this.isInFlight,
       droppedByCompaction: this.droppedByCompaction,
       retried: this.retried,
-      failedTerminal: this.failedTerminal,
+      failedTerminal: this.failedTerminal
     });
   }
 
@@ -784,20 +780,20 @@ export class RxSyncService implements ISyncService {
 }
 
 function requiresOldPath(type: SyncChangeType): boolean {
-  return type === "file-moved" || type === "folder-moved" || type === "folder-renamed";
+  return type === 'file-moved' || type === 'folder-moved' || type === 'folder-renamed';
 }
 
-function defaultClassifyError(error: unknown): "retryable" | "non-retryable" {
+function defaultClassifyError(error: unknown): 'retryable' | 'non-retryable' {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
   if (
-    message.includes("timeout") ||
-    message.includes("network") ||
-    message.includes("temporar") ||
-    message.includes("429") ||
-    message.includes("5xx")
+    message.includes('timeout') ||
+    message.includes('network') ||
+    message.includes('temporar') ||
+    message.includes('429') ||
+    message.includes('5xx')
   ) {
-    return "retryable";
+    return 'retryable';
   }
 
-  return "non-retryable";
+  return 'non-retryable';
 }

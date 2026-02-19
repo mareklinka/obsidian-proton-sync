@@ -1,5 +1,5 @@
 export async function requestUrl(_request: unknown): Promise<any> {
-  throw new Error("requestUrl is not implemented in unit tests.");
+  throw new Error('requestUrl is not implemented in unit tests.');
 }
 
 export class App {}

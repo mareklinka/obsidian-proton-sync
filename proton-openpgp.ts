@@ -1,6 +1,11 @@
 import * as openpgp from 'openpgp';
 import { OpenPGPCryptoWithCryptoProxy, type OpenPGPCrypto, type OpenPGPCryptoProxy } from '@protontech/drive-sdk';
-import { VERIFICATION_STATUS, type PrivateKey, type PublicKey, type SessionKey } from '@protontech/drive-sdk/dist/crypto';
+import {
+  VERIFICATION_STATUS,
+  type PrivateKey,
+  type PublicKey,
+  type SessionKey
+} from '@protontech/drive-sdk/dist/crypto';
 import { PluginLogger } from './logger';
 
 export function createOpenPgpCrypto(): OpenPGPCrypto {
@@ -8,7 +13,11 @@ export function createOpenPgpCrypto(): OpenPGPCrypto {
 }
 
 class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
-  async generateKey(options: { userIDs: { name: string }[]; type: 'ecc'; curve: 'ed25519Legacy' }): Promise<PrivateKey> {
+  async generateKey(options: {
+    userIDs: { name: string }[];
+    type: 'ecc';
+    curve: 'ed25519Legacy';
+  }): Promise<PrivateKey> {
     const result = await openpgp.generateKey({
       type: options.type,
       curve: options.curve,
@@ -21,7 +30,10 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
 
   async exportPrivateKey(options: { privateKey: PrivateKey; passphrase: string | null }): Promise<string> {
     const key = options.passphrase
-      ? await openpgp.encryptKey({ privateKey: toOpenPgpPrivateKey(options.privateKey), passphrase: options.passphrase })
+      ? await openpgp.encryptKey({
+          privateKey: toOpenPgpPrivateKey(options.privateKey),
+          passphrase: options.passphrase
+        })
       : toOpenPgpPrivateKey(options.privateKey);
 
     return key.armor();
@@ -37,11 +49,15 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
   }
 
   async generateSessionKey(options: { recipientKeys: PublicKey[] }): Promise<SessionKey> {
-    const sessionKey = await openpgp.generateSessionKey({ encryptionKeys: toOpenPgpPublicKeysRequired(options.recipientKeys) });
+    const sessionKey = await openpgp.generateSessionKey({
+      encryptionKeys: toOpenPgpPublicKeysRequired(options.recipientKeys)
+    });
     return mapSessionKey(sessionKey);
   }
 
-  async encryptSessionKey(options: SessionKey & { format: 'binary'; encryptionKeys?: PublicKey | PublicKey[]; passwords?: string[] }): Promise<Uint8Array> {
+  async encryptSessionKey(
+    options: SessionKey & { format: 'binary'; encryptionKeys?: PublicKey | PublicKey[]; passwords?: string[] }
+  ): Promise<Uint8Array> {
     const openPgpSessionKey = toOpenPgpSessionKey(options);
     return openpgp.encryptSessionKey({
       data: options.data,
@@ -87,27 +103,35 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     signingKeys?: PrivateKey;
     detached?: Detached;
     compress?: boolean;
-  }): Promise<Detached extends true ? { message: Format extends 'binary' ? Uint8Array : string; signature: Format extends 'binary' ? Uint8Array : string } : { message: Format extends 'binary' ? Uint8Array : string }> {
+  }): Promise<
+    Detached extends true
+      ? {
+          message: Format extends 'binary' ? Uint8Array : string;
+          signature: Format extends 'binary' ? Uint8Array : string;
+        }
+      : { message: Format extends 'binary' ? Uint8Array : string }
+  > {
     const message = await openpgp.createMessage({ binary: options.binaryData });
     const format = options.format ?? 'armored';
 
-    const encrypted = format === 'binary'
-      ? await openpgp.encrypt({
-          message,
-          format: 'binary',
-          encryptionKeys: toOpenPgpPublicKeys(options.encryptionKeys),
-          signingKeys: options.signingKeys ? [toOpenPgpPrivateKey(options.signingKeys)] : undefined,
-          sessionKey: options.sessionKey ? toOpenPgpSessionKey(options.sessionKey) : undefined,
-          config: options.compress === false ? { allowUnauthenticatedMessages: true } : undefined
-        })
-      : await openpgp.encrypt({
-          message,
-          format: 'armored',
-          encryptionKeys: toOpenPgpPublicKeys(options.encryptionKeys),
-          signingKeys: options.signingKeys ? [toOpenPgpPrivateKey(options.signingKeys)] : undefined,
-          sessionKey: options.sessionKey ? toOpenPgpSessionKey(options.sessionKey) : undefined,
-          config: options.compress === false ? { allowUnauthenticatedMessages: true } : undefined
-        });
+    const encrypted =
+      format === 'binary'
+        ? await openpgp.encrypt({
+            message,
+            format: 'binary',
+            encryptionKeys: toOpenPgpPublicKeys(options.encryptionKeys),
+            signingKeys: options.signingKeys ? [toOpenPgpPrivateKey(options.signingKeys)] : undefined,
+            sessionKey: options.sessionKey ? toOpenPgpSessionKey(options.sessionKey) : undefined,
+            config: options.compress === false ? { allowUnauthenticatedMessages: true } : undefined
+          })
+        : await openpgp.encrypt({
+            message,
+            format: 'armored',
+            encryptionKeys: toOpenPgpPublicKeys(options.encryptionKeys),
+            signingKeys: options.signingKeys ? [toOpenPgpPrivateKey(options.signingKeys)] : undefined,
+            sessionKey: options.sessionKey ? toOpenPgpSessionKey(options.sessionKey) : undefined,
+            config: options.compress === false ? { allowUnauthenticatedMessages: true } : undefined
+          });
 
     if (!options.detached) {
       return { message: encrypted as any } as any;
@@ -117,19 +141,20 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
       throw new Error('Detached encryption requires signing keys.');
     }
 
-    const signature = format === 'binary'
-      ? await openpgp.sign({
-          message,
-          format: 'binary',
-          signingKeys: [toOpenPgpPrivateKey(options.signingKeys)],
-          detached: true
-        })
-      : await openpgp.sign({
-          message,
-          format: 'armored',
-          signingKeys: [toOpenPgpPrivateKey(options.signingKeys)],
-          detached: true
-        });
+    const signature =
+      format === 'binary'
+        ? await openpgp.sign({
+            message,
+            format: 'binary',
+            signingKeys: [toOpenPgpPrivateKey(options.signingKeys)],
+            detached: true
+          })
+        : await openpgp.sign({
+            message,
+            format: 'armored',
+            signingKeys: [toOpenPgpPrivateKey(options.signingKeys)],
+            detached: true
+          });
 
     return {
       message: encrypted as any,
@@ -147,12 +172,16 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     passwords?: string[];
     decryptionKeys?: PrivateKey | PrivateKey[];
     verificationKeys?: PublicKey | PublicKey[];
-  }): Promise<{ data: Format extends 'binary' ? Uint8Array : string; verificationStatus: VERIFICATION_STATUS; verificationErrors?: Error[] }> {
+  }): Promise<{
+    data: Format extends 'binary' ? Uint8Array : string;
+    verificationStatus: VERIFICATION_STATUS;
+    verificationErrors?: Error[];
+  }> {
     const signature = options.armoredSignature
       ? await openpgp.readSignature({ armoredSignature: options.armoredSignature })
       : options.binarySignature
-      ? await openpgp.readSignature({ binarySignature: options.binarySignature })
-      : undefined;
+        ? await openpgp.readSignature({ binarySignature: options.binarySignature })
+        : undefined;
 
     const result = options.armoredMessage
       ? options.format === 'binary'
@@ -175,24 +204,24 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
             signature
           })
       : options.format === 'binary'
-      ? await openpgp.decrypt({
-          message: await openpgp.readMessage({ binaryMessage: options.binaryMessage ?? new Uint8Array() }),
-          format: 'binary',
-          decryptionKeys: toOpenPgpPrivateKeys(options.decryptionKeys),
-          passwords: options.passwords,
-          sessionKeys: options.sessionKeys ? [toOpenPgpSessionKey(options.sessionKeys)] : undefined,
-          verificationKeys: toOpenPgpPublicKeys(options.verificationKeys),
-          signature
-        })
-      : await openpgp.decrypt({
-          message: await openpgp.readMessage({ binaryMessage: options.binaryMessage ?? new Uint8Array() }),
-          format: 'utf8',
-          decryptionKeys: toOpenPgpPrivateKeys(options.decryptionKeys),
-          passwords: options.passwords,
-          sessionKeys: options.sessionKeys ? [toOpenPgpSessionKey(options.sessionKeys)] : undefined,
-          verificationKeys: toOpenPgpPublicKeys(options.verificationKeys),
-          signature
-        });
+        ? await openpgp.decrypt({
+            message: await openpgp.readMessage({ binaryMessage: options.binaryMessage ?? new Uint8Array() }),
+            format: 'binary',
+            decryptionKeys: toOpenPgpPrivateKeys(options.decryptionKeys),
+            passwords: options.passwords,
+            sessionKeys: options.sessionKeys ? [toOpenPgpSessionKey(options.sessionKeys)] : undefined,
+            verificationKeys: toOpenPgpPublicKeys(options.verificationKeys),
+            signature
+          })
+        : await openpgp.decrypt({
+            message: await openpgp.readMessage({ binaryMessage: options.binaryMessage ?? new Uint8Array() }),
+            format: 'utf8',
+            decryptionKeys: toOpenPgpPrivateKeys(options.decryptionKeys),
+            passwords: options.passwords,
+            sessionKeys: options.sessionKeys ? [toOpenPgpSessionKey(options.sessionKeys)] : undefined,
+            verificationKeys: toOpenPgpPublicKeys(options.verificationKeys),
+            signature
+          });
 
     const verification = await mapVerificationResult(result.signatures);
 
@@ -223,21 +252,22 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
         ]
       : undefined;
 
-    const signature = options.format === 'binary'
-      ? await openpgp.sign({
-          message,
-          format: 'binary',
-          signingKeys: toOpenPgpPrivateKeysRequired(options.signingKeys),
-          detached: options.detached,
-          signatureNotations
-        })
-      : await openpgp.sign({
-          message,
-          format: 'armored',
-          signingKeys: toOpenPgpPrivateKeysRequired(options.signingKeys),
-          detached: options.detached,
-          signatureNotations
-        });
+    const signature =
+      options.format === 'binary'
+        ? await openpgp.sign({
+            message,
+            format: 'binary',
+            signingKeys: toOpenPgpPrivateKeysRequired(options.signingKeys),
+            detached: options.detached,
+            signatureNotations
+          })
+        : await openpgp.sign({
+            message,
+            format: 'armored',
+            signingKeys: toOpenPgpPrivateKeysRequired(options.signingKeys),
+            detached: options.detached,
+            signatureNotations
+          });
 
     return signature as any;
   }
@@ -253,8 +283,8 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     const signature = options.armoredSignature
       ? await openpgp.readSignature({ armoredSignature: options.armoredSignature })
       : options.binarySignature
-      ? await openpgp.readSignature({ binarySignature: options.binarySignature })
-      : undefined;
+        ? await openpgp.readSignature({ binarySignature: options.binarySignature })
+        : undefined;
 
     const result = await openpgp.verify({
       message,
@@ -285,11 +315,11 @@ function toOpenPgpPublicKeys(keys: PublicKey | PublicKey[] | undefined): openpgp
     return undefined;
   }
 
-  return resolved.map((key) => key as unknown as openpgp.PublicKey);
+  return resolved.map(key => key as unknown as openpgp.PublicKey);
 }
 
 function toOpenPgpPublicKeysRequired(keys: PublicKey | PublicKey[]): openpgp.PublicKey[] {
-  return toArray(keys)?.map((key) => key as unknown as openpgp.PublicKey) ?? [];
+  return toArray(keys)?.map(key => key as unknown as openpgp.PublicKey) ?? [];
 }
 
 function toOpenPgpPrivateKeys(keys: PrivateKey | PrivateKey[] | undefined): openpgp.PrivateKey[] | undefined {
@@ -298,11 +328,11 @@ function toOpenPgpPrivateKeys(keys: PrivateKey | PrivateKey[] | undefined): open
     return undefined;
   }
 
-  return resolved.map((key) => toOpenPgpPrivateKey(key));
+  return resolved.map(key => toOpenPgpPrivateKey(key));
 }
 
 function toOpenPgpPrivateKeysRequired(keys: PrivateKey | PrivateKey[]): openpgp.PrivateKey[] {
-  return toArray(keys)?.map((key) => toOpenPgpPrivateKey(key)) ?? [];
+  return toArray(keys)?.map(key => toOpenPgpPrivateKey(key)) ?? [];
 }
 
 function toOpenPgpPrivateKey(key: PrivateKey): openpgp.PrivateKey {

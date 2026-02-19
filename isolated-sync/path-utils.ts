@@ -4,10 +4,10 @@ export interface NormalizePathOptions {
 
 export function normalizePath(path: string, options: NormalizePathOptions = {}): string {
   const trimSlashes = options.trimSlashes ?? true;
-  let cleaned = path.trim().replace(/\\+/g, "/").replace(/\/+/g, "/");
+  let cleaned = path.trim().replace(/\\+/g, '/').replace(/\/+/g, '/');
 
   if (trimSlashes) {
-    cleaned = cleaned.replace(/^\/+|\/+$/g, "");
+    cleaned = cleaned.replace(/^\/+|\/+$/g, '');
   }
 
   return cleaned;
@@ -20,9 +20,9 @@ export function toCanonicalPathKey(path: string, caseInsensitive: boolean): stri
 
 export function getParentPath(path: string): string {
   const normalized = normalizePath(path);
-  const index = normalized.lastIndexOf("/");
+  const index = normalized.lastIndexOf('/');
   if (index <= 0) {
-    return "";
+    return '';
   }
 
   return normalized.slice(0, index);
@@ -30,7 +30,7 @@ export function getParentPath(path: string): string {
 
 export function getBaseName(path: string): string {
   const normalized = normalizePath(path);
-  const index = normalized.lastIndexOf("/");
+  const index = normalized.lastIndexOf('/');
   if (index < 0) {
     return normalized;
   }

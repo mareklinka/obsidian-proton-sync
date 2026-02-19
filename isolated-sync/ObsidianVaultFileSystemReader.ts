@@ -1,9 +1,9 @@
-import { Observable, Subject } from "rxjs";
-import type { EventRef, TAbstractFile, TFile, TFolder, Vault } from "obsidian";
-import type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from "./shared-types";
-import { getParentPath, normalizePath, toCanonicalPathKey } from "./path-utils";
+import { Observable, Subject } from 'rxjs';
+import type { EventRef, TAbstractFile, TFile, TFolder, Vault } from 'obsidian';
+import type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from './shared-types';
+import { getParentPath, normalizePath, toCanonicalPathKey } from './path-utils';
 
-export type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from "./shared-types";
+export type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from './shared-types';
 
 export type ReaderChangeType = FileSystemChangeType;
 
@@ -21,7 +21,7 @@ export interface FileMetadataDescriptor {
   modifiedAt: number;
 }
 
-type VaultEventName = "create" | "modify" | "rename" | "delete";
+type VaultEventName = 'create' | 'modify' | 'rename' | 'delete';
 
 interface VaultAdapter {
   getAbstractFileByPath(path: string): TAbstractFile | null;
@@ -75,17 +75,14 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
   private started = false;
   private disposed = false;
 
-  constructor(
-    vault: Vault,
-    options: FileSystemReaderOptions = {},
-  ) {
+  constructor(vault: Vault, options: FileSystemReaderOptions = {}) {
     this.adapter = options.vaultAdapter ?? (vault as unknown as VaultAdapter);
     this.now = options.now ?? (() => Date.now());
     this.binaryAsBlob = options.binaryAsBlob ?? false;
     this.caseInsensitivePaths = options.caseInsensitivePaths ?? true;
     this.ignoredPrefixes = (options.ignoredPathPrefixes ?? [])
-      .map((path) => this.normalizePath(path))
-      .filter((path) => path.length > 0);
+      .map(path => this.normalizePath(path))
+      .filter(path => path.length > 0);
     this.ignorePredicate = options.ignorePredicate;
     this.isFileGuard = options.isFile ?? ((entry: unknown): entry is TFile => isLikelyFile(entry));
     this.isFolderGuard = options.isFolder ?? ((entry: unknown): entry is TFolder => isLikelyFolder(entry));
@@ -98,10 +95,10 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
       return;
     }
 
-    this.refs.push(this.adapter.on("create", (...args) => this.handleCreate(args[0])));
-    this.refs.push(this.adapter.on("modify", (...args) => this.handleModify(args[0])));
-    this.refs.push(this.adapter.on("rename", (...args) => this.handleRename(args[0], args[1])));
-    this.refs.push(this.adapter.on("delete", (...args) => this.handleDelete(args[0])));
+    this.refs.push(this.adapter.on('create', (...args) => this.handleCreate(args[0])));
+    this.refs.push(this.adapter.on('modify', (...args) => this.handleModify(args[0])));
+    this.refs.push(this.adapter.on('rename', (...args) => this.handleRename(args[0], args[1])));
+    this.refs.push(this.adapter.on('delete', (...args) => this.handleDelete(args[0])));
 
     this.started = true;
   }
@@ -142,14 +139,14 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
 
     const bytes = await this.adapter.readBinary(entry);
     const content: Blob | ArrayBuffer = this.binaryAsBlob
-      ? new Blob([bytes], { type: "application/octet-stream" })
+      ? new Blob([bytes], { type: 'application/octet-stream' })
       : bytes;
 
     return {
       name: entry.name,
       path: this.normalizePath(entry.path),
       modifiedAt: entry.stat?.mtime ?? this.now(),
-      content,
+      content
     };
   }
 
@@ -166,7 +163,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
 
     return {
       name: entry.name,
-      path: this.normalizePath(entry.path),
+      path: this.normalizePath(entry.path)
     };
   }
 
@@ -181,7 +178,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
       return false;
     }
 
-    if (entityType === "file") {
+    if (entityType === 'file') {
       return this.isFileGuard(entry);
     }
 
@@ -198,14 +195,14 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
       }
 
       const path = this.normalizePath(entry.path);
-      if (!path || this.isIgnored(path, "file")) {
+      if (!path || this.isIgnored(path, 'file')) {
         continue;
       }
 
       files.push({
         name: entry.name,
         path,
-        modifiedAt: entry.stat?.mtime ?? this.now(),
+        modifiedAt: entry.stat?.mtime ?? this.now()
       });
     }
 
@@ -222,13 +219,13 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
       }
 
       const path = this.normalizePath(entry.path);
-      if (!path || this.isIgnored(path, "folder")) {
+      if (!path || this.isIgnored(path, 'folder')) {
         continue;
       }
 
       folders.push({
         name: entry.name,
-        path,
+        path
       });
     }
 
@@ -265,11 +262,11 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
 
   private mapCreateEvent(rawEntry: unknown): ReaderChangeEvent | null {
     if (this.isFileGuard(rawEntry)) {
-      return this.createEvent("file-created", "file", rawEntry.path);
+      return this.createEvent('file-created', 'file', rawEntry.path);
     }
 
     if (this.isFolderGuard(rawEntry)) {
-      return this.createEvent("folder-created", "folder", rawEntry.path);
+      return this.createEvent('folder-created', 'folder', rawEntry.path);
     }
 
     return null;
@@ -277,14 +274,14 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
 
   private mapModifyEvent(rawEntry: unknown): ReaderChangeEvent | null {
     if (this.isFileGuard(rawEntry)) {
-      return this.createEvent("file-edited", "file", rawEntry.path);
+      return this.createEvent('file-edited', 'file', rawEntry.path);
     }
 
     return null;
   }
 
   private mapRenameEvent(rawEntry: unknown, oldPathRaw: unknown): ReaderChangeEvent | null {
-    if (typeof oldPathRaw !== "string" || oldPathRaw.trim().length === 0) {
+    if (typeof oldPathRaw !== 'string' || oldPathRaw.trim().length === 0) {
       return null;
     }
 
@@ -294,25 +291,23 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
     }
 
     if (this.isFileGuard(rawEntry)) {
-      return this.createEvent("file-moved", "file", rawEntry.path, oldPath);
+      return this.createEvent('file-moved', 'file', rawEntry.path, oldPath);
     }
 
     if (this.isFolderGuard(rawEntry)) {
       const newPath = this.normalizePath(rawEntry.path);
-      if (!newPath || this.isIgnored(newPath, "folder")) {
+      if (!newPath || this.isIgnored(newPath, 'folder')) {
         return null;
       }
 
-      const type = getParentPath(newPath) === getParentPath(oldPath)
-        ? "folder-renamed"
-        : "folder-moved";
+      const type = getParentPath(newPath) === getParentPath(oldPath) ? 'folder-renamed' : 'folder-moved';
 
       return {
         type,
-        entityType: "folder",
+        entityType: 'folder',
         path: newPath,
         oldPath,
-        occurredAt: this.now(),
+        occurredAt: this.now()
       };
     }
 
@@ -321,11 +316,11 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
 
   private mapDeleteEvent(rawEntry: unknown): ReaderChangeEvent | null {
     if (this.isFileGuard(rawEntry)) {
-      return this.createEvent("file-deleted", "file", rawEntry.path);
+      return this.createEvent('file-deleted', 'file', rawEntry.path);
     }
 
     if (this.isFolderGuard(rawEntry)) {
-      return this.createEvent("folder-deleted", "folder", rawEntry.path);
+      return this.createEvent('folder-deleted', 'folder', rawEntry.path);
     }
 
     return null;
@@ -335,7 +330,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
     type: ReaderChangeType,
     entityType: EntityType,
     pathRaw: string,
-    oldPathRaw?: string,
+    oldPathRaw?: string
   ): ReaderChangeEvent | null {
     const path = this.normalizePath(pathRaw);
     const oldPath = oldPathRaw ? this.normalizePath(oldPathRaw) : undefined;
@@ -349,7 +344,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
       entityType,
       path,
       oldPath,
-      occurredAt: this.now(),
+      occurredAt: this.now()
     };
   }
 
@@ -381,7 +376,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
 }
 
 function isLikelyFile(entry: unknown): entry is TFile {
-  if (!entry || typeof entry !== "object") {
+  if (!entry || typeof entry !== 'object') {
     return false;
   }
 
@@ -394,15 +389,15 @@ function isLikelyFile(entry: unknown): entry is TFile {
   };
 
   return (
-    typeof value.path === "string" &&
-    typeof value.name === "string" &&
-    typeof value.extension === "string" &&
+    typeof value.path === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.extension === 'string' &&
     value.children === undefined
   );
 }
 
 function isLikelyFolder(entry: unknown): entry is TFolder {
-  if (!entry || typeof entry !== "object") {
+  if (!entry || typeof entry !== 'object') {
     return false;
   }
 
@@ -412,9 +407,5 @@ function isLikelyFolder(entry: unknown): entry is TFolder {
     children?: unknown;
   };
 
-  return (
-    typeof value.path === "string" &&
-    typeof value.name === "string" &&
-    Array.isArray(value.children)
-  );
+  return typeof value.path === 'string' && typeof value.name === 'string' && Array.isArray(value.children);
 }

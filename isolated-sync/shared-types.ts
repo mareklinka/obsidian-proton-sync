@@ -1,14 +1,14 @@
-export type EntityType = "file" | "folder";
+export type EntityType = 'file' | 'folder';
 
 export type FileSystemChangeType =
-  | "file-created"
-  | "file-edited"
-  | "file-deleted"
-  | "file-moved"
-  | "folder-created"
-  | "folder-renamed"
-  | "folder-deleted"
-  | "folder-moved";
+  | 'file-created'
+  | 'file-edited'
+  | 'file-deleted'
+  | 'file-moved'
+  | 'folder-created'
+  | 'folder-renamed'
+  | 'folder-deleted'
+  | 'folder-moved';
 
 export interface FileDescriptor {
   name: string;

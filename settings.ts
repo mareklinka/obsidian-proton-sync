@@ -66,11 +66,11 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Account email')
       .setDesc('Used for login and identification. Stored locally in plugin settings.')
-      .addText((text) =>
+      .addText(text =>
         text
           .setPlaceholder('you@example.com')
           .setValue(this.plugin.settings.accountEmail)
-          .onChange(async (value) => {
+          .onChange(async value => {
             this.plugin.settings.accountEmail = value.trim();
             await this.plugin.saveSettings();
           })
@@ -78,12 +78,10 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
     const statusDescription = this.buildStatusDescription();
 
-    const connectionSetting = new Setting(containerEl)
-      .setName('Connection status')
-      .setDesc(statusDescription);
+    const connectionSetting = new Setting(containerEl).setName('Connection status').setDesc(statusDescription);
 
     if (this.plugin.settings.connectionStatus === 'connected') {
-      connectionSetting.addButton((button) =>
+      connectionSetting.addButton(button =>
         button
           .setButtonText('Disconnect')
           .setCta()
@@ -93,7 +91,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
           })
       );
     } else {
-      connectionSetting.addButton((button) =>
+      connectionSetting.addButton(button =>
         button
           .setButtonText('Connect')
           .setCta()
@@ -106,39 +104,29 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Container node UID')
       .setDesc('UID of the shared Proton Drive container folder.')
-      .addText((text) =>
-        text
-          .setValue(this.plugin.settings.containerNodeUid ?? 'Not set')
-          .setDisabled(true)
-      );
+      .addText(text => text.setValue(this.plugin.settings.containerNodeUid ?? 'Not set').setDisabled(true));
 
     new Setting(containerEl)
       .setName('Vault root node UID')
       .setDesc('UID of this vault’s root folder on Proton Drive.')
-      .addText((text) =>
-        text
-          .setValue(this.plugin.settings.vaultRootNodeUid ?? 'Not set')
-          .setDisabled(true)
-      );
+      .addText(text => text.setValue(this.plugin.settings.vaultRootNodeUid ?? 'Not set').setDisabled(true));
 
     containerEl.createEl('h3', { text: 'Debug logging' });
 
     new Setting(containerEl)
       .setName('Enable file logging')
       .setDesc('Write debug logs to a file inside the vault for troubleshooting.')
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.enableFileLogging)
-          .onChange(async (value) => {
-            this.plugin.settings.enableFileLogging = value;
-            await this.plugin.saveSettings();
-          })
+      .addToggle(toggle =>
+        toggle.setValue(this.plugin.settings.enableFileLogging).onChange(async value => {
+          this.plugin.settings.enableFileLogging = value;
+          await this.plugin.saveSettings();
+        })
       );
 
     new Setting(containerEl)
       .setName('Log level')
       .setDesc('Minimum severity to write to the log file.')
-      .addDropdown((dropdown) =>
+      .addDropdown(dropdown =>
         dropdown
           .addOptions({
             debug: 'Debug',
@@ -147,7 +135,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             error: 'Error'
           })
           .setValue(this.plugin.settings.logLevel)
-          .onChange(async (value) => {
+          .onChange(async value => {
             this.plugin.settings.logLevel = value as LogLevel;
             await this.plugin.saveSettings();
           })
@@ -156,13 +144,14 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Max log size (KB)')
       .setDesc('When the log grows beyond this size it will be trimmed.')
-      .addText((text) =>
+      .addText(text =>
         text
           .setPlaceholder('1024')
           .setValue(String(this.plugin.settings.logMaxSizeKb))
-          .onChange(async (value) => {
+          .onChange(async value => {
             const parsed = Number(value);
-            this.plugin.settings.logMaxSizeKb = Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.logMaxSizeKb;
+            this.plugin.settings.logMaxSizeKb =
+              Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.logMaxSizeKb;
             await this.plugin.saveSettings();
           })
       );

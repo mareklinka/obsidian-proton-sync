@@ -38,7 +38,10 @@ class FileLogger implements PluginLogger {
   private settings: LoggerSettings;
   private writeChain: Promise<void> = Promise.resolve();
 
-  constructor(private readonly app: App, settings: LoggerSettings) {
+  constructor(
+    private readonly app: App,
+    settings: LoggerSettings
+  ) {
     this.settings = settings;
   }
 
@@ -69,9 +72,7 @@ class FileLogger implements PluginLogger {
 
     const entry = formatLogEntry(level, message, context, error);
 
-    this.writeChain = this.writeChain
-      .then(() => this.appendEntry(entry))
-      .catch(() => this.appendEntry(entry));
+    this.writeChain = this.writeChain.then(() => this.appendEntry(entry)).catch(() => this.appendEntry(entry));
   }
 
   private shouldLog(level: LogLevel): boolean {
@@ -142,12 +143,7 @@ function normalizeLoggerSettings(settings: Partial<LoggerSettings>): LoggerSetti
   };
 }
 
-function formatLogEntry(
-  level: LogLevel,
-  message: string,
-  context?: Record<string, unknown>,
-  error?: unknown
-): string {
+function formatLogEntry(level: LogLevel, message: string, context?: Record<string, unknown>, error?: unknown): string {
   const timestamp = new Date().toISOString();
   const levelLabel = level.toUpperCase();
   const contextText = context ? ` ${safeStringify(context)}` : '';

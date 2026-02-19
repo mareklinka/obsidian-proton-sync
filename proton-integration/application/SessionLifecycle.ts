@@ -1,11 +1,11 @@
-import type { ProtonSession } from "../../session-store";
+import type { ProtonSession } from '../../session-store';
 
 const DEFAULT_REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
 
 export class SessionLifecycle {
   constructor(
     private readonly clock: { now(): number },
-    private readonly refreshThresholdMs = DEFAULT_REFRESH_THRESHOLD_MS,
+    private readonly refreshThresholdMs = DEFAULT_REFRESH_THRESHOLD_MS
   ) {}
 
   shouldRefresh(session: ProtonSession, force: boolean): boolean {

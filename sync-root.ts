@@ -1,14 +1,9 @@
-import {
-  NodeType,
-  type ProtonDriveClient,
-  type NodeEntity,
-  type MaybeNode,
-} from "@protontech/drive-sdk";
+import { NodeType, type ProtonDriveClient, type NodeEntity, type MaybeNode } from '@protontech/drive-sdk';
 
-import type { PluginLogger } from "./logger";
-import type { ProtonDriveSyncSettings } from "./settings";
+import type { PluginLogger } from './logger';
+import type { ProtonDriveSyncSettings } from './settings';
 
-const SYNC_CONTAINER_NAME = "obsidian-notes";
+const SYNC_CONTAINER_NAME = 'obsidian-notes';
 
 export interface SyncRootInfo {
   vaultName: string;
@@ -20,31 +15,28 @@ export async function ensureSyncRoots(
   client: ProtonDriveClient,
   settings: ProtonDriveSyncSettings,
   vaultName: string,
-  logger?: PluginLogger,
+  logger?: PluginLogger
 ): Promise<SyncRootInfo> {
-  logger?.debug("Ensuring sync root folders exist");
+  logger?.debug('Ensuring sync root folders exist');
 
-  const myFilesRoot = await requireFolderNode(
-    client.getMyFilesRootFolder(),
-    "My files root",
-  );
+  const myFilesRoot = await requireFolderNode(client.getMyFilesRootFolder(), 'My files root');
 
-  logger?.debug("Ensuring sync container folder exists");
+  logger?.debug('Ensuring sync container folder exists');
   const containerNode = await ensureFolderByName(
     client,
     settings.containerNodeUid,
     myFilesRoot.uid,
     SYNC_CONTAINER_NAME,
-    logger,
+    logger
   );
 
-  logger?.debug("Ensuring vault root folder exists");
+  logger?.debug('Ensuring vault root folder exists');
   const vaultRootNode = await ensureFolderByName(
     client,
     settings.vaultRootNodeUid,
     containerNode.uid,
     vaultName,
-    logger,
+    logger
   );
 
   settings.containerNodeUid = containerNode.uid;
@@ -53,7 +45,7 @@ export async function ensureSyncRoots(
   return {
     vaultName: vaultName,
     containerNodeUid: containerNode.uid,
-    vaultRootNodeUid: vaultRootNode.uid,
+    vaultRootNodeUid: vaultRootNode.uid
   };
 }
 
@@ -62,7 +54,7 @@ async function ensureFolderByName(
   cachedUid: string | null,
   parentUid: string,
   name: string,
-  logger?: PluginLogger,
+  logger?: PluginLogger
 ): Promise<NodeEntity> {
   const cached = await getFolderByUid(client, cachedUid, logger);
   if (cached && cached.parentUid === parentUid) {
@@ -70,10 +62,10 @@ async function ensureFolderByName(
   }
 
   if (cached) {
-    logger?.warn("Cached sync root folder moved or re-parented", {
+    logger?.warn('Cached sync root folder moved or re-parented', {
       uid: cached.uid,
       expectedParentUid: parentUid,
-      actualParentUid: cached.parentUid,
+      actualParentUid: cached.parentUid
     });
   }
 
@@ -89,7 +81,7 @@ async function ensureFolderByName(
 async function getFolderByUid(
   client: ProtonDriveClient,
   uid: string | null,
-  logger?: PluginLogger,
+  logger?: PluginLogger
 ): Promise<NodeEntity | null> {
   if (!uid) {
     return null;
@@ -97,14 +89,14 @@ async function getFolderByUid(
 
   const node = await client.getNode(uid);
   if (!node.ok) {
-    logger?.warn("Sync root node lookup failed", { uid, error: node.error });
+    logger?.warn('Sync root node lookup failed', { uid, error: node.error });
     return null;
   }
 
   if (node.value.type !== NodeType.Folder) {
-    logger?.warn("Sync root node is not a folder", {
+    logger?.warn('Sync root node is not a folder', {
       uid,
-      type: node.value.type,
+      type: node.value.type
     });
     return null;
   }
@@ -115,10 +107,10 @@ async function getFolderByUid(
 async function findChildFolderByName(
   client: ProtonDriveClient,
   parentUid: string,
-  name: string,
+  name: string
 ): Promise<NodeEntity | null> {
   for await (const child of client.iterateFolderChildren(parentUid, {
-    type: NodeType.Folder,
+    type: NodeType.Folder
   })) {
     if (!child.ok) {
       continue;
@@ -132,10 +124,7 @@ async function findChildFolderByName(
   return null;
 }
 
-async function requireFolderNode(
-  nodePromise: Promise<MaybeNode>,
-  label: string,
-): Promise<NodeEntity> {
+async function requireFolderNode(nodePromise: Promise<MaybeNode>, label: string): Promise<NodeEntity> {
   const node = await nodePromise;
   if (!node.ok) {
     throw new Error(`Failed to load ${label}.`);
