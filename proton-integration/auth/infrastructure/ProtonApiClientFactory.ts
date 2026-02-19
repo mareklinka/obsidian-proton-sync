@@ -1,6 +1,6 @@
-import { ProtonApiClient } from '../../proton-api';
-import type { ProtonSession } from '../../session-store';
-import type { ProtonApiClientFactory } from '../public/types';
+import { ProtonApiClient } from './ProtonApiClient';
+import type { ProtonSession } from '../../../session-store';
+import type { ProtonApiClientFactory } from '../../domain/contracts';
 
 export const defaultProtonApiClientFactory: ProtonApiClientFactory = ({ getSession, appVersion, logger }) =>
   new ProtonApiClient(getSession, appVersion, 'https://mail.proton.me/api', logger);

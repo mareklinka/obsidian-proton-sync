@@ -3,7 +3,6 @@ import { sha512 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import bcrypt from 'bcryptjs';
 import * as openpgp from 'openpgp';
-import { PluginLogger } from './logger';
 
 export interface ProtonAuthInfo {
   Version: number;

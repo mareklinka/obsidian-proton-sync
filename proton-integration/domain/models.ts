@@ -1,5 +1,5 @@
 import type { ProtonSession } from '../../session-store';
-import type { ProtonIntegrationStatus } from '../public/types';
+import type { ProtonIntegrationStatus } from './contracts';
 
 export interface ProtonIntegrationState {
   status: ProtonIntegrationStatus;

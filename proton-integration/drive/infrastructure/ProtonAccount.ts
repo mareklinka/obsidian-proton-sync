@@ -2,8 +2,8 @@ import * as openpgp from 'openpgp';
 import type { ProtonDriveAccount, ProtonDriveAccountAddress } from '@protontech/drive-sdk';
 import type { PrivateKey, PublicKey } from '@protontech/drive-sdk/dist/crypto';
 
-import { ProtonApiClient } from './proton-api';
-import type { PluginLogger } from './logger';
+import { ProtonApiClient } from '../../auth/infrastructure/ProtonApiClient';
+import type { ProtonLogger } from '../../domain/contracts';
 
 type ProtonAddressKey = {
   ID: string;
@@ -60,7 +60,7 @@ export class ProtonAccount implements ProtonDriveAccount {
   constructor(
     private readonly apiClient: ProtonApiClient,
     private readonly keyPassphrases: Record<string, string>,
-    private readonly logger?: PluginLogger
+    private readonly logger?: ProtonLogger
   ) {}
 
   async getOwnPrimaryAddress(): Promise<ProtonDriveAccountAddress> {
@@ -175,7 +175,7 @@ export class ProtonAccount implements ProtonDriveAccount {
 async function mapAddress(
   address: ProtonAddress,
   userKey: openpgp.PrivateKey,
-  logger?: PluginLogger
+  logger?: ProtonLogger
 ): Promise<ProtonDriveAccountAddress> {
   const keys = address.Keys ?? [];
   const parsedKeys = await Promise.all(
@@ -199,7 +199,7 @@ async function mapAddress(
 async function resolveUserKey(
   keys: ProtonAddressKey[],
   passphrases: Record<string, string>,
-  logger?: PluginLogger
+  logger?: ProtonLogger
 ): Promise<openpgp.PrivateKey | null> {
   const activeKeys = keys.filter(key => key.Active === undefined || key.Active === true || key.Active === 1);
 
@@ -216,7 +216,7 @@ async function resolveUserKey(
 async function decryptKey(
   key: ProtonAddressKey,
   passphrases: Record<string, string>,
-  logger?: PluginLogger
+  logger?: ProtonLogger
 ): Promise<openpgp.PrivateKey | null> {
   const privateKey = await openpgp.readPrivateKey({
     armoredKey: key.PrivateKey
@@ -256,7 +256,7 @@ async function decryptKey(
 async function decryptKeyUsingToken(
   key: ProtonAddressKey,
   userKey: openpgp.PrivateKey | null,
-  logger?: PluginLogger
+  logger?: ProtonLogger
 ): Promise<PrivateKey> {
   const privateKey = await openpgp.readPrivateKey({
     armoredKey: key.PrivateKey

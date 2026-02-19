@@ -1,7 +1,7 @@
 import { requestUrl } from 'obsidian';
 
-import type { ProtonSession } from './session-store';
-import type { PluginLogger } from './logger';
+import type { ProtonSession } from '../../../session-store';
+import type { ProtonLogger } from '../../domain/contracts';
 
 type SessionProvider = () => ProtonSession | null;
 
@@ -19,7 +19,7 @@ export class ProtonApiClient {
     private readonly getSession: SessionProvider,
     appVersion: string,
     private readonly baseUrl: string = 'https://mail.proton.me/api',
-    private readonly logger?: PluginLogger
+    private readonly logger?: ProtonLogger
   ) {
     this.appVersionHeader = `external-drive-obsidiansync@${appVersion}`;
   }

@@ -1,9 +1,9 @@
 import type { App } from 'obsidian';
 
-import { clearSession, loadSession, saveSession, type ProtonSession } from '../../../session-store';
-import type { SessionStore } from '../../public/types';
+import { clearSession, loadSession, saveSession, type ProtonSession } from '../session-store';
+import type { SessionStore } from '../proton-integration/auth/public';
 
-export class SessionRepository implements SessionStore {
+export class ObsidianSessionRepository implements SessionStore {
   constructor(private readonly app: App) {}
 
   async load(): Promise<ProtonSession | null> {

@@ -1,5 +1,5 @@
-import { ProtonAuthService } from '../../proton-auth';
-import type { ProtonAuthGateway, ProtonCredentials, ProtonLogger } from '../public/types';
+import { ProtonAuthService } from './ProtonAuthService';
+import type { ProtonAuthGateway, ProtonCredentials, ProtonLogger } from '../../domain/contracts';
 
 export class DefaultProtonAuthGateway implements ProtonAuthGateway {
   private readonly authService: ProtonAuthService;

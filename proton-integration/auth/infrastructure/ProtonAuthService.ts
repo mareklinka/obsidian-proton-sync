@@ -1,8 +1,8 @@
 import { requestUrl } from 'obsidian';
 
-import type { ProtonSession } from './session-store';
-import { buildSrpProofs, decodeBase64, encodeBase64, ProtonAuthInfo } from './proton-srp';
-import type { PluginLogger } from './logger';
+import type { ProtonSession } from '../../../session-store';
+import { buildSrpProofs, decodeBase64, encodeBase64, ProtonAuthInfo } from './ProtonSrp';
+import type { ProtonLogger } from '../../domain/contracts';
 
 const API_BASE_URL = 'https://mail.proton.me/api';
 const DEFAULT_SESSION_TTL_MS = 50 * 60 * 1000;
@@ -28,12 +28,9 @@ export interface ProtonAuthResult {
 
 export class ProtonAuthService {
   private readonly appVersionHeader: string;
-  private readonly logger: PluginLogger;
+  private readonly logger: ProtonLogger;
 
-  constructor(
-    private readonly appVersion: string,
-    logger: PluginLogger
-  ) {
+  constructor(appVersion: string, logger: ProtonLogger) {
     this.appVersionHeader = `external-drive-obsidiansync@${appVersion}`;
     this.logger = logger;
   }

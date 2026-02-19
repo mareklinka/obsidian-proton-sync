@@ -1,8 +1,8 @@
 import type { ProtonDriveClient } from '@protontech/drive-sdk';
 
-import { createProtonDriveClient } from '../../proton-drive-client';
-import type { ProtonSession } from '../../session-store';
-import type { ProtonLogger } from '../public/types';
+import { createProtonDriveClient } from './ProtonDriveClient';
+import type { ProtonSession } from '../../../session-store';
+import type { ProtonLogger } from '../../domain/contracts';
 
 export type ProtonDriveClientFactoryArgs = {
   getSession: () => ProtonSession | null;

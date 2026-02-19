@@ -1,10 +1,10 @@
 import type { ProtonSession } from '../../session-store';
 import { NoSessionError, SessionRefreshError, toSafeError } from '../domain/errors';
 import { redactMeta } from '../domain/redaction';
-import type { ProtonAuthGateway, ProtonLogger, SessionStore } from '../public/types';
+import type { ProtonAuthGateway, ProtonLogger, ProtonSessionStore } from '../domain/contracts';
 
 export async function runRestoreFlow(args: {
-  sessionStore: SessionStore;
+  sessionStore: ProtonSessionStore;
   authGateway: ProtonAuthGateway;
   forceRefreshOnRestore: boolean;
   logger: ProtonLogger;

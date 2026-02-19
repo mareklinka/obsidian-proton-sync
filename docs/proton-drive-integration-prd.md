@@ -28,6 +28,7 @@ This PRD is intended as the blueprint for refactoring existing Proton code into 
 4. Ensure callers can quickly get a valid `ProtonApiClient` after either flow.
 5. Enforce security best practices (no token/password logging, secret handling boundaries).
 6. Make behavior deterministic and highly testable with mocked dependencies.
+7. Refactor **both existing and new** Proton-related implementation out of the main plugin namespace (`main.ts`) into the integration module.
 
 ---
 
@@ -37,6 +38,8 @@ This PRD is intended as the blueprint for refactoring existing Proton code into 
 - UI redesign of login modal.
 - Rewriting Proton Drive SDK internals.
 - Persisting app-level settings directly inside Proton module.
+
+> Clarification: this PRD **does include** refactoring existing Proton-related orchestration currently in `main.ts`; that migration is in-scope and mandatory.
 
 ---
 
@@ -86,6 +89,8 @@ proton-integration/
 - `domain/*`: internal models/helpers.
 
 No direct imports to internal modules from outside `proton-integration`.
+
+Additionally, `main.ts` (and the main plugin namespace in general) must not contain Proton auth/session/refresh/bootstrap orchestration logic after migration. It may only invoke the public integration API and react to outcomes.
 
 ---
 
@@ -153,6 +158,7 @@ export type {
 - `signIn` and `restoreFromStorage` must each transition into a state where `getApiClient()` is usable on success.
 - `getApiClient()` returns `null` when unavailable; callers never access session internals directly.
 - No public method should expose raw secrets/tokens in return payloads.
+- Public API must be sufficient for callers so that no Proton orchestration logic needs to remain in `main.ts`.
 
 ---
 
@@ -341,6 +347,12 @@ Likely migration candidates:
 
 `main.ts` should only call public integration handle methods and react to status.
 
+### Mandatory migration rule
+
+- Existing Proton-related logic already present in the codebase must be refactored together with newly introduced Proton integration code.
+- Partial migration where new code lives in `proton-integration/*` but legacy Proton orchestration remains in `main.ts` is **not acceptable**.
+- During migration, `main.ts` is reduced to composition/wiring only (dependency construction + API calls), with no direct Proton auth/session flow logic.
+
 ---
 
 ## 15) Suggested implementation phases
@@ -351,7 +363,7 @@ Phase 1:
 - define public contracts,
 - implement `createProtonIntegration` orchestrator,
 - wire login + restore + disconnect,
-- keep existing behavior parity.
+- refactor existing Proton logic out of `main.ts` while keeping behavior parity.
 
 Phase 2:
 
@@ -412,9 +424,10 @@ const me = await api.getJson('/core/v4/users');
 Implementation is done when:
 
 - Proton integration code is encapsulated in dedicated folder,
+- existing Proton-related code has been migrated out of `main.ts` and main plugin namespace,
 - public API surface is minimal and documented,
 - login + restore flows initialize usable `ProtonApiClient`,
 - external dependencies are DI-based abstractions,
 - logs are structured and sanitized,
 - tests pass and cover critical flow/security paths,
-- caller (`main.ts`) orchestration can be reduced to simple API calls.
+- caller (`main.ts`) contains composition-level calls only, with no direct Proton orchestration logic.

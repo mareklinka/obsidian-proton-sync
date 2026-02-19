@@ -6,7 +6,6 @@ import {
   type PublicKey,
   type SessionKey
 } from '@protontech/drive-sdk/dist/crypto';
-import { PluginLogger } from './logger';
 
 export function createOpenPgpCrypto(): OpenPGPCrypto {
   return new OpenPGPCryptoWithCryptoProxy(new OpenPgpCryptoProxy());
@@ -57,9 +56,9 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
 
   async encryptSessionKey(
     options: SessionKey & { format: 'binary'; encryptionKeys?: PublicKey | PublicKey[]; passwords?: string[] }
-  ): Promise<Uint8Array> {
+  ): Promise<Uint8Array<ArrayBuffer>> {
     const openPgpSessionKey = toOpenPgpSessionKey(options);
-    return openpgp.encryptSessionKey({
+    const encrypted = await openpgp.encryptSessionKey({
       data: options.data,
       algorithm: openPgpSessionKey.algorithm,
       aeadAlgorithm: openPgpSessionKey.aeadAlgorithm,
@@ -67,6 +66,8 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
       encryptionKeys: toArray(options.encryptionKeys) as openpgp.PublicKey[] | undefined,
       passwords: options.passwords
     });
+
+    return encrypted as unknown as Uint8Array<ArrayBuffer>;
   }
 
   async decryptSessionKey(options: {
@@ -97,7 +98,7 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
 
   async encryptMessage<Format extends 'armored' | 'binary' = 'armored', Detached extends boolean = false>(options: {
     format?: Format;
-    binaryData: Uint8Array;
+    binaryData: Uint8Array<ArrayBuffer>;
     sessionKey?: SessionKey;
     encryptionKeys: PublicKey[];
     signingKeys?: PrivateKey;
@@ -106,10 +107,10 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
   }): Promise<
     Detached extends true
       ? {
-          message: Format extends 'binary' ? Uint8Array : string;
-          signature: Format extends 'binary' ? Uint8Array : string;
+          message: Format extends 'binary' ? Uint8Array<ArrayBuffer> : string;
+          signature: Format extends 'binary' ? Uint8Array<ArrayBuffer> : string;
         }
-      : { message: Format extends 'binary' ? Uint8Array : string }
+      : { message: Format extends 'binary' ? Uint8Array<ArrayBuffer> : string }
   > {
     const message = await openpgp.createMessage({ binary: options.binaryData });
     const format = options.format ?? 'armored';
@@ -165,15 +166,15 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
   async decryptMessage<Format extends 'utf8' | 'binary' = 'utf8'>(options: {
     format: Format;
     armoredMessage?: string;
-    binaryMessage?: Uint8Array;
+    binaryMessage?: Uint8Array<ArrayBuffer>;
     armoredSignature?: string;
-    binarySignature?: Uint8Array;
+    binarySignature?: Uint8Array<ArrayBuffer>;
     sessionKeys?: SessionKey;
     passwords?: string[];
     decryptionKeys?: PrivateKey | PrivateKey[];
     verificationKeys?: PublicKey | PublicKey[];
   }): Promise<{
-    data: Format extends 'binary' ? Uint8Array : string;
+    data: Format extends 'binary' ? Uint8Array<ArrayBuffer> : string;
     verificationStatus: VERIFICATION_STATUS;
     verificationErrors?: Error[];
   }> {
@@ -234,11 +235,11 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
 
   async signMessage<Format extends 'binary' | 'armored' = 'armored'>(options: {
     format: Format;
-    binaryData: Uint8Array;
+    binaryData: Uint8Array<ArrayBuffer>;
     signingKeys: PrivateKey | PrivateKey[];
     detached: boolean;
     signatureContext?: { critical: boolean; value: string };
-  }): Promise<Format extends 'binary' ? Uint8Array : string> {
+  }): Promise<Format extends 'binary' ? Uint8Array<ArrayBuffer> : string> {
     const message = await openpgp.createMessage({ binary: options.binaryData });
 
     const signatureNotations = options.signatureContext
@@ -273,9 +274,9 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
   }
 
   async verifyMessage(options: {
-    binaryData: Uint8Array;
+    binaryData: Uint8Array<ArrayBuffer>;
     armoredSignature?: string;
-    binarySignature?: Uint8Array;
+    binarySignature?: Uint8Array<ArrayBuffer>;
     verificationKeys: PublicKey | PublicKey[];
     signatureContext?: { critical: boolean; value: string };
   }): Promise<{ verificationStatus: VERIFICATION_STATUS; errors?: Error[] }> {

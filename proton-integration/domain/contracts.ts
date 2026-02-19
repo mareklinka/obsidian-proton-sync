@@ -1,4 +1,4 @@
-import type { ProtonApiClient } from '../../proton-api';
+import type { ProtonApiClient } from '../auth/infrastructure/ProtonApiClient';
 import type { ProtonSession } from '../../session-store';
 
 export interface ProtonCredentials {
@@ -30,13 +30,13 @@ export interface ProtonIntegrationHandle {
   disconnect(): Promise<void>;
 }
 
-export interface SessionStore {
+export interface ProtonSessionStore {
   load(): Promise<ProtonSession | null>;
   save(session: ProtonSession): Promise<void>;
   clear(): Promise<void>;
 }
 
-export interface SecretStore {
+export interface ProtonSecretStore {
   get(key: string): string | null;
   set(key: string, value: string): void;
   clear(key: string): void;
@@ -66,8 +66,8 @@ export type ProtonApiClientFactory = (args: {
 export interface ProtonIntegrationDeps {
   appVersion: string;
   logger: ProtonLogger;
-  sessionStore: SessionStore;
-  secretStore: SecretStore;
+  sessionStore: ProtonSessionStore;
+  secretStore: ProtonSecretStore;
   authGateway: ProtonAuthGateway;
   apiClientFactory?: ProtonApiClientFactory;
   clock?: { now(): number };

@@ -1,10 +1,16 @@
-import { computeKeyPasswordFromSalt } from '../../proton-srp';
-import type { ProtonApiClient } from '../../proton-api';
+import { computeKeyPasswordFromSalt } from '../auth/infrastructure/ProtonSrp';
+import type { ProtonApiClient } from '../auth/infrastructure/ProtonApiClient';
 import type { ProtonSession } from '../../session-store';
 import { AuthFailedError, SecretStorageError, TwoFactorRequiredError, toSafeError } from '../domain/errors';
 import { SALTED_PASSPHRASES_SECRET_KEY } from '../domain/models';
 import { redactMeta } from '../domain/redaction';
-import type { ProtonAuthGateway, ProtonCredentials, ProtonLogger, SecretStore, SessionStore } from '../public/types';
+import type {
+  ProtonAuthGateway,
+  ProtonCredentials,
+  ProtonLogger,
+  ProtonSecretStore,
+  ProtonSessionStore
+} from '../domain/contracts';
 
 type ProtonKeySaltEntry = {
   ID?: string;
@@ -18,8 +24,8 @@ type ProtonKeySaltsResponse = {
 export async function runLoginFlow(args: {
   credentials: ProtonCredentials;
   authGateway: ProtonAuthGateway;
-  sessionStore: SessionStore;
-  secretStore: SecretStore;
+  sessionStore: ProtonSessionStore;
+  secretStore: ProtonSecretStore;
   createApiClient: (session: ProtonSession) => ProtonApiClient;
   logger: ProtonLogger;
   correlationId: string;

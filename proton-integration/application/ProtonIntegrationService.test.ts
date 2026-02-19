@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createProtonIntegration } from '../public';
+import { createProtonIntegration } from './ProtonIntegrationService';
 import { redactMeta } from '../domain/redaction';
-import type { ProtonIntegrationDeps, ProtonLogger, SecretStore, SessionStore } from '../public/types';
+import type { ProtonIntegrationDeps, ProtonLogger, ProtonSecretStore, ProtonSessionStore } from '../domain/contracts';
 import type { ProtonSession } from '../../session-store';
 
 type LogEntry = {
@@ -40,8 +40,8 @@ function buildLogger(entries: LogEntry[]): ProtonLogger {
 }
 
 function buildStores(initialSession: ProtonSession | null = null): {
-  sessionStore: SessionStore;
-  secretStore: SecretStore;
+  sessionStore: ProtonSessionStore;
+  secretStore: ProtonSecretStore;
   sessionRef: { value: ProtonSession | null };
   secretMap: Map<string, string>;
 } {
@@ -273,7 +273,7 @@ describe('createProtonIntegration', () => {
   });
 
   it('DI storage failure produces sanitized error', async () => {
-    const failingStore: SessionStore = {
+    const failingStore: ProtonSessionStore = {
       load: vi.fn(async () => null),
       save: vi.fn(async () => {
         throw new Error('failed writing token to store');

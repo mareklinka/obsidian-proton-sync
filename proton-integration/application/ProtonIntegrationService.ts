@@ -1,16 +1,16 @@
-import type { ProtonApiClient } from '../../proton-api';
+import type { ProtonApiClient } from '../auth/infrastructure/ProtonApiClient';
 import type { ProtonSession } from '../../session-store';
 import { NoSessionError, SessionRefreshError, toSafeError } from '../domain/errors';
 import { OPERATION_PREFIX } from '../domain/models';
 import { redactMeta, sanitizeErrorMessage } from '../domain/redaction';
-import { defaultProtonApiClientFactory } from '../infrastructure/ProtonApiClientFactory';
+import { defaultProtonApiClientFactory } from '../auth/infrastructure/ProtonApiClientFactory';
 import type {
   CreateProtonIntegration,
   ProtonBootstrapOptions,
   ProtonIntegrationDeps,
   ProtonIntegrationHandle,
   ProtonIntegrationStatus
-} from '../public/types';
+} from '../domain/contracts';
 import { runLoginFlow } from './LoginFlow';
 import { runRestoreFlow } from './RestoreFlow';
 import { SessionLifecycle } from './SessionLifecycle';
