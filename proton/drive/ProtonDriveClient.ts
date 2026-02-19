@@ -2,34 +2,24 @@ import {
   CachedCryptoMaterial,
   MemoryCache,
   ProtonDriveClient,
+  ProtonDriveHTTPClient,
   type ProtonDriveClientContructorParameters,
   type ProtonDriveCryptoCache,
   type ProtonDriveEntitiesCache
 } from '@protontech/drive-sdk';
 
-import type { ProtonSession } from '../../../session-store';
-import { ProtonApiClient } from '../../auth/infrastructure/ProtonApiClient';
+import type { ProtonSession } from '../auth/ProtonSession';
 import { ProtonAccount } from './ProtonAccount';
 import { createOpenPgpCrypto } from './ProtonOpenPgp';
-import { buildSrpProofsFromParams } from '../../auth/infrastructure/ProtonSrp';
-import type { ProtonLogger } from '../../domain/contracts';
-import { ObsidianHttpClient } from './ProtonObsidianHttpClient';
+import { buildSrpProofsFromParams } from '../auth/ProtonSrp';
 
 export type SessionProvider = () => ProtonSession | null;
 type SrpModule = ProtonDriveClientContructorParameters['srpModule'];
 type SrpVerifier = Awaited<ReturnType<SrpModule['getSrpVerifier']>>;
 
-export function createProtonDriveClient(
-  getSession: SessionProvider,
-  saltedPasshphrases: Record<string, string>,
-  appVersion: string,
-  logger: ProtonLogger
-): ProtonDriveClient {
-  const httpClient = new ObsidianHttpClient(getSession, appVersion, logger);
-  const apiClient = new ProtonApiClient(getSession, appVersion, 'https://mail.proton.me/api', logger);
+export function createProtonDriveClient(account: ProtonAccount, httpClient: ProtonDriveHTTPClient): ProtonDriveClient {
   const entitiesCache: ProtonDriveEntitiesCache = new MemoryCache<string>();
   const cryptoCache: ProtonDriveCryptoCache = new MemoryCache<CachedCryptoMaterial>();
-  const account = new ProtonAccount(apiClient, saltedPasshphrases, logger);
 
   const openPGPCryptoModule = createOpenPgpCrypto();
   const srpModule = new PlaceholderSrpModule();

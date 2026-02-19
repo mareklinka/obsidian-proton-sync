@@ -1,9 +1,11 @@
 import * as openpgp from 'openpgp';
 import type { ProtonDriveAccount, ProtonDriveAccountAddress } from '@protontech/drive-sdk';
 import type { PrivateKey, PublicKey } from '@protontech/drive-sdk/dist/crypto';
-
-import { ProtonApiClient } from '../../auth/infrastructure/ProtonApiClient';
-import type { ProtonLogger } from '../../domain/contracts';
+import { ProtonSecretStore } from '../auth/ProtonSecretStore';
+import { SALTED_PASSPHRASES_SECRET_KEY } from '../Constants';
+import { ProtonSessionService } from '../auth/ProtonSessionService';
+import { ProtonSession } from '../auth/ProtonSession';
+import { getJson } from '../ProtonApiClient';
 
 type ProtonAddressKey = {
   ID: string;
@@ -54,17 +56,29 @@ type CachedValue<T> = {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export class ProtonAccount implements ProtonDriveAccount {
+  private readonly saltedKeyPasswords: Record<string, string> = {};
   private addressesCache: CachedValue<ProtonDriveAccountAddress[]> | null = null;
   private publicKeysCache = new Map<string, CachedValue<PublicKey[]>>();
 
+  private currentSession: ProtonSession | null = null;
+
   constructor(
-    private readonly apiClient: ProtonApiClient,
-    private readonly keyPassphrases: Record<string, string>,
-    private readonly logger?: ProtonLogger
-  ) {}
+    private readonly authService: ProtonSessionService,
+    private readonly secretStore: ProtonSecretStore
+  ) {
+    this.saltedKeyPasswords = JSON.parse(this.secretStore.get(SALTED_PASSPHRASES_SECRET_KEY) ?? '{}') as Record<
+      string,
+      string
+    >;
+
+    authService.currentSession$.subscribe(sessionState => {
+      this.currentSession = sessionState.state === 'ok' ? sessionState.session : null;
+    });
+  }
 
   async getOwnPrimaryAddress(): Promise<ProtonDriveAccountAddress> {
     const addresses = await this.getOwnAddresses();
+
     if (!addresses.length) {
       throw new Error('No Proton addresses found for this account.');
     }
@@ -73,13 +87,20 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 
   async getOwnAddresses(): Promise<ProtonDriveAccountAddress[]> {
-    this.logger?.debug('Fetching own Proton addresses');
     const cached = this.getCached(this.addressesCache);
     if (cached) {
       return cached;
     }
 
-    const response = await this.apiClient.getJson<ProtonAddressesResponse>('/core/v4/addresses');
+    if (!this.currentSession) {
+      throw new Error('No Proton addresses found for this account.');
+    }
+
+    const response = await getJson<ProtonAddressesResponse>(
+      '/core/v4/addresses',
+      this.currentSession,
+      this.authService.appVersionHeader
+    );
 
     const addresses = response.Addresses ?? [];
     if (!addresses.length) {
@@ -88,9 +109,9 @@ export class ProtonAccount implements ProtonDriveAccount {
 
     const user = await this.getUser();
 
-    const userKey = await resolveUserKey(user.Keys ?? [], this.keyPassphrases, this.logger);
+    const userKey = await resolveUserKey(user.Keys ?? [], this.saltedKeyPasswords);
 
-    const mapped = await Promise.all(addresses.map(address => mapAddress(address, userKey!, this.logger)));
+    const mapped = await Promise.all(addresses.map(address => mapAddress(address, userKey!)));
 
     const sorted = [...mapped].sort((left, right) => left.addressId.localeCompare(right.addressId));
 
@@ -115,7 +136,11 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 
   async hasProtonAccount(email: string): Promise<boolean> {
-    const response = await this.fetchPublicKeysRaw(email);
+    if (!this.currentSession) {
+      throw new Error('No Proton session available for API request.');
+    }
+
+    const response = await this.fetchPublicKeysRaw(email, this.currentSession);
 
     return (response.Address?.Keys ?? []).length > 0;
   }
@@ -126,7 +151,11 @@ export class ProtonAccount implements ProtonDriveAccount {
       return cached;
     }
 
-    const response = await this.fetchPublicKeysRaw(email);
+    if (!this.currentSession) {
+      throw new Error('No Proton session available for API request.');
+    }
+
+    const response = await this.fetchPublicKeysRaw(email, this.currentSession);
     const keys = response?.Address?.Keys ?? [];
 
     const parsed = await Promise.all(
@@ -146,12 +175,23 @@ export class ProtonAccount implements ProtonDriveAccount {
     return parsed;
   }
 
-  private async fetchPublicKeysRaw(email: string): Promise<ProtonPublicKeysResponse> {
-    return this.apiClient.getJson<ProtonPublicKeysResponse>('/core/v4/keys/all?Email=' + encodeURIComponent(email), {});
+  private async fetchPublicKeysRaw(email: string, session: ProtonSession): Promise<ProtonPublicKeysResponse> {
+    return getJson<ProtonPublicKeysResponse>('/core/v4/keys/all', session, this.authService.appVersionHeader, {
+      Email: email
+    });
   }
 
   private async getUser(): Promise<ProtonUser> {
-    const response = await this.apiClient.getJson<ProtonUserResponse>('/core/v4/users');
+    if (!this.currentSession) {
+      throw new Error('No Proton session available for API request.');
+    }
+
+    const response = await getJson<ProtonUserResponse>(
+      '/core/v4/users',
+      this.currentSession,
+      this.authService.appVersionHeader
+    );
+
     if (!response.User) {
       throw new Error('No Proton user returned from API.');
     }
@@ -172,16 +212,12 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 }
 
-async function mapAddress(
-  address: ProtonAddress,
-  userKey: openpgp.PrivateKey,
-  logger?: ProtonLogger
-): Promise<ProtonDriveAccountAddress> {
+async function mapAddress(address: ProtonAddress, userKey: openpgp.PrivateKey): Promise<ProtonDriveAccountAddress> {
   const keys = address.Keys ?? [];
   const parsedKeys = await Promise.all(
     keys.map(async key => ({
       id: key.ID,
-      key: (await decryptKeyUsingToken(key, userKey, logger)) as unknown as PrivateKey
+      key: (await decryptKeyUsingToken(key, userKey)) as unknown as PrivateKey
     }))
   );
 
@@ -198,25 +234,22 @@ async function mapAddress(
 
 async function resolveUserKey(
   keys: ProtonAddressKey[],
-  passphrases: Record<string, string>,
-  logger?: ProtonLogger
+  passphrases: Record<string, string>
 ): Promise<openpgp.PrivateKey | null> {
   const activeKeys = keys.filter(key => key.Active === undefined || key.Active === true || key.Active === 1);
 
   if (!activeKeys.length) {
-    logger?.warn('No active user keys available for token decryption');
     return null;
   }
 
   const primaryKey = activeKeys.find(key => key.Primary === true || key.Primary === 1) ?? activeKeys[0];
 
-  return decryptKey(primaryKey, passphrases, logger);
+  return decryptKey(primaryKey, passphrases);
 }
 
 async function decryptKey(
   key: ProtonAddressKey,
-  passphrases: Record<string, string>,
-  logger?: ProtonLogger
+  passphrases: Record<string, string>
 ): Promise<openpgp.PrivateKey | null> {
   const privateKey = await openpgp.readPrivateKey({
     armoredKey: key.PrivateKey
@@ -226,14 +259,8 @@ async function decryptKey(
     return privateKey;
   }
 
-  logger?.debug('Key is encrypted, attempting decryption with available passphrases');
-
   const passphrase = passphrases[key.ID];
   if (!passphrase) {
-    logger?.warn('No passphrase available for decrypting key', {
-      keyId: key.ID
-    });
-
     return null;
   }
 
@@ -243,48 +270,30 @@ async function decryptKey(
       passphrase
     });
 
-    logger?.debug('Decrypted key successfully', { keyId: key.ID });
-
     return decrypted;
   } catch (error) {
-    logger?.warn('Failed to decrypt key with provided passphrase', { keyId: key.ID }, error);
-
     return null;
   }
 }
 
-async function decryptKeyUsingToken(
-  key: ProtonAddressKey,
-  userKey: openpgp.PrivateKey | null,
-  logger?: ProtonLogger
-): Promise<PrivateKey> {
+async function decryptKeyUsingToken(key: ProtonAddressKey, userKey: openpgp.PrivateKey | null): Promise<PrivateKey> {
   const privateKey = await openpgp.readPrivateKey({
     armoredKey: key.PrivateKey
   });
 
   if (privateKey.isDecrypted()) {
-    logger?.debug('Private key is not encrypted', { keyId: key.ID });
-
     return privateKey as unknown as PrivateKey;
   }
 
   if (key.Token && key.Signature && userKey) {
-    try {
-      const tokenPassphrase = await derivePassphraseFromToken(key.Token, key.Signature, userKey);
+    const tokenPassphrase = await derivePassphraseFromToken(key.Token, key.Signature, userKey);
 
-      const decrypted = await openpgp.decryptKey({
-        privateKey,
-        passphrase: Buffer.from(tokenPassphrase).toString('utf8')
-      });
+    const decrypted = await openpgp.decryptKey({
+      privateKey,
+      passphrase: Buffer.from(tokenPassphrase).toString('utf8')
+    });
 
-      logger?.debug('Decrypted key using token-derived passphrase', {
-        keyId: key.ID
-      });
-
-      return decrypted as unknown as PrivateKey;
-    } catch (tokenError) {
-      logger?.warn('Failed to decrypt key using token-derived passphrase', { keyId: key.ID }, tokenError);
-    }
+    return decrypted as unknown as PrivateKey;
   }
 
   throw new Error(`Decryption of key via user key failed (key ID: ${key.ID}).`);

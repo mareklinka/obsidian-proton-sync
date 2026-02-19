@@ -1,22 +1,11 @@
 import type { App } from 'obsidian';
-import { SALTED_PASSPHRASES_SECRET_KEY } from './proton-integration/domain/models';
-
-export interface ProtonSession {
-  uid: string;
-  userId: string | null;
-  accessToken: string;
-  refreshToken: string;
-  scope: string | null;
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: string;
-  lastRefreshAt: string;
-}
+import { ProtonSession } from './proton/auth/ProtonSession';
+import { SALTED_PASSPHRASES_SECRET_KEY } from './proton/Constants';
 
 const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
 
-export async function loadSession(app: App): Promise<ProtonSession | null> {
-  const stored = await app.secretStorage.getSecret(SESSION_STORAGE_KEY);
+export function loadSession(app: App): ProtonSession | null {
+  const stored = app.secretStorage.getSecret(SESSION_STORAGE_KEY);
   if (!stored) {
     return null;
   }
@@ -28,8 +17,8 @@ export async function loadSession(app: App): Promise<ProtonSession | null> {
   }
 }
 
-export async function saveSession(app: App, session: ProtonSession): Promise<void> {
-  await app.secretStorage.setSecret(SESSION_STORAGE_KEY, JSON.stringify(session));
+export function saveSession(app: App, session: ProtonSession): void {
+  app.secretStorage.setSecret(SESSION_STORAGE_KEY, JSON.stringify(session));
 }
 
 export async function clearSession(app: App): Promise<void> {

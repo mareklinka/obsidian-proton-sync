@@ -4,19 +4,18 @@ import type {
   ProtonDriveHTTPClientBlobRequest
 } from '@protontech/drive-sdk';
 import { requestUrl } from 'obsidian';
-import type { ProtonLogger } from '../../domain/contracts';
-import { SessionProvider, headersToObject } from './ProtonDriveClient';
-import type { ProtonSession } from '../../../session-store';
+import { headersToObject } from './ProtonDriveClient';
+import type { ProtonSession } from '../auth/ProtonSession';
+import { ProtonSessionService } from '../auth/ProtonSessionService';
+import { map } from 'rxjs';
 
 export class ObsidianHttpClient implements ProtonDriveHTTPClient {
-  private readonly appVersionHeader: string;
+  private currentSession: ProtonSession | null = null;
 
-  constructor(
-    private readonly getSession: SessionProvider,
-    appVersion: string,
-    private readonly logger?: ProtonLogger
-  ) {
-    this.appVersionHeader = `external-drive-obsidiansync@${appVersion}`;
+  constructor(private readonly authService: ProtonSessionService) {
+    authService.currentSession$.pipe(map(_ => (_.state === 'ok' ? _.session : null))).subscribe(session => {
+      this.currentSession = session;
+    });
   }
 
   async fetchJson(request: ProtonDriveHTTPClientJsonRequest): Promise<Response> {
@@ -31,14 +30,11 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     request: ProtonDriveHTTPClientJsonRequest | ProtonDriveHTTPClientBlobRequest,
     isJson: boolean
   ): Promise<Response> {
-    this.logger?.debug('SDK: preparing request', { request });
-
-    const session = this.getSession();
-    if (!session) {
+    if (!this.currentSession) {
       throw new Error('No Proton session available for SDK requests.');
     }
 
-    const headers = this.buildHeaders(request.headers, session);
+    const headers = this.buildHeaders(request.headers, this.currentSession);
     const { body, contentType } = await this.prepareRequestBody(request);
 
     const response = await requestUrl({
@@ -48,10 +44,6 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
       contentType: contentType,
       body: body,
       throw: false
-    });
-
-    this.logger?.debug('SDK: response received', {
-      response
     });
 
     if (isJson) {
@@ -84,7 +76,6 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
         const blockData = (request.body as unknown as FormData).get('Block') as Blob;
 
         if (!blockData) {
-          this.logger?.error("SDK: unexpected body type in request - does not contain 'Block' item", { request });
           throw new Error('Unexpected body type in request');
         }
 
@@ -93,8 +84,6 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
 
         contentType = `multipart/form-data; boundary=${boundary}`;
       } else {
-        this.logger?.error('SDK: unexpected body type in blob request');
-
         throw new Error('Unexpected body type in blob request');
       }
     } else {
@@ -110,7 +99,7 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
 
     headers.set('x-pm-uid', session.uid);
     headers.set('authorization', `Bearer ${session.accessToken}`);
-    headers.set('x-pm-appversion', this.appVersionHeader);
+    headers.set('x-pm-appversion', this.authService.appVersionHeader);
 
     return headers;
   }
