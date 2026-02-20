@@ -1,4 +1,15 @@
-import { BehaviorSubject, Observable, Subject, Subscription, SchedulerLike, asyncScheduler, interval } from 'rxjs';
+import {
+  BehaviorSubject,
+  Observable,
+  Subject,
+  Subscription,
+  SchedulerLike,
+  asyncScheduler,
+  concatMap,
+  from,
+  observeOn,
+  timer
+} from 'rxjs';
 import type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from './shared-types';
 import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from './path-utils';
 
@@ -107,7 +118,6 @@ export interface ISyncService {
 
   readonly mapChanges$: Observable<SyncIndexSnapshotEvent>;
   readonly dispatchResults$: Observable<SyncDispatchResult>;
-  readonly stats$: Observable<SyncQueueStats>;
 }
 
 type LifecycleState = 'idle' | 'initialized' | 'running' | 'stopped' | 'disposed';
@@ -115,6 +125,13 @@ type LifecycleState = 'idle' | 'initialized' | 'running' | 'stopped' | 'disposed
 type QueueRecord = {
   entityKey: string;
   items: QueuedChange[];
+};
+
+type EngineCommandReason = 'start' | 'enqueue' | 'dispatch-complete' | 'retry-due' | 'clear-pending';
+
+type EngineCommand = {
+  type: 'evaluate';
+  reason: EngineCommandReason;
 };
 
 export const DEFAULT_DEBOUNCE_MS = 1500;
@@ -129,28 +146,23 @@ export const DEFAULT_MAX_PENDING_PER_ENTITY = 500;
 export class RxSyncService implements ISyncService {
   public readonly mapChanges$: Observable<SyncIndexSnapshotEvent>;
   public readonly dispatchResults$: Observable<SyncDispatchResult>;
-  public readonly stats$: Observable<SyncQueueStats>;
 
   private readonly mapChangesSubject = new Subject<SyncIndexSnapshotEvent>();
   private readonly dispatchResultsSubject = new Subject<SyncDispatchResult>();
-  private readonly statsSubject = new BehaviorSubject<SyncQueueStats>({
-    totalPending: 0,
-    queueCount: 0,
-    inFlight: false,
-    droppedByCompaction: 0,
-    retried: 0,
-    failedTerminal: 0
-  });
 
   private readonly byPath = new Map<string, SyncIndexEntry>();
   private readonly byCloudId = new Map<string, SyncIndexEntry>();
   private readonly queueMap = new Map<string, QueueRecord>();
   private readonly scheduler: SchedulerLike;
+  private readonly engineCommands = new Subject<EngineCommand>();
+  private readonly engineSub: Subscription;
 
   private state: LifecycleState = 'idle';
   private isInitialized = false;
   private isInFlight = false;
-  private tickerSub: Subscription | null = null;
+  private wakeSub: Subscription | null = null;
+  private wakeAt: number | null = null;
+  private nextDispatchAt = 0;
 
   private seq = 0;
   private droppedByCompaction = 0;
@@ -189,9 +201,15 @@ export class RxSyncService implements ISyncService {
     this.caseInsensitivePaths = options.caseInsensitivePaths ?? true;
     this.classifyError = options.classifyError ?? defaultClassifyError;
 
+    this.engineSub = this.engineCommands
+      .pipe(
+        observeOn(this.scheduler),
+        concatMap(command => from(this.handleEngineCommand(command)))
+      )
+      .subscribe();
+
     this.mapChanges$ = this.mapChangesSubject.asObservable();
     this.dispatchResults$ = this.dispatchResultsSubject.asObservable();
-    this.stats$ = this.statsSubject.asObservable();
   }
 
   initializeIndex(snapshot: SyncIndexSnapshot): void {
@@ -250,10 +268,8 @@ export class RxSyncService implements ISyncService {
     }
 
     this.state = 'running';
-    this.tickerSub = interval(this.sendIntervalMs, this.scheduler).subscribe(() => {
-      void this.processTick();
-    });
-    this.publishStats();
+    this.nextDispatchAt = this.now() + this.sendIntervalMs;
+    this.requestEngineEvaluation('start');
   }
 
   stop(): void {
@@ -261,13 +277,11 @@ export class RxSyncService implements ISyncService {
       return;
     }
 
-    this.tickerSub?.unsubscribe();
-    this.tickerSub = null;
+    this.cancelWake();
 
     if (this.state !== 'idle') {
       this.state = 'stopped';
     }
-    this.publishStats();
   }
 
   dispose(): void {
@@ -281,11 +295,12 @@ export class RxSyncService implements ISyncService {
     this.byCloudId.clear();
 
     this.state = 'disposed';
+    this.cancelWake();
+    this.engineSub.unsubscribe();
+    this.engineCommands.complete();
 
-    this.publishStats();
     this.mapChangesSubject.complete();
     this.dispatchResultsSubject.complete();
-    this.statsSubject.complete();
   }
 
   enqueueChange(change: SyncChangeBase): string {
@@ -294,6 +309,7 @@ export class RxSyncService implements ISyncService {
     }
 
     const normalized = this.normalizeAndValidate(change);
+    const hadPending = this.getTotalPending() > 0;
     const queued: QueuedChange = {
       ...normalized,
       id: this.nextChangeId(),
@@ -328,28 +344,90 @@ export class RxSyncService implements ISyncService {
     }
 
     this.insertWithCompaction(queue, queued);
-    this.publishStats();
+
+    if (this.state === 'running' && !hadPending) {
+      this.nextDispatchAt = this.now() + this.sendIntervalMs;
+    }
+
+    if (this.state === 'running') {
+      this.requestEngineEvaluation('enqueue');
+    }
+
     return queued.id;
   }
 
   clearPending(entityKey?: string): void {
     if (typeof entityKey === 'string' && entityKey.length > 0) {
       this.queueMap.delete(entityKey);
-      this.publishStats();
+      if (this.state === 'running') {
+        this.requestEngineEvaluation('clear-pending');
+      }
+
       return;
     }
 
     this.queueMap.clear();
-    this.publishStats();
+    if (this.state === 'running') {
+      this.requestEngineEvaluation('clear-pending');
+    }
   }
 
-  private async processTick(): Promise<void> {
+  private requestEngineEvaluation(reason: EngineCommandReason): void {
+    if (this.state !== 'running') {
+      return;
+    }
+
+    this.engineCommands.next({
+      type: 'evaluate',
+      reason
+    });
+  }
+
+  private async handleEngineCommand(command: EngineCommand): Promise<void> {
+    if (this.state !== 'running' || this.isInFlight || command.type !== 'evaluate') {
+      return;
+    }
+
+    if (!this.hasPendingChanges()) {
+      this.cancelWake();
+      return;
+    }
+
+    const now = this.now();
+    const earliestAvailableAt = this.findEarliestAvailableAt();
+    if (earliestAvailableAt === null) {
+      this.cancelWake();
+      return;
+    }
+
+    const dueAt = Math.max(this.nextDispatchAt, earliestAvailableAt);
+    if (dueAt > now) {
+      this.scheduleWake(dueAt);
+      return;
+    }
+
+    this.cancelWake();
+    await this.processTurn();
+
+    if (this.state !== 'running') {
+      return;
+    }
+
+    if (this.hasPendingChanges()) {
+      this.nextDispatchAt = this.now() + this.sendIntervalMs;
+      this.requestEngineEvaluation('dispatch-complete');
+      return;
+    }
+
+    this.cancelWake();
+  }
+
+  private async processTurn(): Promise<void> {
     if (this.state !== 'running' || this.isInFlight) {
       return;
     }
 
     this.isInFlight = true;
-    this.publishStats();
 
     try {
       for (let i = 0; i < this.maxOpsPerTick; i += 1) {
@@ -374,8 +452,58 @@ export class RxSyncService implements ISyncService {
       }
     } finally {
       this.isInFlight = false;
-      this.publishStats();
     }
+  }
+
+  private hasPendingChanges(): boolean {
+    for (const queue of this.queueMap.values()) {
+      if (queue.items.length > 0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private findEarliestAvailableAt(): number | null {
+    let minAvailableAt: number | null = null;
+    for (const queue of this.queueMap.values()) {
+      if (queue.items.length === 0) {
+        continue;
+      }
+
+      const head = queue.items[0];
+      if (minAvailableAt === null || head.availableAt < minAvailableAt) {
+        minAvailableAt = head.availableAt;
+      }
+    }
+
+    return minAvailableAt;
+  }
+
+  private scheduleWake(at: number): void {
+    if (this.state !== 'running') {
+      return;
+    }
+
+    if (this.wakeAt !== null && this.wakeAt <= at) {
+      return;
+    }
+
+    this.cancelWake();
+
+    const delay = Math.max(0, at - this.now());
+    this.wakeAt = at;
+    this.wakeSub = timer(delay, this.scheduler).subscribe(() => {
+      this.wakeAt = null;
+      this.wakeSub = null;
+      this.requestEngineEvaluation('retry-due');
+    });
+  }
+
+  private cancelWake(): void {
+    this.wakeSub?.unsubscribe();
+    this.wakeSub = null;
+    this.wakeAt = null;
   }
 
   private async dispatchChange(change: QueuedChange): Promise<SyncDispatchResult> {
@@ -735,17 +863,6 @@ export class RxSyncService implements ISyncService {
     if (queue && queue.items.length === 0) {
       this.queueMap.delete(entityKey);
     }
-  }
-
-  private publishStats(): void {
-    this.statsSubject.next({
-      totalPending: this.getTotalPending(),
-      queueCount: this.queueMap.size,
-      inFlight: this.isInFlight,
-      droppedByCompaction: this.droppedByCompaction,
-      retried: this.retried,
-      failedTerminal: this.failedTerminal
-    });
   }
 
   private getTotalPending(): number {

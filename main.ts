@@ -165,12 +165,6 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     );
 
     this.syncSubscriptions.push(
-      syncService.stats$.subscribe(stats => {
-        this.logger.debug('Isolated sync queue stats', stats as unknown as Record<string, unknown>);
-      })
-    );
-
-    this.syncSubscriptions.push(
       syncService.mapChanges$.subscribe(event => {
         this.logger.debug('Isolated sync index snapshot updated', {
           sequence: event.seq,
