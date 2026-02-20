@@ -1,12 +1,11 @@
 import { requestUrl } from 'obsidian';
 
 import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64, ProtonAuthInfo } from './ProtonSrp';
-import { map, merge, of, shareReplay, Subject, switchMap, timer } from 'rxjs';
+import { BehaviorSubject, map, merge, of, shareReplay, Subject, switchMap, timer } from 'rxjs';
 import { ProtonSession } from './ProtonSession';
 import { getJson } from '../ProtonApiClient';
 import type { ProtonSecretStore } from './ProtonSecretStore';
 import { SESSION_REFRESH_INTERVAL_MS, PROTON_BASE_URL, SALTED_PASSPHRASES_SECRET_KEY } from '../Constants';
-import { debug } from 'node:console';
 
 const DEFAULT_SESSION_TTL_MS = 50 * 60 * 1000;
 const AUTH_SCOPE = 'full locked';
@@ -34,12 +33,16 @@ export type ProtonSessionState =
   | { state: 'disconnected' }
   | { state: 'logged-out' };
 
+export type ProtonAuthStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
 export class ProtonSessionService {
   public readonly appVersionHeader: string;
   private readonly currentSessionSubject: Subject<ProtonSessionState> = new Subject();
+  private readonly authStatusSubject = new BehaviorSubject<ProtonAuthStatus>('disconnected');
 
   private refreshIntervalId: number | null = null;
   private currentSession: ProtonSession | null = null;
+  public readonly authState$ = this.authStatusSubject.asObservable();
   public readonly currentSession$ = this.currentSessionSubject.pipe(
     switchMap(sessionState => {
       if (!sessionState) {
@@ -69,56 +72,75 @@ export class ProtonSessionService {
   ) {
     this.appVersionHeader = `external-drive-obsidiansync@${appVersion}`;
     this.currentSession$.subscribe(session => {
-      if (session.state === 'ok') {
-        this.currentSession = session.session;
+      switch (session.state) {
+        case 'ok':
+          this.currentSession = session.session;
+          this.authStatusSubject.next('connected');
+          break;
+        case 'stale':
+          this.authStatusSubject.next('connected');
+          break;
+        case 'error':
+          this.authStatusSubject.next('error');
+          break;
+        default:
+          this.authStatusSubject.next('disconnected');
+          break;
       }
     });
   }
 
   async signIn(email: string, password: string, twoFactorCode: string | undefined): Promise<void> {
-    const authInfo = await this.fetchAuthInfo(email);
-    const proofs = await buildSrpProofs(authInfo, email, password);
+    this.authStatusSubject.next('connecting');
 
-    const authResponse = await this.authenticate(authInfo, email, proofs);
+    try {
+      const authInfo = await this.fetchAuthInfo(email);
+      const proofs = await buildSrpProofs(authInfo, email, password);
 
-    if (!this.verifyServerProof(authResponse.ServerProof, proofs.expectedServerProof)) {
-      throw new Error('SRP server proof mismatch.');
-    }
+      const authResponse = await this.authenticate(authInfo, email, proofs);
 
-    if (authResponse.TwoFA?.Enabled && (authResponse.TwoFA.Enabled & 1) !== 0) {
-      if (!twoFactorCode) {
-        throw new Error('Two-factor authentication code required.');
+      if (!this.verifyServerProof(authResponse.ServerProof, proofs.expectedServerProof)) {
+        throw new Error('SRP server proof mismatch.');
       }
 
-      await this.submitTwoFactor(twoFactorCode);
-    }
+      if (authResponse.TwoFA?.Enabled && (authResponse.TwoFA.Enabled & 1) !== 0) {
+        if (!twoFactorCode) {
+          throw new Error('Two-factor authentication code required.');
+        }
 
-    const now = new Date();
-    const expiresAt = new Date(now.getTime() + DEFAULT_SESSION_TTL_MS);
+        await this.submitTwoFactor(twoFactorCode);
+      }
 
-    const keyPasswords = await this.getKeyPasswords(password, {
-      uid: authResponse.UID,
-      accessToken: authResponse.AccessToken
-    });
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + DEFAULT_SESSION_TTL_MS);
 
-    this.secretStore.set(SALTED_PASSPHRASES_SECRET_KEY, JSON.stringify(keyPasswords));
-
-    this.currentSessionSubject.next({
-      state: 'ok',
-      session: {
+      const keyPasswords = await this.getKeyPasswords(password, {
         uid: authResponse.UID,
-        userId: authResponse.UserID || null,
-        accessToken: authResponse.AccessToken,
-        refreshToken: authResponse.RefreshToken,
-        scope: authResponse.Scope || null,
-        createdAt: now.toISOString(),
-        updatedAt: now.toISOString(),
-        expiresAt: expiresAt.getTime(),
-        lastRefreshAt: now.getTime()
-      }
-    });
+        accessToken: authResponse.AccessToken
+      });
 
-    this.startAutoRefresh();
+      this.secretStore.set(SALTED_PASSPHRASES_SECRET_KEY, JSON.stringify(keyPasswords));
+
+      this.currentSessionSubject.next({
+        state: 'ok',
+        session: {
+          uid: authResponse.UID,
+          userId: authResponse.UserID || null,
+          accessToken: authResponse.AccessToken,
+          refreshToken: authResponse.RefreshToken,
+          scope: authResponse.Scope || null,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+          expiresAt: expiresAt.getTime(),
+          lastRefreshAt: now.getTime()
+        }
+      });
+
+      this.startAutoRefresh();
+    } catch (error) {
+      this.authStatusSubject.next('error');
+      throw error;
+    }
   }
 
   signOut(): void {
@@ -131,6 +153,7 @@ export class ProtonSessionService {
     this.secretStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
 
     this.currentSessionSubject.next({ state: 'logged-out' });
+    this.authStatusSubject.next('disconnected');
   }
 
   dispose(): void {
@@ -142,6 +165,7 @@ export class ProtonSessionService {
     this.stopAutoRefresh();
 
     this.currentSessionSubject.next({ state: 'disconnected' });
+    this.authStatusSubject.next('disconnected');
   }
 
   async refreshSession(session: ProtonSession): Promise<void> {

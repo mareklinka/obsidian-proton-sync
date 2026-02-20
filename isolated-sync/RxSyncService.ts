@@ -93,6 +93,8 @@ export interface SyncDispatchResult {
   retryable?: boolean;
 }
 
+export type SyncEngineState = 'idle' | 'syncing' | 'retrying' | 'error';
+
 export interface SyncServiceOptions {
   debounceMs?: number;
   sendIntervalMs?: number;
@@ -119,6 +121,7 @@ export interface ISyncService {
 
   readonly mapChanges$: Observable<SyncIndexSnapshotEvent>;
   readonly dispatchResults$: Observable<SyncDispatchResult>;
+  readonly syncState$: Observable<SyncEngineState>;
 }
 
 type LifecycleState = 'idle' | 'initialized' | 'running' | 'stopped' | 'disposed';
@@ -148,9 +151,11 @@ export const DEFAULT_MAX_PENDING_PER_ENTITY = 500;
 export class RxSyncService implements ISyncService {
   public readonly mapChanges$: Observable<SyncIndexSnapshotEvent>;
   public readonly dispatchResults$: Observable<SyncDispatchResult>;
+  public readonly syncState$: Observable<SyncEngineState>;
 
   private readonly mapChangesSubject = new Subject<SyncIndexSnapshotEvent>();
   private readonly dispatchResultsSubject = new Subject<SyncDispatchResult>();
+  private readonly syncStateSubject = new BehaviorSubject<SyncEngineState>('idle');
 
   private readonly byPath = new Map<string, SyncIndexEntry>();
   private readonly byCloudId = new Map<string, SyncIndexEntry>();
@@ -214,6 +219,7 @@ export class RxSyncService implements ISyncService {
 
     this.mapChanges$ = this.mapChangesSubject.asObservable();
     this.dispatchResults$ = this.dispatchResultsSubject.asObservable();
+    this.syncState$ = this.syncStateSubject.asObservable();
   }
 
   initializeIndex(snapshot: SyncIndexSnapshot): void {
@@ -272,6 +278,7 @@ export class RxSyncService implements ISyncService {
     }
 
     this.state = 'running';
+    this.setSyncState('idle');
     this.nextDispatchAt = this.now() + this.sendIntervalMs;
     this.requestEngineEvaluation('start');
   }
@@ -286,6 +293,8 @@ export class RxSyncService implements ISyncService {
     if (this.state !== 'idle') {
       this.state = 'stopped';
     }
+
+    this.setSyncState('idle');
   }
 
   dispose(): void {
@@ -305,6 +314,7 @@ export class RxSyncService implements ISyncService {
 
     this.mapChangesSubject.complete();
     this.dispatchResultsSubject.complete();
+    this.syncStateSubject.complete();
   }
 
   enqueueChange(change: SyncChangeBase): string {
@@ -349,6 +359,7 @@ export class RxSyncService implements ISyncService {
     }
 
     this.insertWithCompaction(queue, queued);
+    this.setSyncState('syncing');
 
     if (this.state === 'running' && !hadPending) {
       this.nextDispatchAt = this.now() + this.sendIntervalMs;
@@ -368,10 +379,15 @@ export class RxSyncService implements ISyncService {
         this.requestEngineEvaluation('clear-pending');
       }
 
+      if (!this.hasPendingChanges()) {
+        this.setSyncState('idle');
+      }
+
       return;
     }
 
     this.queueMap.clear();
+    this.setSyncState('idle');
     if (this.state === 'running') {
       this.requestEngineEvaluation('clear-pending');
     }
@@ -394,6 +410,7 @@ export class RxSyncService implements ISyncService {
     }
 
     if (!this.hasPendingChanges()) {
+      this.setSyncState('idle');
       this.cancelWake();
       return;
     }
@@ -432,6 +449,7 @@ export class RxSyncService implements ISyncService {
       return;
     }
 
+    this.setSyncState('syncing');
     this.isInFlight = true;
 
     try {
@@ -457,6 +475,10 @@ export class RxSyncService implements ISyncService {
       }
     } finally {
       this.isInFlight = false;
+
+      if (!this.hasPendingChanges()) {
+        this.setSyncState('idle');
+      }
     }
   }
 
@@ -537,6 +559,7 @@ export class RxSyncService implements ISyncService {
           retryable: true,
           errorMessage: this.toErrorMessage(error)
         };
+        this.setSyncState('retrying');
         this.dispatchResultsSubject.next(retryResult);
         return retryResult;
       }
@@ -549,9 +572,18 @@ export class RxSyncService implements ISyncService {
         retryable,
         errorMessage: this.toErrorMessage(error)
       };
+      this.setSyncState('error');
       this.dispatchResultsSubject.next(failure);
       return failure;
     }
+  }
+
+  private setSyncState(next: SyncEngineState): void {
+    if (this.syncStateSubject.value === next) {
+      return;
+    }
+
+    this.syncStateSubject.next(next);
   }
 
   private async executeChange(change: QueuedChange): Promise<void> {
