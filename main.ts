@@ -11,10 +11,11 @@ import { LoggingCloudStorageApi } from './isolated-sync/LoggingCloudStorageApi';
 import type { ProtonDriveClient } from '@protontech/drive-sdk';
 import { ProtonSessionService, ProtonSessionState } from './proton/auth/ProtonSessionService';
 import { loadSession, saveSession } from './session-store';
-import { ObsidianSecretRepository2 } from './Services/ObsidianSecretRepository';
+import { ObsidianSecretRepository } from './Services/ObsidianSecretRepository';
 import { ProtonAccount } from './proton/drive/ProtonAccount';
 import { createProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { ObsidianHttpClient } from './proton/drive/ObsidianHttpClient';
+import { ReconciliationService, type ReconciliationTombstone } from './isolated-sync/ReconciliationService';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   settings!: ProtonDriveSyncSettings;
@@ -25,6 +26,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private isolatedSyncService: RxSyncService | null = null;
   private syncReader: ObsidianVaultFileSystemReader | null = null;
   private syncSubscriptions: Subscription[] = [];
+  private sessionSubscription: Subscription | null = null;
+  private syncBootstrapInProgress = false;
+  private syncBootstrapped = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -40,20 +44,29 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       version: this.manifest.version
     });
 
-    this.initializeIsolatedSync();
-
-    const secretStore = new ObsidianSecretRepository2(this.app);
+    const secretStore = new ObsidianSecretRepository(this.app);
 
     this.protonSessionService = new ProtonSessionService(secretStore, this.manifest.version);
     const protonAccount = new ProtonAccount(this.protonSessionService, secretStore);
     this.driveClient = createProtonDriveClient(protonAccount, new ObsidianHttpClient(this.protonSessionService));
 
-    const sub = this.protonSessionService.currentSession$.subscribe(session => {
+    this.sessionSubscription = this.protonSessionService.currentSession$.subscribe(session => {
       this.applyAuthResultToSettings(session);
 
       if (session.state === 'ok') {
         saveSession(this.app, session.session);
-        this.initializeSyncRoots();
+        if (!this.syncBootstrapped && !this.syncBootstrapInProgress) {
+          this.syncBootstrapInProgress = true;
+          void this.bootstrapSyncFromSession().finally(() => {
+            this.syncBootstrapInProgress = false;
+          });
+        }
+        return;
+      }
+
+      if (session.state === 'disconnected' || session.state === 'logged-out') {
+        this.syncBootstrapped = false;
+        this.disposeIsolatedSync();
       }
     });
 
@@ -72,6 +85,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.logger.info('Unloading Proton Drive Sync plugin');
+    this.sessionSubscription?.unsubscribe();
+    this.sessionSubscription = null;
     this.protonSessionService?.dispose();
     this.disposeIsolatedSync();
   }
@@ -102,11 +117,13 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   async disconnect(): Promise<void> {
     this.logger.info('Disconnecting from Proton Drive');
     this.protonSessionService.signOut();
+    this.syncBootstrapped = false;
+    this.disposeIsolatedSync();
     this.saveSettings();
     new Notice('Disconnected from Proton Drive.');
   }
 
-  private async initializeSyncRoots(): Promise<void> {
+  private async bootstrapSyncFromSession(): Promise<void> {
     if (!this.driveClient) {
       return;
     }
@@ -114,25 +131,55 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     try {
       const vaultName = this.app.vault.getName();
       const info = await ensureSyncRoots(this.driveClient, this.settings, vaultName, this.logger);
+      const reconciliation = new ReconciliationService(
+        this.app.vault,
+        this.driveClient,
+        info.vaultRootNodeUid,
+        this.logger,
+        {
+          previousSnapshot: this.buildInitialSyncSnapshot(),
+          tombstones: this.settings.reconciliationTombstones.map(
+            (item: ProtonDriveSyncSettings['reconciliationTombstones'][number]) => ({
+              ...item,
+              deletedAt: Date.parse(item.deletedAt)
+            })
+          )
+        }
+      );
+      const reconciliationResult = await reconciliation.run();
+
+      this.applySnapshotToSettings(reconciliationResult.snapshot);
+      this.settings.reconciliationTombstones = reconciliationResult.tombstones.map((item: ReconciliationTombstone) => ({
+        ...item,
+        deletedAt: new Date(item.deletedAt).toISOString()
+      }));
       await this.saveSettings();
+
+      this.initializeIsolatedSync(reconciliationResult.snapshot);
+      this.syncBootstrapped = true;
+
+      this.logger.info('Initial reconciliation completed', {
+        ...reconciliationResult.stats
+      });
       this.logger.info('Sync roots ready', { ...info });
     } catch (error) {
+      this.syncBootstrapped = false;
       this.logger.error('Failed to ensure sync roots', {}, error);
-      new Notice('Failed to initialize Proton Drive sync roots.');
+      new Notice('Failed to initialize Proton Drive sync bootstrap.');
     }
   }
 
-  private initializeIsolatedSync(): void {
+  private initializeIsolatedSync(initialSnapshot?: SyncIndexSnapshot): void {
     if (this.isolatedSyncService || this.syncReader) {
       return;
     }
 
     const reader = new ObsidianVaultFileSystemReader(this.app.vault, {
-      ignoredPathPrefixes: ['.obsidian']
+      ignoredPathPrefixes: []
     });
 
     const syncService = new RxSyncService(reader, new LoggingCloudStorageApi(this.logger));
-    syncService.initializeIndex(this.buildInitialSyncSnapshot());
+    syncService.initializeIndex(initialSnapshot ?? this.buildInitialSyncSnapshot());
 
     this.syncSubscriptions.push(
       reader.changes$.subscribe(change => {
@@ -166,6 +213,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     this.syncSubscriptions.push(
       syncService.mapChanges$.subscribe(event => {
+        this.applySnapshotToSettings(event.snapshot);
+        void this.saveSettings();
+
         this.logger.debug('Isolated sync index snapshot updated', {
           sequence: event.seq,
           reason: event.reason,
@@ -230,6 +280,29 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     }
 
     return { byPath, byCloudId };
+  }
+
+  private applySnapshotToSettings(snapshot: SyncIndexSnapshot): void {
+    const pathMap: ProtonDriveSyncSettings['pathMap'] = {};
+    const folderMap: ProtonDriveSyncSettings['folderMap'] = {};
+
+    for (const entry of Object.values(snapshot.byPath)) {
+      const updatedAt = new Date(entry.updatedAt).toISOString();
+      if (entry.entityType === 'folder') {
+        folderMap[entry.path] = {
+          nodeUid: entry.cloudId,
+          updatedAt
+        };
+      } else {
+        pathMap[entry.path] = {
+          nodeUid: entry.cloudId,
+          updatedAt
+        };
+      }
+    }
+
+    this.settings.pathMap = pathMap;
+    this.settings.folderMap = folderMap;
   }
 
   private applyAuthResultToSettings(sessionState: ProtonSessionState): void {

@@ -14,6 +14,7 @@ export interface ProtonDriveSyncSettings {
   vaultRootNodeUid: string | null;
   pathMap: Record<string, SyncMapEntry>;
   folderMap: Record<string, SyncMapEntry>;
+  reconciliationTombstones: ReconciliationTombstone[];
   enableFileLogging: boolean;
   logLevel: LogLevel;
   logMaxSizeKb: number;
@@ -22,6 +23,14 @@ export interface ProtonDriveSyncSettings {
 export interface SyncMapEntry {
   nodeUid: string;
   updatedAt: string;
+}
+
+export interface ReconciliationTombstone {
+  entityType: 'file' | 'folder';
+  path: string;
+  cloudId?: string;
+  deletedAt: string;
+  origin: 'local' | 'remote';
 }
 
 export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
@@ -35,6 +44,7 @@ export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
   vaultRootNodeUid: null,
   pathMap: {},
   folderMap: {},
+  reconciliationTombstones: [],
   enableFileLogging: false,
   logLevel: 'info',
   logMaxSizeKb: 1024
