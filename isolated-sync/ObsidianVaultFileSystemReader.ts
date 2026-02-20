@@ -41,6 +41,7 @@ export interface FileSystemReaderOptions {
   vaultAdapter?: VaultAdapter;
   isFile?: (entry: unknown) => entry is TFile;
   isFolder?: (entry: unknown) => entry is TFolder;
+  folderRenameBatchWindowMs?: number;
 }
 
 export interface IFileSystemReaderService {
@@ -70,6 +71,8 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
   private readonly ignorePredicate?: (path: string, entityType: EntityType) => boolean;
   private readonly isFileGuard: (entry: unknown) => entry is TFile;
   private readonly isFolderGuard: (entry: unknown) => entry is TFolder;
+  private readonly folderRenameBatchWindowMs: number;
+  private readonly pendingFolderRenames = new Map<string, PendingFolderRename>();
 
   private refs: EventRef[] = [];
   private started = false;
@@ -86,6 +89,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
     this.ignorePredicate = options.ignorePredicate;
     this.isFileGuard = options.isFile ?? ((entry: unknown): entry is TFile => isLikelyFile(entry));
     this.isFolderGuard = options.isFolder ?? ((entry: unknown): entry is TFolder => isLikelyFolder(entry));
+    this.folderRenameBatchWindowMs = Math.max(0, options.folderRenameBatchWindowMs ?? 250);
 
     this.changes$ = this.changesSubject.asObservable();
   }
@@ -107,6 +111,8 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
     if (!this.started) {
       return;
     }
+
+    this.flushAllPendingFolderRenames();
 
     for (const ref of this.refs) {
       this.adapter.offref(ref);
@@ -249,6 +255,11 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
   private handleRename(rawEntry: unknown, oldPathRaw: unknown): void {
     const event = this.mapRenameEvent(rawEntry, oldPathRaw);
     if (event) {
+      if (event.entityType === 'folder' && (event.type === 'folder-renamed' || event.type === 'folder-moved')) {
+        this.queuePendingFolderRename(event);
+        return;
+      }
+
       this.changesSubject.next(event);
     }
   }
@@ -291,7 +302,16 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
     }
 
     if (this.isFileGuard(rawEntry)) {
-      return this.createEvent('file-moved', 'file', rawEntry.path, oldPath);
+      const event = this.createEvent('file-moved', 'file', rawEntry.path, oldPath);
+      if (!event) {
+        return null;
+      }
+
+      if (this.shouldSuppressDescendantRename(event.path, event.oldPath)) {
+        return null;
+      }
+
+      return event;
     }
 
     if (this.isFolderGuard(rawEntry)) {
@@ -302,13 +322,19 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
 
       const type = getParentPath(newPath) === getParentPath(oldPath) ? 'folder-renamed' : 'folder-moved';
 
-      return {
+      const event: ReaderChangeEvent = {
         type,
         entityType: 'folder',
         path: newPath,
         oldPath,
         occurredAt: this.now()
       };
+
+      if (this.shouldSuppressDescendantRename(event.path, event.oldPath)) {
+        return null;
+      }
+
+      return event;
     }
 
     return null;
@@ -373,7 +399,96 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
   private toCanonicalKey(path: string): string {
     return toCanonicalPathKey(path, this.caseInsensitivePaths);
   }
+
+  private queuePendingFolderRename(event: ReaderChangeEvent): void {
+    if (!event.oldPath) {
+      return;
+    }
+
+    const key = this.toCanonicalKey(event.oldPath);
+    const existing = this.pendingFolderRenames.get(key);
+    if (existing) {
+      clearTimeout(existing.timer);
+    }
+
+    const timer = setTimeout(() => {
+      this.flushPendingFolderRename(key);
+    }, this.folderRenameBatchWindowMs);
+
+    this.pendingFolderRenames.set(key, {
+      event,
+      timer
+    });
+  }
+
+  private flushPendingFolderRename(key: string): void {
+    const pending = this.pendingFolderRenames.get(key);
+    if (!pending) {
+      return;
+    }
+
+    clearTimeout(pending.timer);
+    this.pendingFolderRenames.delete(key);
+    this.changesSubject.next(pending.event);
+  }
+
+  private flushAllPendingFolderRenames(): void {
+    const keys = Array.from(this.pendingFolderRenames.keys());
+    for (const key of keys) {
+      this.flushPendingFolderRename(key);
+    }
+  }
+
+  private shouldSuppressDescendantRename(newPath: string, oldPath?: string): boolean {
+    if (!oldPath) {
+      return false;
+    }
+
+    const canonicalOldPath = this.toCanonicalKey(oldPath);
+    const canonicalNewPath = this.toCanonicalKey(newPath);
+
+    for (const pending of this.pendingFolderRenames.values()) {
+      const parentOldPath = pending.event.oldPath;
+      const parentNewPath = pending.event.path;
+      if (!parentOldPath) {
+        continue;
+      }
+
+      const canonicalParentOld = this.toCanonicalKey(parentOldPath);
+      const canonicalParentNew = this.toCanonicalKey(parentNewPath);
+      const parentOldPrefix = `${canonicalParentOld}/`;
+
+      if (!canonicalOldPath.startsWith(parentOldPrefix)) {
+        continue;
+      }
+
+      const rawSuffix = oldPath.slice(parentOldPath.length);
+      const suffix = rawSuffix.startsWith('/') ? rawSuffix : `/${rawSuffix}`;
+      const expectedNewPath = normalizePath(`${parentNewPath}${suffix}`);
+      if (!expectedNewPath) {
+        continue;
+      }
+
+      const canonicalExpectedNew = this.toCanonicalKey(expectedNewPath);
+      if (canonicalExpectedNew !== canonicalNewPath) {
+        continue;
+      }
+
+      if (!canonicalNewPath.startsWith(`${canonicalParentNew}/`)) {
+        continue;
+      }
+
+      return true;
+    }
+
+    return false;
+  }
 }
+
+type PendingFolderRename = {
+  event: ReaderChangeEvent;
+  timer: ReturnType<typeof setTimeout>;
+};
 
 function isLikelyFile(entry: unknown): entry is TFile {
   if (!entry || typeof entry !== 'object') {

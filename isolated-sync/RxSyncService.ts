@@ -617,7 +617,9 @@ export class RxSyncService implements ISyncService {
         }
         const newName = getBaseName(change.path);
         const result = await this.cloudApi.renameFolder(cloudId, newName, change.path);
-        this.upsertIndex(result, change.type, change.oldPath);
+        this.upsertIndex(result, change.type, change.oldPath, false);
+        this.rebaseDescendantPaths(change.oldPath, change.path);
+        this.emitSnapshot(change.type);
         return;
       }
 
@@ -639,7 +641,9 @@ export class RxSyncService implements ISyncService {
           throw new Error(`Unknown cloud ID for moved folder: ${change.oldPath}`);
         }
         const result = await this.cloudApi.moveFolder(cloudId, change.path, change.oldPath);
-        this.upsertIndex(result, change.type, change.oldPath);
+        this.upsertIndex(result, change.type, change.oldPath, false);
+        this.rebaseDescendantPaths(change.oldPath, change.path);
+        this.emitSnapshot(change.type);
         return;
       }
 
@@ -648,7 +652,7 @@ export class RxSyncService implements ISyncService {
     }
   }
 
-  private upsertIndex(result: CloudUpsertResult, reason: SyncChangeType, oldPath?: string): void {
+  private upsertIndex(result: CloudUpsertResult, reason: SyncChangeType, oldPath?: string, emit = true): void {
     const normalizedPath = this.normalizePath(result.path);
     const canonicalPath = this.toCanonicalKey(normalizedPath);
 
@@ -671,7 +675,49 @@ export class RxSyncService implements ISyncService {
     this.byPath.set(canonicalPath, next);
     this.byCloudId.set(result.cloudId, next);
 
-    this.emitSnapshot(reason);
+    if (emit) {
+      this.emitSnapshot(reason);
+    }
+  }
+
+  private rebaseDescendantPaths(oldFolderPath: string, newFolderPath: string): void {
+    const normalizedOld = this.normalizePath(oldFolderPath);
+    const normalizedNew = this.normalizePath(newFolderPath);
+    if (!normalizedOld || !normalizedNew) {
+      return;
+    }
+
+    const oldPrefix = `${normalizedOld}/`;
+    const rebasedEntries: SyncIndexEntry[] = [];
+
+    for (const entry of this.byCloudId.values()) {
+      if (!entry.path.startsWith(oldPrefix)) {
+        continue;
+      }
+
+      const suffix = entry.path.slice(normalizedOld.length);
+      const nextPath = this.normalizePath(`${normalizedNew}${suffix}`);
+      if (!nextPath) {
+        continue;
+      }
+
+      rebasedEntries.push({
+        ...entry,
+        path: nextPath,
+        updatedAt: this.now()
+      });
+    }
+
+    for (const entry of rebasedEntries) {
+      const current = this.byCloudId.get(entry.cloudId);
+      if (!current) {
+        continue;
+      }
+
+      this.byPath.delete(this.toCanonicalKey(current.path));
+      this.byPath.set(this.toCanonicalKey(entry.path), entry);
+      this.byCloudId.set(entry.cloudId, entry);
+    }
   }
 
   private removeIndexByCloudId(cloudId: string, reason: SyncChangeType): void {

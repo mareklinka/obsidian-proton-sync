@@ -269,6 +269,7 @@ describe('ObsidianVaultFileSystemReader', () => {
     reader.start();
 
     adapter.emit('rename', makeFolder('notes/new-name'), 'notes/old-name');
+    vi.advanceTimersByTime(251);
 
     expect(events[0]?.type).toBe('folder-renamed');
   });
@@ -282,8 +283,33 @@ describe('ObsidianVaultFileSystemReader', () => {
     reader.start();
 
     adapter.emit('rename', makeFolder('archive/notes'), 'notes/archive');
+    vi.advanceTimersByTime(251);
 
     expect(events[0]?.type).toBe('folder-moved');
+  });
+
+  it('suppresses descendant rename events during pending parent folder rename window', () => {
+    const adapter = new FakeVaultAdapter();
+    const reader = makeReader(adapter, { folderRenameBatchWindowMs: 200 });
+    const events: ReaderChangeEvent[] = [];
+
+    reader.changes$.subscribe(event => events.push(event));
+    reader.start();
+
+    adapter.emit('rename', makeFolder('new-root'), 'old-root');
+    adapter.emit('rename', makeFile('new-root/a.md'), 'old-root/a.md');
+    adapter.emit('rename', makeFolder('new-root/sub'), 'old-root/sub');
+
+    vi.advanceTimersByTime(199);
+    expect(events).toHaveLength(0);
+
+    vi.advanceTimersByTime(2);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'folder-renamed',
+      path: 'new-root',
+      oldPath: 'old-root'
+    });
   });
 
   it('ignore rules suppress events (prefix + predicate)', () => {
@@ -415,6 +441,7 @@ describe('ObsidianVaultFileSystemReader', () => {
     reader.changes$.subscribe(event => events.push(event));
     reader.start();
     adapter.emit('rename', makeFolder('\\archive\\notes\\'), '\\notes\\archive\\');
+    vi.advanceTimersByTime(251);
 
     expect(events[0]).toMatchObject({
       path: 'archive/notes',

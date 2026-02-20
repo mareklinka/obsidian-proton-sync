@@ -390,4 +390,68 @@ describe('RxSyncService (isolated)', () => {
 
     expect(calls).toEqual([]);
   });
+
+  it('rebases descendant index paths when folder rename succeeds', async () => {
+    const calls: string[] = [];
+    const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
+      sendIntervalMs: 20,
+      debounceMs: 0
+    });
+
+    service.initializeIndex({
+      byPath: {
+        old: {
+          cloudId: 'folder-1',
+          path: 'old',
+          entityType: 'folder',
+          updatedAt: Date.now() - 10000
+        },
+        'old/child.md': {
+          cloudId: 'file-1',
+          path: 'old/child.md',
+          entityType: 'file',
+          updatedAt: Date.now() - 10000
+        },
+        'old/sub': {
+          cloudId: 'folder-2',
+          path: 'old/sub',
+          entityType: 'folder',
+          updatedAt: Date.now() - 10000
+        },
+        'old/sub/deep.md': {
+          cloudId: 'file-2',
+          path: 'old/sub/deep.md',
+          entityType: 'file',
+          updatedAt: Date.now() - 10000
+        }
+      },
+      byCloudId: {}
+    });
+
+    const snapshots: SyncIndexSnapshotEvent[] = [];
+    service.mapChanges$.subscribe(event => snapshots.push(event));
+
+    service.enqueueChange({
+      type: 'folder-renamed',
+      entityType: 'folder',
+      path: 'new',
+      oldPath: 'old'
+    });
+
+    service.start();
+    await vi.advanceTimersByTimeAsync(30);
+
+    expect(calls).toContain('renameFolder:folder-1:new');
+
+    const last = snapshots[snapshots.length - 1];
+    expect(last.snapshot.byPath['new']?.cloudId).toBe('folder-1');
+    expect(last.snapshot.byPath['new/child.md']?.cloudId).toBe('file-1');
+    expect(last.snapshot.byPath['new/sub']?.cloudId).toBe('folder-2');
+    expect(last.snapshot.byPath['new/sub/deep.md']?.cloudId).toBe('file-2');
+
+    expect(last.snapshot.byPath['old']).toBeUndefined();
+    expect(last.snapshot.byPath['old/child.md']).toBeUndefined();
+    expect(last.snapshot.byPath['old/sub']).toBeUndefined();
+    expect(last.snapshot.byPath['old/sub/deep.md']).toBeUndefined();
+  });
 });
