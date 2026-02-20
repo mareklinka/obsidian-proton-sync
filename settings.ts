@@ -14,6 +14,7 @@ export interface ProtonDriveSyncSettings {
   vaultRootNodeUid: string | null;
   pathMap: Record<string, SyncMapEntry>;
   folderMap: Record<string, SyncMapEntry>;
+  latestEventIds: Record<string, string>;
   reconciliationTombstones: ReconciliationTombstone[];
   enableFileLogging: boolean;
   logLevel: LogLevel;
@@ -44,6 +45,7 @@ export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
   vaultRootNodeUid: null,
   pathMap: {},
   folderMap: {},
+  latestEventIds: {},
   reconciliationTombstones: [],
   enableFileLogging: false,
   logLevel: 'info',

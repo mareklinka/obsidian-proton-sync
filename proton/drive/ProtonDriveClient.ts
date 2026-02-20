@@ -3,6 +3,7 @@ import {
   MemoryCache,
   ProtonDriveClient,
   ProtonDriveHTTPClient,
+  type LatestEventIdProvider,
   type ProtonDriveClientContructorParameters,
   type ProtonDriveCryptoCache,
   type ProtonDriveEntitiesCache
@@ -17,7 +18,11 @@ export type SessionProvider = () => ProtonSession | null;
 type SrpModule = ProtonDriveClientContructorParameters['srpModule'];
 type SrpVerifier = Awaited<ReturnType<SrpModule['getSrpVerifier']>>;
 
-export function createProtonDriveClient(account: ProtonAccount, httpClient: ProtonDriveHTTPClient): ProtonDriveClient {
+export function createProtonDriveClient(
+  account: ProtonAccount,
+  httpClient: ProtonDriveHTTPClient,
+  latestEventIdProvider: LatestEventIdProvider
+): ProtonDriveClient {
   const entitiesCache: ProtonDriveEntitiesCache = new MemoryCache<string>();
   const cryptoCache: ProtonDriveCryptoCache = new MemoryCache<CachedCryptoMaterial>();
 
@@ -30,7 +35,8 @@ export function createProtonDriveClient(account: ProtonAccount, httpClient: Prot
     cryptoCache,
     account,
     openPGPCryptoModule,
-    srpModule
+    srpModule,
+    latestEventIdProvider
   });
 }
 

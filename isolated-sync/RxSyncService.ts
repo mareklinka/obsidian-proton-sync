@@ -73,7 +73,7 @@ export interface ICloudStorageApi {
   createFolder(input: FolderDescriptor, parentPath?: string): Promise<CloudUpsertResult>;
   renameFolder(cloudId: string, newName: string, newPath: string): Promise<CloudUpsertResult>;
   deleteFolder(cloudId: string): Promise<void>;
-  moveFolder(cloudId: string, newPath: string): Promise<CloudUpsertResult>;
+  moveFolder(cloudId: string, newPath: string, oldPath?: string): Promise<CloudUpsertResult>;
 }
 
 export interface SyncQueueStats {
@@ -97,6 +97,7 @@ export interface SyncServiceOptions {
   debounceMs?: number;
   sendIntervalMs?: number;
   maxOpsPerTick?: number;
+  upToDateToleranceMs?: number;
   retryMaxAttempts?: number;
   retryBaseDelayMs?: number;
   jitterRatio?: number;
@@ -137,6 +138,7 @@ type EngineCommand = {
 export const DEFAULT_DEBOUNCE_MS = 10000;
 export const DEFAULT_SEND_INTERVAL_MS = 500;
 export const DEFAULT_MAX_OPS_PER_TICK = 1;
+export const DEFAULT_UP_TO_DATE_TOLERANCE_MS = 3000;
 export const DEFAULT_RETRY_MAX_ATTEMPTS = 5;
 export const DEFAULT_RETRY_BASE_DELAY_MS = 1000;
 export const DEFAULT_JITTER_RATIO = 0.2;
@@ -173,6 +175,7 @@ export class RxSyncService implements ISyncService {
   private readonly debounceMs: number;
   private readonly sendIntervalMs: number;
   private readonly maxOpsPerTick: number;
+  private readonly upToDateToleranceMs: number;
   private readonly retryMaxAttempts: number;
   private readonly retryBaseDelayMs: number;
   private readonly jitterRatio: number;
@@ -192,6 +195,7 @@ export class RxSyncService implements ISyncService {
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     this.sendIntervalMs = options.sendIntervalMs ?? DEFAULT_SEND_INTERVAL_MS;
     this.maxOpsPerTick = options.maxOpsPerTick ?? DEFAULT_MAX_OPS_PER_TICK;
+    this.upToDateToleranceMs = options.upToDateToleranceMs ?? DEFAULT_UP_TO_DATE_TOLERANCE_MS;
     this.retryMaxAttempts = options.retryMaxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS;
     this.retryBaseDelayMs = options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
     this.jitterRatio = options.jitterRatio ?? DEFAULT_JITTER_RATIO;
@@ -558,7 +562,12 @@ export class RxSyncService implements ISyncService {
         if (!descriptor) {
           throw new Error(`File not found: ${change.path}`);
         }
+
         const known = this.lookupByPath(change.path);
+        if (known && descriptor.modifiedAt <= known.updatedAt + this.upToDateToleranceMs) {
+          return;
+        }
+
         const result = known
           ? await this.cloudApi.updateFile(known.cloudId, descriptor)
           : await this.cloudApi.createFile(descriptor, getParentPath(change.path));
@@ -629,7 +638,7 @@ export class RxSyncService implements ISyncService {
         if (!cloudId) {
           throw new Error(`Unknown cloud ID for moved folder: ${change.oldPath}`);
         }
-        const result = await this.cloudApi.moveFolder(cloudId, change.path);
+        const result = await this.cloudApi.moveFolder(cloudId, change.path, change.oldPath);
         this.upsertIndex(result, change.type, change.oldPath);
         return;
       }

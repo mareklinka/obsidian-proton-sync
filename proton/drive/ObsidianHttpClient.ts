@@ -71,7 +71,7 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     if ('json' in request && request.json) {
       body = JSON.stringify(request.json);
       contentType = 'application/json';
-    } else if ('body' in request) {
+    } else if ('body' in request && request.body) {
       if (request.body instanceof FormData && request.body.has('Block')) {
         const blockData = (request.body as unknown as FormData).get('Block') as Blob;
 

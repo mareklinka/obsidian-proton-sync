@@ -332,6 +332,113 @@ describe('ProtonDriveCloudStorageApi', () => {
     expect(drive.renameCalls[0]).toEqual({ id: 'file-1', name: 'new.md' });
   });
 
+  it('rename-only moveFolder does not call moveNodes when parent folder is unchanged', async () => {
+    const rootUid = 'root';
+    const drive = new FakeDriveClient(rootUid);
+    drive.addFolder('folder-parent', rootUid, 'parent');
+    drive.addFolder('folder-1', 'folder-parent', 'old-name');
+
+    const snapshot: SyncIndexSnapshot = {
+      byPath: {
+        parent: {
+          cloudId: 'folder-parent',
+          path: 'parent',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        },
+        'parent/old-name': {
+          cloudId: 'folder-1',
+          path: 'parent/old-name',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        }
+      },
+      byCloudId: {
+        'folder-parent': {
+          cloudId: 'folder-parent',
+          path: 'parent',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        },
+        'folder-1': {
+          cloudId: 'folder-1',
+          path: 'parent/old-name',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        }
+      }
+    };
+
+    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, fakeLogger, () => snapshot);
+
+    const moved = await api.moveFolder('folder-1', 'parent/new-name', 'parent/old-name');
+
+    expect(moved.path).toBe('parent/new-name');
+    expect(drive.moveCalls).toHaveLength(0);
+    expect(drive.renameCalls).toHaveLength(1);
+    expect(drive.renameCalls[0]).toEqual({ id: 'folder-1', name: 'new-name' });
+  });
+
+  it('moveFolder performs parent move and rename when both change', async () => {
+    const rootUid = 'root';
+    const drive = new FakeDriveClient(rootUid);
+    drive.addFolder('folder-parent-a', rootUid, 'a');
+    drive.addFolder('folder-parent-b', rootUid, 'b');
+    drive.addFolder('folder-1', 'folder-parent-a', 'old-name');
+
+    const snapshot: SyncIndexSnapshot = {
+      byPath: {
+        a: {
+          cloudId: 'folder-parent-a',
+          path: 'a',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        },
+        b: {
+          cloudId: 'folder-parent-b',
+          path: 'b',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        },
+        'a/old-name': {
+          cloudId: 'folder-1',
+          path: 'a/old-name',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        }
+      },
+      byCloudId: {
+        'folder-parent-a': {
+          cloudId: 'folder-parent-a',
+          path: 'a',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        },
+        'folder-parent-b': {
+          cloudId: 'folder-parent-b',
+          path: 'b',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        },
+        'folder-1': {
+          cloudId: 'folder-1',
+          path: 'a/old-name',
+          entityType: 'folder',
+          updatedAt: Date.now()
+        }
+      }
+    };
+
+    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, fakeLogger, () => snapshot);
+
+    const moved = await api.moveFolder('folder-1', 'b/new-name', 'a/old-name');
+
+    expect(moved.path).toBe('b/new-name');
+    expect(drive.moveCalls).toHaveLength(1);
+    expect(drive.renameCalls).toHaveLength(1);
+    expect(drive.renameCalls[0]).toEqual({ id: 'folder-1', name: 'new-name' });
+  });
+
   it('delete ignores not-found errors for idempotence', async () => {
     const rootUid = 'root';
     const drive = new FakeDriveClient(rootUid);

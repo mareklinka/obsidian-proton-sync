@@ -142,15 +142,21 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
     this.removeFolderByUid(cloudId);
   }
 
-  async moveFolder(cloudId: string, newPath: string): Promise<CloudUpsertResult> {
+  async moveFolder(cloudId: string, newPath: string, oldPath?: string): Promise<CloudUpsertResult> {
     const normalizedPath = normalizePath(newPath);
+    const normalizedOldPath = oldPath ? normalizePath(oldPath) : undefined;
     const targetParentPath = getParentPath(normalizedPath);
     const targetName = getBaseName(normalizedPath);
     const parentUid = await this.ensureFolderPath(targetParentPath, true);
+    const sourceParentPath = normalizedOldPath ? getParentPath(normalizedOldPath) : undefined;
+    const parentChanged =
+      sourceParentPath === undefined || this.toCanonical(sourceParentPath) !== this.toCanonical(targetParentPath);
 
-    const moveResult = await this.consumeSingleNodeResult(this.driveClient.moveNodes([cloudId], parentUid));
-    if (!moveResult.ok) {
-      throw new Error(`moveFolder failed for ${cloudId}: ${moveResult.error ?? 'unknown error'}`);
+    if (parentChanged) {
+      const moveResult = await this.consumeSingleNodeResult(this.driveClient.moveNodes([cloudId], parentUid));
+      if (!moveResult.ok) {
+        throw new Error(`moveFolder failed for ${cloudId}: ${moveResult.error ?? 'unknown error'}`);
+      }
     }
 
     const currentName = await this.getNodeName(cloudId);

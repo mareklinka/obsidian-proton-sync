@@ -33,7 +33,7 @@ function createFsMock(): IFileSystemReader {
     readFile: vi.fn(async (path: string) => ({
       name: path.split('/').pop() ?? 'file.txt',
       path,
-      modifiedAt: 123,
+      modifiedAt: Date.now(),
       content: new Blob(['content'])
     })),
     readFolder: vi.fn(async (path: string) => ({
@@ -282,7 +282,7 @@ describe('RxSyncService (isolated)', () => {
           cloudId: 'cloud-1',
           path: 'Notes/Doc.md',
           entityType: 'file',
-          updatedAt: Date.now()
+          updatedAt: Date.now() - 10000
         }
       },
       byCloudId: {}
@@ -350,5 +350,44 @@ describe('RxSyncService (isolated)', () => {
 
     await vi.advanceTimersByTimeAsync(20);
     expect(calls).toEqual(['createFile:notes/a.md']);
+  });
+
+  it('skips cloud update when local file is already up-to-date', async () => {
+    const calls: string[] = [];
+    const fs = createFsMock();
+    const cloud = createCloudMock(calls);
+
+    (
+      fs.readFile as unknown as { mockImplementation: (fn: (path: string) => Promise<unknown>) => void }
+    ).mockImplementation(async (path: string) => ({
+      name: path.split('/').pop() ?? 'file.txt',
+      path,
+      modifiedAt: Date.now() - 2000,
+      content: new Blob(['content'])
+    }));
+
+    const service = new RxSyncService(fs, cloud, {
+      sendIntervalMs: 20,
+      debounceMs: 0,
+      upToDateToleranceMs: 3000
+    });
+
+    service.initializeIndex({
+      byPath: {
+        'notes/a.md': {
+          cloudId: 'cloud-1',
+          path: 'notes/a.md',
+          entityType: 'file',
+          updatedAt: Date.now()
+        }
+      },
+      byCloudId: {}
+    });
+
+    service.enqueueChange({ type: 'file-edited', entityType: 'file', path: 'notes/a.md' });
+    service.start();
+    await vi.advanceTimersByTimeAsync(30);
+
+    expect(calls).toEqual([]);
   });
 });
