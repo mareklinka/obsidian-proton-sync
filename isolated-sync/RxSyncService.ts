@@ -68,7 +68,7 @@ export interface ICloudStorageApi {
   createFile(input: FileDescriptor, parentPath?: string): Promise<CloudUpsertResult>;
   updateFile(cloudId: string, input: FileDescriptor): Promise<CloudUpsertResult>;
   deleteFile(cloudId: string): Promise<void>;
-  moveFile(cloudId: string, newPath: string): Promise<CloudUpsertResult>;
+  moveFile(cloudId: string, newPath: string, oldPath?: string): Promise<CloudUpsertResult>;
 
   createFolder(input: FolderDescriptor, parentPath?: string): Promise<CloudUpsertResult>;
   renameFolder(cloudId: string, newName: string, newPath: string): Promise<CloudUpsertResult>;
@@ -134,7 +134,7 @@ type EngineCommand = {
   reason: EngineCommandReason;
 };
 
-export const DEFAULT_DEBOUNCE_MS = 1500;
+export const DEFAULT_DEBOUNCE_MS = 10000;
 export const DEFAULT_SEND_INTERVAL_MS = 500;
 export const DEFAULT_MAX_OPS_PER_TICK = 1;
 export const DEFAULT_RETRY_MAX_ATTEMPTS = 5;
@@ -308,13 +308,14 @@ export class RxSyncService implements ISyncService {
       throw new Error('Cannot enqueue into a disposed service.');
     }
 
+    const now = this.now();
     const normalized = this.normalizeAndValidate(change);
     const hadPending = this.getTotalPending() > 0;
     const queued: QueuedChange = {
       ...normalized,
       id: this.nextChangeId(),
-      enqueuedAt: this.now(),
-      availableAt: this.now(),
+      enqueuedAt: now,
+      availableAt: this.computeInitialAvailableAt(normalized.type, now),
       attempt: 0
     };
 
@@ -582,7 +583,7 @@ export class RxSyncService implements ISyncService {
         if (!cloudId) {
           throw new Error(`Unknown cloud ID for moved file: ${change.oldPath}`);
         }
-        const result = await this.cloudApi.moveFile(cloudId, change.path);
+        const result = await this.cloudApi.moveFile(cloudId, change.path, change.oldPath);
         this.upsertIndex(result, change.type, change.oldPath);
         return;
       }
@@ -778,6 +779,7 @@ export class RxSyncService implements ISyncService {
       }
 
       if (last.type === 'file-created' && incoming.type === 'file-edited') {
+        last.availableAt = Math.max(last.availableAt, incoming.availableAt);
         this.droppedByCompaction += 1;
         return;
       }
@@ -893,6 +895,14 @@ export class RxSyncService implements ISyncService {
   private nextChangeId(): string {
     this.idCounter += 1;
     return `chg_${this.idCounter}`;
+  }
+
+  private computeInitialAvailableAt(type: SyncChangeType, enqueuedAt: number): number {
+    if (type === 'file-created' || type === 'file-edited') {
+      return enqueuedAt + this.debounceMs;
+    }
+
+    return enqueuedAt;
   }
 }
 

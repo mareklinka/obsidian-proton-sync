@@ -102,7 +102,8 @@ describe('RxSyncService (isolated)', () => {
   it('accepts enqueue before start and processes after start', async () => {
     const calls: string[] = [];
     const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
-      sendIntervalMs: 50
+      sendIntervalMs: 50,
+      debounceMs: 0
     });
 
     service.initializeIndex(emptySnapshot());
@@ -138,7 +139,7 @@ describe('RxSyncService (isolated)', () => {
     service.enqueueChange({ type: 'file-edited', entityType: 'file', path: 'notes/a.md' });
 
     service.start();
-    await vi.advanceTimersByTimeAsync(120);
+    await vi.advanceTimersByTimeAsync(1700);
 
     expect((cloud.createFile as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(1);
     expect(calls).toEqual(['createFile:notes/a.md']);
@@ -148,7 +149,8 @@ describe('RxSyncService (isolated)', () => {
     const calls: string[] = [];
     const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
       sendIntervalMs: 20,
-      maxOpsPerTick: 1
+      maxOpsPerTick: 1,
+      debounceMs: 0
     });
 
     service.initializeIndex(emptySnapshot());
@@ -175,7 +177,8 @@ describe('RxSyncService (isolated)', () => {
 
     const service = new RxSyncService(createFsMock(), cloud, {
       sendIntervalMs: 10,
-      maxOpsPerTick: 1
+      maxOpsPerTick: 1,
+      debounceMs: 0
     });
 
     service.initializeIndex(emptySnapshot());
@@ -210,7 +213,8 @@ describe('RxSyncService (isolated)', () => {
       sendIntervalMs: 50,
       retryBaseDelayMs: 100,
       jitterRatio: 0,
-      retryMaxAttempts: 2
+      retryMaxAttempts: 2,
+      debounceMs: 0
     });
 
     const results: { success: boolean; retryScheduled: boolean }[] = [];
@@ -235,7 +239,8 @@ describe('RxSyncService (isolated)', () => {
   it('emits full snapshot on init and each map mutation', async () => {
     const calls: string[] = [];
     const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
-      sendIntervalMs: 20
+      sendIntervalMs: 20,
+      debounceMs: 0
     });
 
     const snapshots: SyncIndexSnapshotEvent[] = [];
@@ -267,7 +272,8 @@ describe('RxSyncService (isolated)', () => {
   it('uses case-insensitive canonical path keys', async () => {
     const calls: string[] = [];
     const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
-      sendIntervalMs: 20
+      sendIntervalMs: 20,
+      debounceMs: 0
     });
 
     service.initializeIndex({
@@ -293,7 +299,8 @@ describe('RxSyncService (isolated)', () => {
   it('stop pauses and restart resumes processing', async () => {
     const calls: string[] = [];
     const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
-      sendIntervalMs: 20
+      sendIntervalMs: 20,
+      debounceMs: 0
     });
 
     service.initializeIndex(emptySnapshot());
@@ -322,5 +329,26 @@ describe('RxSyncService (isolated)', () => {
     expect(() => service.enqueueChange({ type: 'file-created', entityType: 'file', path: 'x.md' })).toThrowError(
       /disposed/i
     );
+  });
+
+  it('extends file-created dispatch window when a file-edited event is compacted into it', async () => {
+    const calls: string[] = [];
+    const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
+      sendIntervalMs: 10,
+      debounceMs: 100
+    });
+
+    service.initializeIndex(emptySnapshot());
+    service.start();
+
+    service.enqueueChange({ type: 'file-created', entityType: 'file', path: 'notes/a.md' });
+    await vi.advanceTimersByTimeAsync(50);
+    service.enqueueChange({ type: 'file-edited', entityType: 'file', path: 'notes/a.md' });
+
+    await vi.advanceTimersByTimeAsync(90);
+    expect(calls).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(20);
+    expect(calls).toEqual(['createFile:notes/a.md']);
   });
 });

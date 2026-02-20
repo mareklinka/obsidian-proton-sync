@@ -42,10 +42,11 @@ export class LoggingCloudStorageApi implements ICloudStorageApi {
     this.logger.info('Mock sync deleteFile', { cloudId });
   }
 
-  async moveFile(cloudId: string, newPath: string): Promise<CloudUpsertResult> {
+  async moveFile(cloudId: string, newPath: string, oldPath?: string): Promise<CloudUpsertResult> {
     this.logger.info('Mock sync moveFile', {
       cloudId,
-      newPath
+      newPath,
+      oldPath
     });
 
     return {

@@ -7,7 +7,7 @@ import { createFileLogger, getDefaultLogFilePath, type PluginLogger } from './lo
 import { ensureSyncRoots } from './sync-root';
 import { ObsidianVaultFileSystemReader } from './isolated-sync/ObsidianVaultFileSystemReader';
 import { RxSyncService, type SyncIndexSnapshot } from './isolated-sync/RxSyncService';
-import { LoggingCloudStorageApi } from './isolated-sync/LoggingCloudStorageApi';
+import { ProtonDriveCloudStorageApi } from './isolated-sync/ProtonDriveCloudStorageApi';
 import type { ProtonDriveClient } from '@protontech/drive-sdk';
 import { ProtonSessionService, ProtonSessionState } from './proton/auth/ProtonSessionService';
 import { loadSession, saveSession } from './session-store';
@@ -170,7 +170,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   private initializeIsolatedSync(initialSnapshot?: SyncIndexSnapshot): void {
-    if (this.isolatedSyncService || this.syncReader) {
+    if (this.isolatedSyncService || this.syncReader || !this.driveClient || !this.settings.vaultRootNodeUid) {
       return;
     }
 
@@ -178,7 +178,11 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       ignoredPathPrefixes: []
     });
 
-    const syncService = new RxSyncService(reader, new LoggingCloudStorageApi(this.logger));
+    const cloudApi = new ProtonDriveCloudStorageApi(this.driveClient, this.settings.vaultRootNodeUid, this.logger, () =>
+      this.buildInitialSyncSnapshot()
+    );
+
+    const syncService = new RxSyncService(reader, cloudApi);
     syncService.initializeIndex(initialSnapshot ?? this.buildInitialSyncSnapshot());
 
     this.syncSubscriptions.push(
@@ -196,7 +200,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.syncSubscriptions.push(
       syncService.dispatchResults$.subscribe(result => {
         if (result.success) {
-          this.logger.info('Isolated sync operation dispatched through mock service', {
+          this.logger.info('Isolated sync operation dispatched to Proton Drive', {
             changeId: result.changeId
           });
           return;
@@ -231,7 +235,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.syncReader = reader;
     this.isolatedSyncService = syncService;
 
-    this.logger.info('Isolated sync queue initialized with logging mock cloud service');
+    this.logger.info('Isolated sync queue initialized with Proton cloud service');
   }
 
   private disposeIsolatedSync(): void {
