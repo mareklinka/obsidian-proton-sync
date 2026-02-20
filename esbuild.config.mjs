@@ -11,7 +11,8 @@ const context = await esbuild.context({
   sourcemap: !isProduction,
   minify: isProduction,
   external: ['obsidian'],
-  logLevel: 'info'
+  logLevel: 'info',
+  treeShaking: true
 });
 
 if (isProduction) {

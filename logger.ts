@@ -10,11 +10,11 @@ export interface LoggerSettings {
 }
 
 export interface PluginLogger {
+  updateSettings(settings: Partial<LoggerSettings>): void;
   debug(message: string, context?: Record<string, unknown>): void;
   info(message: string, context?: Record<string, unknown>): void;
   warn(message: string, context?: Record<string, unknown>, error?: unknown): void;
   error(message: string, context?: Record<string, unknown>, error?: unknown): void;
-  updateSettings(settings: LoggerSettings): void;
 }
 
 const LEVEL_ORDER: Record<LogLevel, number> = {
@@ -45,8 +45,8 @@ class FileLogger implements PluginLogger {
     this.settings = settings;
   }
 
-  updateSettings(settings: LoggerSettings): void {
-    this.settings = normalizeLoggerSettings(settings);
+  updateSettings(settings: Partial<LoggerSettings>): void {
+    this.settings = normalizeLoggerSettings({ ...this.settings, ...settings });
   }
 
   debug(message: string, context?: Record<string, unknown>): void {

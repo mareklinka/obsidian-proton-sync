@@ -1,0 +1,170 @@
+import { PluginSettingTab, Setting } from 'obsidian';
+import { Subject, take } from 'rxjs';
+
+import { type LogLevel } from './logger';
+import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from './model/settings';
+import { ProtonDriveLoginModal } from './login-modal';
+import ProtonDriveSyncPlugin from './main';
+
+export class ProtonDriveSyncSettingTab extends PluginSettingTab {
+  private readonly disconnectSubject = new Subject<void>();
+  public readonly disconnect$ = this.disconnectSubject.asObservable();
+
+  private readonly loginSubject = new Subject<{
+    email: string;
+    password: string;
+    mailboxPassword: string;
+    twoFactorCode: string;
+  }>();
+  public readonly login$ = this.loginSubject.asObservable();
+
+  private readonly loggingChangedSubject = new Subject<{ isEnabled: boolean; maxSize: number; minLevel: LogLevel }>();
+  public readonly loggingChanged$ = this.loggingChangedSubject.asObservable();
+
+  constructor(private readonly plugin: ProtonDriveSyncPlugin) {
+    super(plugin.app, plugin);
+  }
+
+  async display(): Promise<void> {
+    const { containerEl } = this;
+    let settings = await this.loadSettings();
+
+    containerEl.empty();
+
+    containerEl.createEl('h2', { text: 'Proton Drive Sync' });
+
+    const disclosure = containerEl.createEl('div', { cls: 'proton-sync-disclosure' });
+    disclosure.createEl('p', {
+      cls: 'proton-sync-disclosure__title',
+      text: '⚠️ Disclaimer'
+    });
+    disclosure.createEl('p', {
+      text: 'This plugin is an unofficial, third-party integration with Proton Drive.'
+    });
+    disclosure.createEl('p', {
+      text: 'You will be asked to enter your credentials into this plugin. Passwords or other sensitive information are never stored or logged.'
+    });
+
+    const statusDescription = this.buildStatusDescription(settings);
+    const connectionSetting = new Setting(containerEl).setName('Connection status').setDesc(statusDescription);
+
+    if (settings.connectionStatus === 'connected') {
+      connectionSetting.addButton(button =>
+        button
+          .setButtonText('Disconnect')
+          .setCta()
+          .onClick(() => {
+            this.disconnectSubject.next();
+          })
+      );
+    } else {
+      connectionSetting.addButton(button =>
+        button
+          .setButtonText('Connect')
+          .setCta()
+          .onClick(() => {
+            const modal = new ProtonDriveLoginModal(this.app);
+            modal.login$.pipe(take(1)).subscribe(async credentials => {
+              settings.accountEmail = credentials.email;
+
+              await this.saveSettings(settings);
+              this.emitLogSettingsChange(settings);
+
+              this.loginSubject.next(credentials);
+
+              settings = await this.loadSettings();
+              connectionSetting.setDesc(this.buildStatusDescription(settings));
+            });
+            modal.open();
+          })
+      );
+    }
+
+    containerEl.createEl('h3', { text: 'Debug logging' });
+
+    new Setting(containerEl)
+      .setName('Enable file logging')
+      .setDesc('Write debug logs to a file inside the vault for troubleshooting.')
+      .addToggle(toggle =>
+        toggle.setValue(settings.enableFileLogging).onChange(value => {
+          settings.enableFileLogging = value;
+          this.saveSettings(settings);
+          this.emitLogSettingsChange(settings);
+        })
+      );
+
+    new Setting(containerEl)
+      .setName('Log level')
+      .setDesc('Minimum severity to write to the log file.')
+      .addDropdown(dropdown =>
+        dropdown
+          .addOptions({
+            debug: 'Debug',
+            info: 'Info',
+            warn: 'Warn',
+            error: 'Error'
+          })
+          .setValue(settings.logLevel)
+          .onChange(value => {
+            settings.logLevel = value as LogLevel;
+            this.saveSettings(settings);
+            this.emitLogSettingsChange(settings);
+          })
+      );
+
+    new Setting(containerEl)
+      .setName('Max log size (KB)')
+      .setDesc('When the log grows beyond this size it will be trimmed.')
+      .addText(text =>
+        text
+          .setPlaceholder('1024')
+          .setValue(String(settings.logMaxSizeKb))
+          .onChange(value => {
+            settings.logMaxSizeKb = Number(value);
+            this.saveSettings(settings);
+            this.emitLogSettingsChange(settings);
+          })
+      );
+  }
+
+  private buildStatusDescription(settings: ProtonDriveSyncSettings): DocumentFragment {
+    const fragment = document.createDocumentFragment();
+
+    fragment.appendText(`Status: ${settings.connectionStatus}`);
+
+    if (settings.lastLoginAt) {
+      fragment.appendText(` • Last login: ${settings.lastLoginAt}`);
+    }
+
+    if (settings.lastRefreshAt) {
+      fragment.appendText(` • Last refresh: ${settings.lastRefreshAt}`);
+    }
+
+    if (settings.sessionExpiresAt) {
+      fragment.appendText(` • Expires: ${settings.sessionExpiresAt}`);
+    }
+
+    if (settings.lastLoginError) {
+      fragment.appendText(` • Error: ${settings.lastLoginError}`);
+    }
+
+    return fragment;
+  }
+
+  private async loadSettings(): Promise<ProtonDriveSyncSettings> {
+    return Object.assign({}, DEFAULT_SETTINGS, await this.plugin.loadData());
+  }
+
+  private async saveSettings(settings: ProtonDriveSyncSettings): Promise<void> {
+    await this.plugin.saveData(settings);
+    await this.display();
+  }
+
+  private emitLogSettingsChange(settints: ProtonDriveSyncSettings): void {
+    this.loggingChangedSubject.next({
+      isEnabled: settints.enableFileLogging,
+      maxSize: settints.logMaxSizeKb,
+      minLevel: settints.logLevel
+    });
+  }
+}

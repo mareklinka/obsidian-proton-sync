@@ -1,17 +1,23 @@
-import { App, Modal, Notice, Setting } from 'obsidian';
+import { App, Modal, Setting } from 'obsidian';
 
-import type ProtonDriveSyncPlugin from './main';
+import { Subject } from 'rxjs';
 
 export class ProtonDriveLoginModal extends Modal {
-  private readonly plugin: ProtonDriveSyncPlugin;
+  private readonly loginSubject = new Subject<{
+    email: string;
+    password: string;
+    mailboxPassword: string;
+    twoFactorCode: string;
+  }>();
+  public readonly login$ = this.loginSubject.asObservable();
+
   private email = '';
   private password = '';
   private mailboxPassword = '';
   private twoFactorCode = '';
 
-  constructor(app: App, plugin: ProtonDriveSyncPlugin) {
+  constructor(app: App) {
     super(app);
-    this.plugin = plugin;
   }
 
   onOpen(): void {
@@ -27,7 +33,7 @@ export class ProtonDriveLoginModal extends Modal {
     new Setting(contentEl).setName('Email').addText(text =>
       text
         .setPlaceholder('you@example.com')
-        .setValue(this.plugin.settings.accountEmail)
+        .setValue('')
         .onChange(value => {
           this.email = value.trim();
         })
@@ -68,8 +74,8 @@ export class ProtonDriveLoginModal extends Modal {
           .setButtonText('Connect')
           .setCta()
           .onClick(async () => {
-            await this.plugin.signIn({
-              email: this.email || this.plugin.settings.accountEmail,
+            this.loginSubject.next({
+              email: this.email,
               password: this.password,
               mailboxPassword: this.mailboxPassword,
               twoFactorCode: this.twoFactorCode
@@ -87,10 +93,6 @@ export class ProtonDriveLoginModal extends Modal {
             this.close();
           })
       );
-
-    if (!this.plugin.settings.accountEmail) {
-      new Notice('Tip: set your account email in settings for faster login.');
-    }
   }
 
   onClose(): void {

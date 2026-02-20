@@ -22,3 +22,24 @@
 .proton-sync-status__label--error {
   color: var(--text-error);
 }
+
+.proton-sync-disclosure {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius-s);
+  border: 1px solid rgba(var(--background-modifier-error-rgb), 0.45);
+  background: rgba(var(--background-modifier-error-rgb), 0.12);
+}
+
+.proton-sync-disclosure p {
+  margin: 0;
+  color: var(--text-warning);
+}
+
+.proton-sync-disclosure p + p {
+  margin-top: 6px;
+}
+
+.proton-sync-disclosure__title {
+  font-weight: 600;
+}

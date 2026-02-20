@@ -1,8 +1,6 @@
 import * as openpgp from 'openpgp';
 import type { ProtonDriveAccount, ProtonDriveAccountAddress } from '@protontech/drive-sdk';
 import type { PrivateKey, PublicKey } from '@protontech/drive-sdk/dist/crypto';
-import { ProtonSecretStore } from '../auth/ProtonSecretStore';
-import { SALTED_PASSPHRASES_SECRET_KEY } from '../Constants';
 import { ProtonSessionService } from '../auth/ProtonSessionService';
 import { ProtonSession } from '../auth/ProtonSession';
 import { getJson } from '../ProtonApiClient';
@@ -56,23 +54,19 @@ type CachedValue<T> = {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export class ProtonAccount implements ProtonDriveAccount {
-  private readonly saltedKeyPasswords: Record<string, string> = {};
+  private saltedKeyPasswords: Record<string, string> = {};
   private addressesCache: CachedValue<ProtonDriveAccountAddress[]> | null = null;
   private publicKeysCache = new Map<string, CachedValue<PublicKey[]>>();
 
   private currentSession: ProtonSession | null = null;
 
-  constructor(
-    private readonly authService: ProtonSessionService,
-    private readonly secretStore: ProtonSecretStore
-  ) {
-    this.saltedKeyPasswords = JSON.parse(this.secretStore.get(SALTED_PASSPHRASES_SECRET_KEY) ?? '{}') as Record<
-      string,
-      string
-    >;
-
+  constructor(private readonly authService: ProtonSessionService) {
     authService.currentSession$.subscribe(sessionState => {
       this.currentSession = sessionState.state === 'ok' ? sessionState.session : null;
+    });
+
+    authService.saltedKeyPasswords$.subscribe(passwords => {
+      this.saltedKeyPasswords = passwords;
     });
   }
 

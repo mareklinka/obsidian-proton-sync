@@ -1,7 +1,7 @@
 import { NodeType, type ProtonDriveClient, type NodeEntity, type MaybeNode } from '@protontech/drive-sdk';
 
 import type { PluginLogger } from './logger';
-import type { ProtonDriveSyncSettings } from './settings';
+import type { ProtonDriveSyncSettings } from './model/settings';
 
 const SYNC_CONTAINER_NAME = 'obsidian-notes';
 

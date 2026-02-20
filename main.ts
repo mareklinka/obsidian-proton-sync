@@ -1,8 +1,7 @@
 import { Notice, Plugin } from 'obsidian';
 import { of, type Observable, type Subscription } from 'rxjs';
 
-import { ProtonDriveLoginModal } from './login-modal';
-import { DEFAULT_SETTINGS, ProtonDriveSyncSettings, ProtonDriveSyncSettingTab } from './settings';
+import { DEFAULT_SETTINGS, ProtonDriveSyncSettings } from './model/settings';
 import { createFileLogger, getDefaultLogFilePath, type PluginLogger } from './logger';
 import { ensureSyncRoots } from './sync-root';
 import { ObsidianVaultFileSystemReader } from './isolated-sync/ObsidianVaultFileSystemReader';
@@ -10,7 +9,6 @@ import { RxSyncService, type SyncEngineState, type SyncIndexSnapshot } from './i
 import { ProtonDriveCloudStorageApi } from './isolated-sync/ProtonDriveCloudStorageApi';
 import type { ProtonDriveClient } from '@protontech/drive-sdk';
 import { ProtonSessionService, ProtonSessionState } from './proton/auth/ProtonSessionService';
-import { loadSession, saveSession } from './session-store';
 import { ObsidianSecretRepository } from './Services/ObsidianSecretRepository';
 import { ProtonAccount } from './proton/drive/ProtonAccount';
 import { createProtonDriveClient } from './proton/drive/ProtonDriveClient';
@@ -20,6 +18,7 @@ import { normalizePath, toCanonicalPathKey } from './isolated-sync/path-utils';
 import type { DriveEvent, LatestEventIdProvider } from '@protontech/drive-sdk';
 import { createSyncStatusBar, type SyncStatusBarController } from './status-bar';
 import { CloudReconciliationQueue } from './CloudReconciliationQueue';
+import { ProtonDriveSyncSettingTab } from './settings-tab';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   settings!: ProtonDriveSyncSettings;
@@ -31,6 +30,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private syncReader: ObsidianVaultFileSystemReader | null = null;
   private syncSubscriptions: Subscription[] = [];
   private sessionSubscription: Subscription | null = null;
+  private settingsUiSubscription: Subscription | null = null;
   private syncBootstrapInProgress = false;
   private syncBootstrapped = false;
   private cloudEventSubscription: { dispose(): void } | null = null;
@@ -39,6 +39,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private readonly localSuppressionTtlMs = 5000;
   private readonly cloudReconciliationQueue = new CloudReconciliationQueue();
   private statusBarController: SyncStatusBarController | null = null;
+  private readonly subscriptions: Subscription[] = [];
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -58,7 +59,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     this.protonSessionService = new ProtonSessionService(secretStore, this.manifest.version);
     this.refreshStatusBarBinding();
-    const protonAccount = new ProtonAccount(this.protonSessionService, secretStore);
+    const protonAccount = new ProtonAccount(this.protonSessionService);
     this.driveClient = createProtonDriveClient(
       protonAccount,
       new ObsidianHttpClient(this.protonSessionService),
@@ -69,7 +70,6 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.applyAuthResultToSettings(session);
 
       if (session.state === 'ok') {
-        saveSession(this.app, session.session);
         if (!this.syncBootstrapped && !this.syncBootstrapInProgress) {
           this.syncBootstrapInProgress = true;
           void this.bootstrapSyncFromSession().finally(() => {
@@ -86,23 +86,19 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       }
     });
 
-    const existingSession = loadSession(this.app);
-    if (existingSession) {
-      await this.protonSessionService.refreshSession(existingSession);
-    }
+    await this.protonSessionService.loadSession();
 
-    this.settingTab = new ProtonDriveSyncSettingTab(this.app, this);
-    this.addSettingTab(this.settingTab);
-
-    this.addRibbonIcon('refresh-ccw', 'Proton Drive Sync', () => {
-      new Notice('Proton Drive Sync: scaffold loaded');
-    });
+    this.settingTab = this.setupSettingsTab(this);
   }
 
   async onunload(): Promise<void> {
     this.logger.info('Unloading Proton Drive Sync plugin');
+    this.subscriptions.forEach(subscription => subscription.unsubscribe());
+    this.subscriptions.length = 0;
     this.sessionSubscription?.unsubscribe();
     this.sessionSubscription = null;
+    this.settingsUiSubscription?.unsubscribe();
+    this.settingsUiSubscription = null;
     this.cloudEventSubscription?.dispose();
     this.cloudEventSubscription = null;
     this.protonSessionService?.dispose();
@@ -110,10 +106,6 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.cloudReconciliationQueue.dispose();
     this.statusBarController?.dispose();
     this.statusBarController = null;
-  }
-
-  openLoginModal(): void {
-    new ProtonDriveLoginModal(this.app, this).open();
   }
 
   async signIn(credentials: {
@@ -139,10 +131,51 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.logger.info('Disconnecting from Proton Drive');
     this.protonSessionService.signOut();
     this.cloudReconciliationQueue.reset();
+    this.cloudEventSubscription?.dispose();
     this.syncBootstrapped = false;
+
+    this.settings = {
+      ...this.settings,
+      connectionStatus: 'disconnected',
+      sessionExpiresAt: null,
+      pathMap: {},
+      folderMap: {},
+      latestEventIds: {},
+      reconciliationTombstones: [],
+      vaultRootNodeUid: null,
+      containerNodeUid: null,
+      lastLoginAt: null,
+      lastLoginError: null,
+      lastRefreshAt: null
+    };
     this.disposeIsolatedSync();
     this.saveSettings();
     new Notice('Disconnected from Proton Drive.');
+  }
+
+  private setupSettingsTab(plugin: ProtonDriveSyncPlugin): ProtonDriveSyncSettingTab {
+    const settingTab = new ProtonDriveSyncSettingTab(plugin);
+
+    this.subscriptions.push(
+      settingTab.loggingChanged$.subscribe(({ isEnabled, maxSize, minLevel }) => {
+        this.logger.updateSettings({
+          enabled: isEnabled,
+          maxFileSizeBytes: maxSize * 1024,
+          level: minLevel,
+          filePath: getDefaultLogFilePath()
+        });
+      }),
+      settingTab.disconnect$.subscribe(() => {
+        this.disconnect();
+      }),
+      settingTab.login$.subscribe(credentials => {
+        this.signIn(credentials);
+      })
+    );
+
+    this.addSettingTab(settingTab);
+
+    return settingTab;
   }
 
   private async bootstrapSyncFromSession(): Promise<void> {
@@ -577,12 +610,6 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-    this.logger?.updateSettings({
-      enabled: this.settings.enableFileLogging,
-      level: this.settings.logLevel,
-      filePath: getDefaultLogFilePath(),
-      maxFileSizeBytes: this.settings.logMaxSizeKb * 1024
-    });
     this.settingTab?.display();
   }
 }

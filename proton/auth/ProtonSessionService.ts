@@ -3,22 +3,28 @@ import { requestUrl } from 'obsidian';
 import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64, ProtonAuthInfo } from './ProtonSrp';
 import { BehaviorSubject, map, merge, of, shareReplay, Subject, switchMap, timer } from 'rxjs';
 import { ProtonSession } from './ProtonSession';
-import { getJson } from '../ProtonApiClient';
+import { deleteJson, getJson } from '../ProtonApiClient';
 import type { ProtonSecretStore } from './ProtonSecretStore';
-import { SESSION_REFRESH_INTERVAL_MS, PROTON_BASE_URL, SALTED_PASSPHRASES_SECRET_KEY } from '../Constants';
+import { PROTON_BASE_URL } from '../Constants';
 
-const DEFAULT_SESSION_TTL_MS = 50 * 60 * 1000;
 const AUTH_SCOPE = 'full locked';
+const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
+const SALTED_PASSPHRASES_SECRET_KEY = 'proton-drive-sync-salted-passphrases';
+
+const DEFAULT_SESSION_TTL_MS = 50 * 60 * 1000; // 50 minutes
+export const SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export interface ProtonAuthResponse {
   UserID: string;
   UID: string;
+  ExpiresIn: number;
   AccessToken: string;
   RefreshToken: string;
   ServerProof: string;
   Scope: string;
-  TwoFA?: {
+  '2FA'?: {
     Enabled: number;
+    TOTP: number;
   };
   PasswordMode?: number;
 }
@@ -39,6 +45,9 @@ export class ProtonSessionService {
   public readonly appVersionHeader: string;
   private readonly currentSessionSubject: Subject<ProtonSessionState> = new Subject();
   private readonly authStatusSubject = new BehaviorSubject<ProtonAuthStatus>('disconnected');
+
+  private readonly saltedKeyPasswordsSubject: BehaviorSubject<Record<string, string>> = new BehaviorSubject({});
+  public readonly saltedKeyPasswords$ = this.saltedKeyPasswordsSubject.asObservable();
 
   private refreshIntervalId: number | null = null;
   private currentSession: ProtonSession | null = null;
@@ -71,10 +80,17 @@ export class ProtonSessionService {
     appVersion: string
   ) {
     this.appVersionHeader = `external-drive-obsidiansync@${appVersion}`;
-    this.currentSession$.subscribe(session => {
-      switch (session.state) {
+
+    const saltedPasswordsJson = this.secretStore.get(SALTED_PASSPHRASES_SECRET_KEY);
+    this.saltedKeyPasswordsSubject.next(
+      JSON.parse(saltedPasswordsJson ? saltedPasswordsJson : '{}') as Record<string, string>
+    );
+
+    this.currentSession$.subscribe(sessionState => {
+      switch (sessionState.state) {
         case 'ok':
-          this.currentSession = session.session;
+          this.currentSession = sessionState.session;
+          this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(this.currentSession));
           this.authStatusSubject.next('connected');
           break;
         case 'stale':
@@ -87,6 +103,10 @@ export class ProtonSessionService {
           this.authStatusSubject.next('disconnected');
           break;
       }
+    });
+
+    this.saltedKeyPasswords$.subscribe(_ => {
+      this.secretStore.set(SALTED_PASSPHRASES_SECRET_KEY, JSON.stringify(_));
     });
   }
 
@@ -103,7 +123,7 @@ export class ProtonSessionService {
         throw new Error('SRP server proof mismatch.');
       }
 
-      if (authResponse.TwoFA?.Enabled && (authResponse.TwoFA.Enabled & 1) !== 0) {
+      if (authResponse['2FA']?.Enabled && (authResponse['2FA'].Enabled & 1) !== 0) {
         if (!twoFactorCode) {
           throw new Error('Two-factor authentication code required.');
         }
@@ -112,14 +132,13 @@ export class ProtonSessionService {
       }
 
       const now = new Date();
-      const expiresAt = new Date(now.getTime() + DEFAULT_SESSION_TTL_MS);
 
       const keyPasswords = await this.getKeyPasswords(password, {
         uid: authResponse.UID,
         accessToken: authResponse.AccessToken
       });
 
-      this.secretStore.set(SALTED_PASSPHRASES_SECRET_KEY, JSON.stringify(keyPasswords));
+      this.saltedKeyPasswordsSubject.next(keyPasswords);
 
       this.currentSessionSubject.next({
         state: 'ok',
@@ -131,7 +150,7 @@ export class ProtonSessionService {
           scope: authResponse.Scope || null,
           createdAt: now.toISOString(),
           updatedAt: now.toISOString(),
-          expiresAt: expiresAt.getTime(),
+          expiresAt: now.getTime() + authResponse.ExpiresIn * 1000,
           lastRefreshAt: now.getTime()
         }
       });
@@ -143,14 +162,17 @@ export class ProtonSessionService {
     }
   }
 
-  signOut(): void {
+  async signOut(): Promise<void> {
     const session = this.currentSession;
     if (!session) {
       return;
     }
 
+    await deleteJson<ProtonKeySaltsResponse>('/auth/v4', session, this.appVersionHeader);
+
     this.stopAutoRefresh();
-    this.secretStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
+    this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(undefined));
+    this.saltedKeyPasswordsSubject.next({});
 
     this.currentSessionSubject.next({ state: 'logged-out' });
     this.authStatusSubject.next('disconnected');
@@ -168,7 +190,20 @@ export class ProtonSessionService {
     this.authStatusSubject.next('disconnected');
   }
 
-  async refreshSession(session: ProtonSession): Promise<void> {
+  async loadSession() {
+    const stored = this.secretStore.get(SESSION_STORAGE_KEY);
+    if (!stored) {
+      return;
+    }
+
+    try {
+      await this.refreshSession(JSON.parse(stored) as ProtonSession);
+    } catch {
+      // session restore failed - the user will need to re-authenticate
+    }
+  }
+
+  private async refreshSession(session: ProtonSession): Promise<void> {
     const state = encodeBase64(randomToken(32));
     const body = {
       UID: session.uid,
@@ -187,7 +222,6 @@ export class ProtonSessionService {
     });
 
     const refreshedAt = new Date();
-    const refreshedExpiresAt = new Date(refreshedAt.getTime() + DEFAULT_SESSION_TTL_MS);
 
     this.currentSessionSubject.next({
       state: 'ok',
@@ -198,7 +232,7 @@ export class ProtonSessionService {
         refreshToken: response.RefreshToken,
         scope: response.Scope || session.scope,
         updatedAt: refreshedAt.toISOString(),
-        expiresAt: refreshedExpiresAt.getTime(),
+        expiresAt: refreshedAt.getTime() + response.ExpiresIn * 1000,
         lastRefreshAt: refreshedAt.getTime()
       }
     });

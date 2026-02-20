@@ -2,7 +2,7 @@ import { requestUrl } from 'obsidian';
 import { APP_ID, PROTON_BASE_URL as PROTON_BASE_URL } from './Constants';
 
 type ProtonApiRequestOptions = {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'DELETE';
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
   headers?: Record<string, string>;
@@ -24,6 +24,14 @@ export async function postJson<T>(
   body?: ProtonApiRequestOptions['body']
 ): Promise<T> {
   return getProtonApiJson<T>(path, { method: 'POST', body }, session, appVersion);
+}
+
+export async function deleteJson<T>(
+  path: string,
+  session: { uid: string; accessToken: string },
+  appVersion: string
+): Promise<T> {
+  return getProtonApiJson<T>(path, { method: 'DELETE' }, session, appVersion);
 }
 
 async function getProtonApiJson<T>(
