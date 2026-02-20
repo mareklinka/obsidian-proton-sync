@@ -32,15 +32,18 @@ export function createSyncStatusBar(
     )
     .subscribe(({ loginState, syncState }) => {
       const loginText = toLoginLabel(loginState);
+      const loginIcon = toLoginIcon(loginState);
       const syncText = toSyncLabel(syncState);
+      const syncIcon = toSyncIcon(syncState);
 
-      itemEl.setAttribute('aria-label', `Proton Sync status: Login ${loginText}, Sync ${syncText}`);
+      itemEl.setAttribute('aria-label', `Proton Sync status: ${loginText} / ${syncText}`);
       itemEl.innerHTML =
+        `Proton Sync: ` +
         `<span class="proton-sync-status__label proton-sync-status__label--${loginState}">` +
-        `Login: ${loginText}</span>` +
+        `${loginIcon}</span>` +
         '<span class="proton-sync-status__separator">•</span>' +
         `<span class="proton-sync-status__label proton-sync-status__label--${syncState}">` +
-        `Sync: ${syncText}</span>`;
+        `${syncIcon}</span>`;
     });
 
   return {
@@ -85,6 +88,20 @@ function toLoginLabel(state: StatusBarLoginState): string {
   }
 }
 
+function toLoginIcon(state: StatusBarLoginState): string {
+  switch (state) {
+    case 'connected':
+      return '🟢';
+    case 'connecting':
+      return '⏳';
+    case 'error':
+      return '⚠️';
+    case 'disconnected':
+    default:
+      return '⚫';
+  }
+}
+
 function toSyncLabel(state: StatusBarSyncState): string {
   switch (state) {
     case 'reconciling':
@@ -98,5 +115,21 @@ function toSyncLabel(state: StatusBarSyncState): string {
     case 'idle':
     default:
       return 'Idle';
+  }
+}
+
+function toSyncIcon(state: StatusBarSyncState): string {
+  switch (state) {
+    case 'reconciling':
+      return '⬇️';
+    case 'syncing':
+      return '⬆️';
+    case 'retrying':
+      return '🔁';
+    case 'error':
+      return '⚠️';
+    case 'idle':
+    default:
+      return '💤';
   }
 }
