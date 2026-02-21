@@ -3,7 +3,7 @@ import { requestUrl } from 'obsidian';
 import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64, ProtonAuthInfo } from './ProtonSrp';
 import { BehaviorSubject, map, merge, of, shareReplay, Subject, switchMap, timer } from 'rxjs';
 import { ProtonSession } from './ProtonSession';
-import { deleteJson, getJson } from '../ProtonApiClient';
+import { deleteJson, getJson, postJson } from '../ProtonApiClient';
 import type { ProtonSecretStore } from './ProtonSecretStore';
 import { PROTON_BASE_URL } from '../Constants';
 
@@ -11,7 +11,6 @@ const AUTH_SCOPE = 'full locked';
 const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
 const SALTED_PASSPHRASES_SECRET_KEY = 'proton-drive-sync-salted-passphrases';
 
-const DEFAULT_SESSION_TTL_MS = 50 * 60 * 1000; // 50 minutes
 export const SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 export interface ProtonAuthResponse {
@@ -41,15 +40,19 @@ export type ProtonSessionState =
 
 export type ProtonAuthStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+export type ProtonSignInDelegates = {
+  requestTwoFactorCode: () => Promise<string | undefined>;
+  requestMailboxPassword: () => Promise<string | undefined>;
+};
+
 export class ProtonSessionService {
-  public readonly appVersionHeader: string;
   private readonly currentSessionSubject: Subject<ProtonSessionState> = new Subject();
   private readonly authStatusSubject = new BehaviorSubject<ProtonAuthStatus>('disconnected');
 
   private readonly saltedKeyPasswordsSubject: BehaviorSubject<Record<string, string>> = new BehaviorSubject({});
   public readonly saltedKeyPasswords$ = this.saltedKeyPasswordsSubject.asObservable();
 
-  private refreshIntervalId: number | null = null;
+  private refreshIntervalId: ReturnType<typeof globalThis.setInterval> | null = null;
   private currentSession: ProtonSession | null = null;
   public readonly authState$ = this.authStatusSubject.asObservable();
   public readonly currentSession$ = this.currentSessionSubject.pipe(
@@ -77,10 +80,8 @@ export class ProtonSessionService {
 
   constructor(
     private readonly secretStore: ProtonSecretStore,
-    appVersion: string
+    public readonly appVersionHeader: string
   ) {
-    this.appVersionHeader = `external-drive-obsidiansync@${appVersion}`;
-
     const saltedPasswordsJson = this.secretStore.get(SALTED_PASSPHRASES_SECRET_KEY);
     this.saltedKeyPasswordsSubject.next(
       JSON.parse(saltedPasswordsJson ? saltedPasswordsJson : '{}') as Record<string, string>
@@ -110,30 +111,35 @@ export class ProtonSessionService {
     });
   }
 
-  async signIn(email: string, password: string, twoFactorCode: string | undefined): Promise<void> {
+  async signIn(email: string, password: string, delegates: ProtonSignInDelegates): Promise<void> {
     this.authStatusSubject.next('connecting');
+
+    let authResponse: ProtonAuthResponse | undefined = undefined;
 
     try {
       const authInfo = await this.fetchAuthInfo(email);
       const proofs = await buildSrpProofs(authInfo, email, password);
 
-      const authResponse = await this.authenticate(authInfo, email, proofs);
+      authResponse = await this.authenticate(authInfo, email, proofs);
 
       if (!this.verifyServerProof(authResponse.ServerProof, proofs.expectedServerProof)) {
         throw new Error('SRP server proof mismatch.');
       }
 
-      if (authResponse['2FA']?.Enabled && (authResponse['2FA'].Enabled & 1) !== 0) {
-        if (!twoFactorCode) {
-          throw new Error('Two-factor authentication code required.');
-        }
+      if (this.requiresTwoFactorCode(authResponse)) {
+        const twoFactorCode = await this.resolveTwoFactorCode(delegates.requestTwoFactorCode);
+        await this.submitTwoFactor(twoFactorCode, { accessToken: authResponse.AccessToken, uid: authResponse.UID });
+      }
 
-        await this.submitTwoFactor(twoFactorCode);
+      let keyPassword = password;
+
+      if (this.requiresMailboxPassword(authResponse)) {
+        keyPassword = await this.resolveMailboxPassword(delegates.requestMailboxPassword);
       }
 
       const now = new Date();
 
-      const keyPasswords = await this.getKeyPasswords(password, {
+      const keyPasswords = await this.getKeyPasswords(keyPassword, {
         uid: authResponse.UID,
         accessToken: authResponse.AccessToken
       });
@@ -157,6 +163,13 @@ export class ProtonSessionService {
 
       this.startAutoRefresh();
     } catch (error) {
+      if (authResponse) {
+        // destroy the session if it was successfully created
+        await this.destroySession({
+          uid: authResponse.UID,
+          accessToken: authResponse.AccessToken
+        });
+      }
       this.authStatusSubject.next('error');
       throw error;
     }
@@ -168,7 +181,7 @@ export class ProtonSessionService {
       return;
     }
 
-    await deleteJson<ProtonKeySaltsResponse>('/auth/v4', session, this.appVersionHeader);
+    await this.destroySession(session);
 
     this.stopAutoRefresh();
     this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(undefined));
@@ -201,6 +214,10 @@ export class ProtonSessionService {
     } catch {
       // session restore failed - the user will need to re-authenticate
     }
+  }
+
+  private async destroySession(session: { uid: string; accessToken: string }): Promise<void> {
+    await deleteJson<ProtonKeySaltsResponse>('/auth/v4', session, this.appVersionHeader);
   }
 
   private async refreshSession(session: ProtonSession): Promise<void> {
@@ -264,10 +281,40 @@ export class ProtonSessionService {
     });
   }
 
-  private async submitTwoFactor(twoFactorCode: string): Promise<void> {
-    await this.request<void>('/auth/v4/2fa', {
+  private async submitTwoFactor(twoFactorCode: string, session: { uid: string; accessToken: string }): Promise<void> {
+    await postJson('/auth/v4/2fa', session, this.appVersionHeader, {
       TwoFactorCode: twoFactorCode
     });
+  }
+
+  private requiresTwoFactorCode(authResponse: ProtonAuthResponse): boolean {
+    return Boolean(authResponse['2FA']?.Enabled && (authResponse['2FA'].Enabled & 1) !== 0);
+  }
+
+  private requiresMailboxPassword(authResponse: ProtonAuthResponse): boolean {
+    return authResponse.PasswordMode === 2;
+  }
+
+  private async resolveTwoFactorCode(
+    requestTwoFactorCode: ProtonSignInDelegates['requestTwoFactorCode']
+  ): Promise<string> {
+    const code = (await requestTwoFactorCode())?.trim();
+    if (!code) {
+      throw new Error('Two-factor authentication code required.');
+    }
+
+    return code;
+  }
+
+  private async resolveMailboxPassword(
+    requestMailboxPassword: ProtonSignInDelegates['requestMailboxPassword']
+  ): Promise<string> {
+    const mailboxPassword = await requestMailboxPassword();
+    if (!mailboxPassword) {
+      throw new Error('Mailbox password required.');
+    }
+
+    return mailboxPassword;
   }
 
   private verifyServerProof(serverProof: string, expected: Uint8Array): boolean {
@@ -331,7 +378,7 @@ export class ProtonSessionService {
       return;
     }
 
-    this.refreshIntervalId = window.setInterval(() => {
+    this.refreshIntervalId = globalThis.setInterval(() => {
       this.refreshSessionIfNeeded();
     }, SESSION_REFRESH_INTERVAL_MS);
   }
@@ -341,7 +388,7 @@ export class ProtonSessionService {
       return;
     }
 
-    window.clearInterval(this.refreshIntervalId);
+    globalThis.clearInterval(this.refreshIntervalId);
     this.refreshIntervalId = null;
   }
 

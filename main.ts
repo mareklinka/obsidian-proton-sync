@@ -18,6 +18,9 @@ import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
 import { SettingsService } from './Services/SettingsService';
 import { SyncOrchestrationService } from './Services/SyncOrchestrationService';
 import { SyncIndexStateService } from './Services/SyncIndexStateService';
+import { promptFromModal } from './ui/modal-prompt';
+import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
+import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   private settingsService!: SettingsService;
@@ -61,7 +64,10 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     const secretStore = new ObsidianSecretRepository(this.app);
 
-    this.protonSessionService = new ProtonSessionService(secretStore, this.manifest.version);
+    this.protonSessionService = new ProtonSessionService(
+      secretStore,
+      `external-drive-obsidiansync@${this.manifest.version}`
+    );
     const protonAccount = new ProtonAccount(this.protonSessionService);
     this.driveClient = createProtonDriveClient(
       protonAccount,
@@ -126,19 +132,17 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.protonSessionService?.dispose();
   }
 
-  async signIn(credentials: {
-    email: string;
-    password: string;
-    mailboxPassword?: string;
-    twoFactorCode?: string;
-  }): Promise<void> {
+  async signIn(credentials: { email: string; password: string }): Promise<void> {
     if (!credentials.email || !credentials.password) {
       new Notice('Email and password are required to connect.');
       return;
     }
 
     try {
-      await this.protonSessionService.signIn(credentials.email.trim(), credentials.password, credentials.twoFactorCode);
+      await this.protonSessionService.signIn(credentials.email.trim(), credentials.password, {
+        requestTwoFactorCode: () => promptFromModal(this.app, app => new ProtonDriveTwoFactorModal(app)),
+        requestMailboxPassword: () => promptFromModal(this.app, app => new ProtonDriveMailboxPasswordModal(app))
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
       new Notice(message);

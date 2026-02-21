@@ -3,7 +3,7 @@ import { Subject, take } from 'rxjs';
 
 import { type LogLevel } from '../logger';
 import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from '../model/settings';
-import { ProtonDriveLoginModal } from './login-modal';
+import { ProtonDriveLoginModal } from './modals/login-modal';
 import ProtonDriveSyncPlugin from '../main';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 import { SettingsService } from '../Services/SettingsService';
@@ -15,8 +15,6 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   private readonly loginSubject = new Subject<{
     email: string;
     password: string;
-    mailboxPassword: string;
-    twoFactorCode: string;
   }>();
   public readonly login$ = this.loginSubject.asObservable();
 

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BehaviorSubject, Subject } from 'rxjs';
+import { NodeType } from '@protontech/drive-sdk';
 
 import { SyncOrchestrationService, type OrchestrationState } from '../Services/SyncOrchestrationService';
 import { SettingsService } from '../Services/SettingsService';
@@ -71,6 +72,35 @@ function createSyncService() {
   };
 }
 
+function createDriveClient() {
+  return {
+    getMyFilesRootFolder: vi.fn(async () => ({
+      ok: true,
+      value: {
+        uid: 'my-files-root',
+        type: NodeType.Folder,
+        name: 'My files'
+      }
+    })),
+    getNode: vi.fn(async () => ({
+      ok: false,
+      error: 'not found'
+    })),
+    iterateFolderChildren: vi.fn(async function* () {
+      yield* [];
+    }),
+    createFolder: vi.fn(async (parentUid: string, name: string) => ({
+      ok: true,
+      value: {
+        uid: `${parentUid}-${name}`,
+        parentUid,
+        type: NodeType.Folder,
+        name
+      }
+    }))
+  };
+}
+
 describe('SyncOrchestrationService', () => {
   let sessionSubject: Subject<ProtonSessionState>;
   let settingsService: SettingsService;
@@ -135,6 +165,7 @@ describe('SyncOrchestrationService', () => {
 
   it('buffers local changes before auth and flushes after cloud initialization', async () => {
     const runInitialReconciliation = vi.fn(async () => ({ byPath: {}, byCloudId: {} }) as SyncIndexSnapshot);
+    const driveClient = createDriveClient();
 
     const service = new SyncOrchestrationService({
       vault: {
@@ -158,7 +189,7 @@ describe('SyncOrchestrationService', () => {
         runInitialReconciliation,
         ensureCloudEventSubscription: vi.fn(async () => {})
       } as never,
-      getDriveClient: () => ({}) as never,
+      getDriveClient: () => driveClient as never,
       createReader: () => reader as never,
       createSyncService: () => syncService as never,
       maxBufferedChanges: 100
@@ -188,8 +219,8 @@ describe('SyncOrchestrationService', () => {
       }
     });
 
-    for (let attempt = 0; attempt < 10 && runInitialReconciliation.mock.calls.length === 0; attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 0));
+    for (let attempt = 0; attempt < 100 && runInitialReconciliation.mock.calls.length === 0; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5));
     }
 
     expect(runInitialReconciliation).toHaveBeenCalledTimes(1);
