@@ -2,7 +2,6 @@ import type { DriveEvent } from '@protontech/drive-sdk';
 import { BehaviorSubject, type Observable } from 'rxjs';
 
 import type { ReconciliationTombstone } from '../isolated-sync/ReconciliationService';
-import type { SyncIndexSnapshot } from '../isolated-sync/RxSyncService';
 import { type ProtonDriveSyncSettings } from '../model/settings';
 import type { ProtonSessionState } from '../proton/auth/ProtonSessionService';
 
@@ -40,72 +39,8 @@ export class SettingsService {
     return id;
   }
 
-  getReconciliationSeed(): {
-    previousSnapshot: SyncIndexSnapshot;
-    tombstones: ReconciliationTombstone[];
-  } {
-    return {
-      previousSnapshot: this.buildInitialSyncSnapshot(),
-      tombstones: this.settings.reconciliationTombstones.map(
-        (item: ProtonDriveSyncSettings['reconciliationTombstones'][number]) => ({
-          ...item,
-          deletedAt: Date.parse(item.deletedAt)
-        })
-      )
-    };
-  }
-
-  async applySyncSnapshot(snapshot: SyncIndexSnapshot): Promise<void> {
-    const pathMap: ProtonDriveSyncSettings['pathMap'] = {};
-    const folderMap: ProtonDriveSyncSettings['folderMap'] = {};
-
-    for (const entry of Object.values(snapshot.byPath)) {
-      const updatedAt = new Date(entry.updatedAt).toISOString();
-      if (entry.entityType === 'folder') {
-        folderMap[entry.path] = {
-          nodeUid: entry.cloudId,
-          updatedAt
-        };
-      } else {
-        pathMap[entry.path] = {
-          nodeUid: entry.cloudId,
-          updatedAt
-        };
-      }
-    }
-
-    this.settings.pathMap = pathMap;
-    this.settings.folderMap = folderMap;
-    await this.persist();
-  }
-
-  async applyReconciliationResult(snapshot: SyncIndexSnapshot, tombstones: ReconciliationTombstone[]): Promise<void> {
-    const pathMap: ProtonDriveSyncSettings['pathMap'] = {};
-    const folderMap: ProtonDriveSyncSettings['folderMap'] = {};
-
-    for (const entry of Object.values(snapshot.byPath)) {
-      const updatedAt = new Date(entry.updatedAt).toISOString();
-      if (entry.entityType === 'folder') {
-        folderMap[entry.path] = {
-          nodeUid: entry.cloudId,
-          updatedAt
-        };
-      } else {
-        pathMap[entry.path] = {
-          nodeUid: entry.cloudId,
-          updatedAt
-        };
-      }
-    }
-
-    this.settings.pathMap = pathMap;
-    this.settings.folderMap = folderMap;
-    this.settings.reconciliationTombstones = tombstones.map((item: ReconciliationTombstone) => ({
-      ...item,
-      deletedAt: new Date(item.deletedAt).toISOString()
-    }));
-
-    await this.persist();
+  getReconciliationTombstones(): ReconciliationTombstone[] {
+    return this.settings.reconciliationTombstones;
   }
 
   async setAccountEmail(email: string): Promise<void> {
@@ -116,6 +51,24 @@ export class SettingsService {
   async setSyncRoots(containerNodeUid: string, vaultRootNodeUid: string): Promise<void> {
     this.settings.containerNodeUid = containerNodeUid;
     this.settings.vaultRootNodeUid = vaultRootNodeUid;
+    await this.persist();
+  }
+
+  async setSyncMaps(
+    pathMap: ProtonDriveSyncSettings['pathMap'],
+    folderMap: ProtonDriveSyncSettings['folderMap']
+  ): Promise<void> {
+    this.settings.pathMap = pathMap;
+    this.settings.folderMap = folderMap;
+    await this.persist();
+  }
+
+  async setReconciliationTombstones(tombstones: ReconciliationTombstone[]): Promise<void> {
+    this.settings.reconciliationTombstones = tombstones.map((item: ReconciliationTombstone) => ({
+      ...item,
+      deletedAt: new Date(item.deletedAt).getTime()
+    }));
+
     await this.persist();
   }
 
@@ -159,8 +112,6 @@ export class SettingsService {
       ...this.settings,
       connectionStatus: 'disconnected',
       sessionExpiresAt: null,
-      pathMap: {},
-      folderMap: {},
       latestEventIds: {},
       reconciliationTombstones: [],
       vaultRootNodeUid: null,
@@ -190,41 +141,6 @@ export class SettingsService {
 
     this.settings.latestEventIds[scope] = eventId;
     await this.persist();
-  }
-
-  buildInitialSyncSnapshot(): SyncIndexSnapshot {
-    const byPath: SyncIndexSnapshot['byPath'] = {};
-    const byCloudId: SyncIndexSnapshot['byCloudId'] = {};
-
-    for (const [path, entry] of Object.entries(this.settings.pathMap)) {
-      const updatedAt = Date.parse(entry.updatedAt);
-      const normalizedUpdatedAt = Number.isFinite(updatedAt) ? updatedAt : Date.now();
-      const indexEntry = {
-        cloudId: entry.nodeUid,
-        path,
-        entityType: 'file' as const,
-        updatedAt: normalizedUpdatedAt
-      };
-
-      byPath[path] = indexEntry;
-      byCloudId[entry.nodeUid] = indexEntry;
-    }
-
-    for (const [path, entry] of Object.entries(this.settings.folderMap)) {
-      const updatedAt = Date.parse(entry.updatedAt);
-      const normalizedUpdatedAt = Number.isFinite(updatedAt) ? updatedAt : Date.now();
-      const indexEntry = {
-        cloudId: entry.nodeUid,
-        path,
-        entityType: 'folder' as const,
-        updatedAt: normalizedUpdatedAt
-      };
-
-      byPath[path] = indexEntry;
-      byCloudId[entry.nodeUid] = indexEntry;
-    }
-
-    return { byPath, byCloudId };
   }
 
   private async persist(): Promise<void> {

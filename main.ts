@@ -13,13 +13,15 @@ import { ProtonAccount } from './proton/drive/ProtonAccount';
 import { createProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { ObsidianHttpClient } from './proton/drive/ObsidianHttpClient';
 import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-bar';
-import { CloudReconciliationService } from './CloudReconciliationService';
+import { CloudReconciliationService } from './Services/CloudReconciliationService';
 import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
 import { SettingsService } from './Services/SettingsService';
 import { SyncOrchestrationService } from './Services/SyncOrchestrationService';
+import { SyncIndexStateService } from './Services/SyncIndexStateService';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   private settingsService!: SettingsService;
+  private syncIndexStateService!: SyncIndexStateService;
   private protonSessionService!: ProtonSessionService;
   private driveClient: ProtonDriveClient | null = null;
   private logger!: PluginLogger;
@@ -38,6 +40,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       Object.assign({}, DEFAULT_SETTINGS, await this.loadData()),
       nextSettings => this.saveData(nextSettings)
     );
+    this.syncIndexStateService = new SyncIndexStateService(this.settingsService);
 
     this.subscriptions.push(
       this.settingsService.settings$.subscribe(() => {
@@ -71,6 +74,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       logger: this.logger,
       vault: this.app.vault,
       settingsService: this.settingsService,
+      syncIndexStateService: this.syncIndexStateService,
       getSyncReader: () => this.orchestrator?.getReader() ?? null,
       getSyncService: () => this.orchestrator?.getSyncService() ?? null
     });
@@ -79,6 +83,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       vault: this.app.vault,
       logger: this.logger,
       settingsService: this.settingsService,
+      syncIndexStateService: this.syncIndexStateService,
       sessionService: this.protonSessionService,
       cloudReconciliationService: this.cloudReconciliationService,
       getDriveClient: () => this.driveClient,
@@ -92,7 +97,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
         }
 
         const cloudApi = new ProtonDriveCloudStorageApi(this.driveClient, vaultRootNodeUid, this.logger, () =>
-          this.settingsService.buildInitialSyncSnapshot()
+          this.syncIndexStateService.snapshot()
         );
 
         return new RxSyncService(reader, cloudApi);

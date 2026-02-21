@@ -21,14 +21,14 @@ export interface ProtonDriveSyncSettings {
 
 export interface SyncMapEntry {
   nodeUid: string;
-  updatedAt: string;
+  updatedAt: number;
 }
 
 export interface ReconciliationTombstone {
   entityType: 'file' | 'folder';
   path: string;
   cloudId?: string;
-  deletedAt: string;
+  deletedAt: number;
   origin: 'local' | 'remote';
 }
 

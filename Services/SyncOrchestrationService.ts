@@ -2,7 +2,7 @@ import type { ProtonDriveClient } from '@protontech/drive-sdk';
 import type { Vault } from 'obsidian';
 import { BehaviorSubject, type Observable, type Subscription } from 'rxjs';
 
-import { CloudReconciliationService, type ReconcileState } from '../CloudReconciliationService';
+import { CloudReconciliationService, type ReconcileState } from './CloudReconciliationService';
 import type { ObsidianVaultFileSystemReader, ReaderChangeEvent } from '../isolated-sync/ObsidianVaultFileSystemReader';
 import type {
   SyncDispatchResult,
@@ -15,6 +15,7 @@ import type { PluginLogger } from '../logger';
 import type { ProtonSessionService, ProtonSessionState } from '../proton/auth/ProtonSessionService';
 import { ensureSyncRoots } from '../sync-root';
 import { SettingsService } from './SettingsService';
+import { SyncIndexStateService } from './SyncIndexStateService';
 
 export type OrchestrationState =
   | 'starting'
@@ -80,6 +81,7 @@ export class SyncOrchestrationService {
     this.cloudInitInProgress = false;
     this.input.cloudReconciliationService.reset();
     this.disposeSyncService();
+    await this.input.syncIndexStateService.clear();
     await this.input.settingsService.resetForDisconnect();
     this.lifecycleSubject.next('unauthenticated');
   }
@@ -259,7 +261,7 @@ export class SyncOrchestrationService {
     }
 
     this.syncService = this.input.createSyncService(vaultRootNodeUid, this.reader);
-    this.syncService.initializeIndex(initialSnapshot ?? this.input.settingsService.buildInitialSyncSnapshot());
+    this.syncService.initializeIndex(initialSnapshot ?? this.input.syncIndexStateService.snapshot());
 
     this.subscriptions.push(
       this.syncService.dispatchResults$.subscribe(result => {
@@ -327,7 +329,7 @@ export class SyncOrchestrationService {
   }
 
   private async handleMapChange(event: SyncIndexSnapshotEvent): Promise<void> {
-    await this.input.settingsService.applySyncSnapshot(event.snapshot);
+    await this.input.syncIndexStateService.applySnapshot(event.snapshot);
 
     this.input.logger.debug('Isolated sync index snapshot updated', {
       sequence: event.seq,
@@ -342,6 +344,7 @@ type SyncOrchestrationInput = {
   vault: Vault;
   logger: PluginLogger;
   settingsService: SettingsService;
+  syncIndexStateService: SyncIndexStateService;
   sessionService: ProtonSessionService;
   cloudReconciliationService: CloudReconciliationService;
   getDriveClient: () => ProtonDriveClient | null;

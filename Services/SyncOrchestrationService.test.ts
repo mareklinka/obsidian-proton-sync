@@ -3,9 +3,10 @@ import { BehaviorSubject, Subject } from 'rxjs';
 
 import { SyncOrchestrationService, type OrchestrationState } from './SyncOrchestrationService';
 import { SettingsService } from './SettingsService';
+import { SyncIndexStateService } from './SyncIndexStateService';
 import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from '../model/settings';
 import type { ProtonSessionState } from '../proton/auth/ProtonSessionService';
-import type { ReconcileState } from '../CloudReconciliationService';
+import type { ReconcileState } from './CloudReconciliationService';
 import type { ReaderChangeEvent } from '../isolated-sync/ObsidianVaultFileSystemReader';
 import type {
   SyncDispatchResult,
@@ -77,6 +78,7 @@ describe('SyncOrchestrationService', () => {
   let reader: ReturnType<typeof createReader>;
   let syncService: ReturnType<typeof createSyncService>;
   let reconcileStateSubject: BehaviorSubject<ReconcileState>;
+  let syncIndexStateService: SyncIndexStateService;
 
   beforeEach(() => {
     sessionSubject = new Subject<ProtonSessionState>();
@@ -85,6 +87,7 @@ describe('SyncOrchestrationService', () => {
     reader = createReader();
     syncService = createSyncService();
     reconcileStateSubject = new BehaviorSubject<ReconcileState>('idle');
+    syncIndexStateService = new SyncIndexStateService(settingsService);
   });
 
   it('transitions to queue-ready and unauthenticated on disconnected restore', async () => {
@@ -94,6 +97,7 @@ describe('SyncOrchestrationService', () => {
       } as never,
       logger: logger as never,
       settingsService,
+      syncIndexStateService,
       sessionService: {
         currentSession$: sessionSubject.asObservable(),
         loadSession: vi.fn(async () => {
@@ -138,6 +142,7 @@ describe('SyncOrchestrationService', () => {
       } as never,
       logger: logger as never,
       settingsService,
+      syncIndexStateService,
       sessionService: {
         currentSession$: sessionSubject.asObservable(),
         loadSession: vi.fn(async () => {

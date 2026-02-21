@@ -2,12 +2,13 @@ import type { ProtonDriveClient } from '@protontech/drive-sdk';
 import type { Vault } from 'obsidian';
 import { BehaviorSubject, Subject, type Observable, type Subscription } from 'rxjs';
 
-import { ReconciliationService, type ReconciliationTombstone } from './isolated-sync/ReconciliationService';
-import type { ObsidianVaultFileSystemReader } from './isolated-sync/ObsidianVaultFileSystemReader';
-import { normalizePath, toCanonicalPathKey } from './isolated-sync/path-utils';
-import type { RxSyncService, SyncIndexSnapshot } from './isolated-sync/RxSyncService';
-import type { PluginLogger } from './logger';
-import { SettingsService } from './Services/SettingsService';
+import { ReconciliationService, type ReconciliationTombstone } from '../isolated-sync/ReconciliationService';
+import type { ObsidianVaultFileSystemReader } from '../isolated-sync/ObsidianVaultFileSystemReader';
+import { normalizePath, toCanonicalPathKey } from '../isolated-sync/path-utils';
+import type { RxSyncService, SyncIndexSnapshot } from '../isolated-sync/RxSyncService';
+import type { PluginLogger } from '../logger';
+import { SettingsService } from './SettingsService';
+import { SyncIndexStateService } from './SyncIndexStateService';
 
 export type ReconcileState = 'idle' | 'reconciling' | 'error';
 
@@ -30,6 +31,7 @@ export class CloudReconciliationService {
       logger: PluginLogger;
       vault: Vault;
       settingsService: SettingsService;
+      syncIndexStateService: SyncIndexStateService;
       getSyncReader: () => ObsidianVaultFileSystemReader | null;
       getSyncService: () => RxSyncService | null;
     }
@@ -196,24 +198,23 @@ export class CloudReconciliationService {
       throw new Error('Drive client unavailable for reconciliation');
     }
 
-    const seed = this.input.settingsService.getReconciliationSeed();
+    const previousSnapshot = this.input.syncIndexStateService.snapshot();
+    const tombstones = this.input.settingsService.getReconciliationTombstones();
     const reconciliation = new ReconciliationService(
       this.input.vault,
       driveClient,
       vaultRootNodeUid,
       this.input.logger,
       {
-        previousSnapshot: seed.previousSnapshot,
-        tombstones: seed.tombstones
+        previousSnapshot,
+        tombstones
       }
     );
 
     const reconciliationResult = await reconciliation.run();
 
-    await this.input.settingsService.applyReconciliationResult(
-      reconciliationResult.snapshot,
-      reconciliationResult.tombstones as ReconciliationTombstone[]
-    );
+    await this.input.syncIndexStateService.applySnapshot(reconciliationResult.snapshot);
+    await this.input.settingsService.setReconciliationTombstones(reconciliationResult.tombstones);
 
     return reconciliationResult;
   }
