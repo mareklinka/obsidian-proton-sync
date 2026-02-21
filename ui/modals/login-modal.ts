@@ -22,18 +22,23 @@ export class ProtonDriveLoginModal extends Modal {
     contentEl.empty();
 
     contentEl.createEl('h2', { text: 'Connect to Proton Drive' });
-    contentEl.createEl('p', {
-      text: 'This is an unofficial integration. Your credentials are never stored or logged.'
+
+    const disclosure = contentEl.createEl('div', { cls: 'proton-sync-disclosure' });
+    disclosure.createEl('p', {
+      text: '⚠️ Your credentials are never stored or logged.'
     });
 
-    new Setting(contentEl).setName('Email').addText(text =>
-      text
-        .setPlaceholder('you@example.com')
-        .setValue('')
-        .onChange(value => {
-          this.email = value.trim();
-        })
-    );
+    new Setting(contentEl)
+      .setName('Email')
+      .setDesc('Your Proton account email address.')
+      .addText(text =>
+        text
+          .setPlaceholder('john.shepard@proton.me')
+          .setValue('')
+          .onChange(value => {
+            this.email = value.trim();
+          })
+      );
 
     new Setting(contentEl)
       .setName('Password')

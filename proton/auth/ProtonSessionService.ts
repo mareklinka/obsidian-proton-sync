@@ -1,11 +1,19 @@
-import { requestUrl } from 'obsidian';
+import { requestUrl, RequestUrlResponse } from 'obsidian';
 
-import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64, ProtonAuthInfo } from './ProtonSrp';
+import {
+  buildSrpProofs,
+  computeKeyPasswordFromSalt,
+  decodeBase64,
+  encodeBase64,
+  ProtonAuthInfo,
+  ProtonSrpProofs
+} from './ProtonSrp';
 import { BehaviorSubject, map, merge, of, shareReplay, Subject, switchMap, timer } from 'rxjs';
 import { ProtonSession } from './ProtonSession';
 import { deleteJson, getJson, postJson } from '../ProtonApiClient';
 import type { ProtonSecretStore } from './ProtonSecretStore';
 import { PROTON_BASE_URL } from '../Constants';
+import { CaptchaVerification } from '../../ui/modals/captcha-modal';
 
 const AUTH_SCOPE = 'full locked';
 const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
@@ -43,7 +51,24 @@ export type ProtonAuthStatus = 'disconnected' | 'connecting' | 'connected' | 'er
 export type ProtonSignInDelegates = {
   requestTwoFactorCode: () => Promise<string | undefined>;
   requestMailboxPassword: () => Promise<string | undefined>;
+  requestCaptchaChallenge: (captchaUrl: string) => Promise<CaptchaVerification | undefined>;
 };
+
+interface ProtonApiError<T> {
+  Code: number;
+  Error: string;
+  Details: T;
+}
+
+interface ProtonCaptchaApiError {
+  HumanVerificationToken: string;
+  HumanVerificationMethods: string[];
+  Direct: number;
+  Description: string;
+  Title: string;
+  WebUrl: string;
+  ExpiresAt: number;
+}
 
 export class ProtonSessionService {
   private readonly currentSessionSubject: Subject<ProtonSessionState> = new Subject();
@@ -120,7 +145,7 @@ export class ProtonSessionService {
       const authInfo = await this.fetchAuthInfo(email);
       const proofs = await buildSrpProofs(authInfo, email, password);
 
-      authResponse = await this.authenticate(authInfo, email, proofs);
+      authResponse = await this.authenticateWithCaptcha(authInfo, email, proofs, delegates);
 
       if (!this.verifyServerProof(authResponse.ServerProof, proofs.expectedServerProof)) {
         throw new Error('SRP server proof mismatch.');
@@ -173,6 +198,44 @@ export class ProtonSessionService {
       this.authStatusSubject.next('error');
       throw error;
     }
+  }
+
+  private async authenticateWithCaptcha(
+    authInfo: ProtonAuthInfo,
+    email: string,
+    proofs: ProtonSrpProofs,
+    delegates: ProtonSignInDelegates
+  ) {
+    let authResponse: ProtonAuthResponse | undefined = undefined;
+    let captchaData: CaptchaVerification | undefined = undefined;
+
+    while (!authResponse) {
+      const authResponseRaw = await this.authenticate(authInfo, email, proofs, captchaData);
+
+      if (this.requiresCaptcha(authResponseRaw)) {
+        const captchaUrl = this.extractCaptchaUrl(authResponseRaw.json);
+        if (!captchaUrl) {
+          throw new Error('CAPTCHA verification is required, but no challenge URL was provided.');
+        }
+
+        captchaData = await delegates.requestCaptchaChallenge(captchaUrl);
+
+        if (!captchaData) {
+          throw new Error('CAPTCHA verification required to continue sign-in.');
+        }
+
+        continue;
+      }
+
+      if (authResponseRaw.status >= 400) {
+        const message = extractApiError(authResponseRaw.json) ?? `Auth request failed (${authResponseRaw.status}).`;
+        throw new Error(message);
+      }
+
+      authResponse = authResponseRaw.json as ProtonAuthResponse;
+    }
+
+    return authResponse;
   }
 
   async signOut(): Promise<void> {
@@ -270,21 +333,54 @@ export class ProtonSessionService {
   private async authenticate(
     authInfo: ProtonAuthInfo,
     username: string,
-    proofs: { clientProof: Uint8Array; clientEphemeral: Uint8Array }
-  ): Promise<ProtonAuthResponse> {
-    return this.request<ProtonAuthResponse>('/auth/v4', {
-      Username: username,
-      ClientProof: encodeBase64(proofs.clientProof),
-      ClientEphemeral: encodeBase64(proofs.clientEphemeral),
-      SRPSession: authInfo.SRPSession,
-      Scope: AUTH_SCOPE
-    });
+    proofs: { clientProof: Uint8Array; clientEphemeral: Uint8Array },
+    captchaData?: CaptchaVerification
+  ): Promise<RequestUrlResponse> {
+    return this.requestRaw(
+      '/auth/v4',
+      {
+        Username: username,
+        ClientProof: encodeBase64(proofs.clientProof),
+        ClientEphemeral: encodeBase64(proofs.clientEphemeral),
+        SRPSession: authInfo.SRPSession,
+        Scope: AUTH_SCOPE
+      },
+      captchaData
+        ? {
+            'x-pm-human-verification-token': captchaData.token,
+            'x-pm-human-verification-token-type': captchaData.verificationMethod
+          }
+        : undefined
+    );
   }
 
   private async submitTwoFactor(twoFactorCode: string, session: { uid: string; accessToken: string }): Promise<void> {
     await postJson('/auth/v4/2fa', session, this.appVersionHeader, {
       TwoFactorCode: twoFactorCode
     });
+  }
+
+  private requiresCaptcha(response: RequestUrlResponse): boolean {
+    if (response.status !== 422 || !response.json || !('Code' in response.json) || response.json?.Code !== 9001) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private extractCaptchaUrl(payload: unknown): string | null {
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+
+    const captchaError = payload as ProtonApiError<ProtonCaptchaApiError>;
+    const url = captchaError.Details?.WebUrl;
+
+    if (typeof url !== 'string' || !url.trim()) {
+      return null;
+    }
+
+    return url;
   }
 
   private requiresTwoFactorCode(authResponse: ProtonAuthResponse): boolean {
@@ -333,6 +429,17 @@ export class ProtonSessionService {
   }
 
   private async request<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
+    const response = await this.requestRaw(path, body, headers);
+
+    if (response.status >= 400) {
+      const message = extractApiError(response.json) ?? `Auth request failed (${response.status}).`;
+      throw new Error(message);
+    }
+
+    return response.json as T;
+  }
+
+  private async requestRaw(path: string, body: unknown, headers?: Record<string, string>): Promise<RequestUrlResponse> {
     const response = await requestUrl({
       url: `${PROTON_BASE_URL}${path}`,
       method: 'POST',
@@ -345,12 +452,7 @@ export class ProtonSessionService {
       throw: false
     });
 
-    if (response.status >= 400) {
-      const message = extractApiError(response.json) ?? `Auth request failed (${response.status}).`;
-      throw new Error(message);
-    }
-
-    return response.json as T;
+    return response;
   }
 
   private async getKeyPasswords(

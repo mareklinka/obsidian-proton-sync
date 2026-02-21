@@ -111,7 +111,11 @@ describe('ProtonSessionService signIn delegates', () => {
 
     await service.signIn('test@example.com', 'login-password', {
       requestTwoFactorCode,
-      requestMailboxPassword: async () => undefined
+      requestMailboxPassword: async () => undefined,
+      requestCaptchaChallenge: async () => ({
+        token: 'token',
+        verificationMethod: 'captcha'
+      })
     });
 
     expect(requestTwoFactorCode).toHaveBeenCalledTimes(1);
@@ -153,7 +157,11 @@ describe('ProtonSessionService signIn delegates', () => {
     await expect(
       service.signIn('test@example.com', 'login-password', {
         requestTwoFactorCode: async () => undefined,
-        requestMailboxPassword: async () => undefined
+        requestMailboxPassword: async () => undefined,
+        requestCaptchaChallenge: async () => ({
+          token: 'token',
+          verificationMethod: 'captcha'
+        })
       })
     ).rejects.toThrow('Two-factor authentication code required.');
   });
@@ -186,7 +194,11 @@ describe('ProtonSessionService signIn delegates', () => {
 
     await service.signIn('test@example.com', 'login-password', {
       requestTwoFactorCode: async () => undefined,
-      requestMailboxPassword
+      requestMailboxPassword,
+      requestCaptchaChallenge: async () => ({
+        token: 'token',
+        verificationMethod: 'captcha'
+      })
     });
 
     expect(requestMailboxPassword).toHaveBeenCalledTimes(1);
@@ -220,9 +232,65 @@ describe('ProtonSessionService signIn delegates', () => {
     await expect(
       service.signIn('test@example.com', 'login-password', {
         requestTwoFactorCode: async () => undefined,
-        requestMailboxPassword: async () => undefined
+        requestMailboxPassword: async () => undefined,
+        requestCaptchaChallenge: async () => ({
+          token: 'token',
+          verificationMethod: 'captcha'
+        })
       })
     ).rejects.toThrow('Mailbox password required.');
+  });
+
+  it('requests CAPTCHA challenge and retries authentication', async () => {
+    const captchaUrl = 'https://account.proton.me/captcha/challenge';
+
+    requestUrlMock.mockImplementation(((request: { url?: string }) => {
+      const url = (request as { url: string }).url;
+
+      if (url.endsWith('/auth/v4')) {
+        const authAttempts = requestUrlMock.mock.calls.filter(([call]) =>
+          ((call as { url?: string }).url ?? '').endsWith('/auth/v4')
+        ).length;
+
+        if (authAttempts === 1) {
+          return toRequestUrlResponse(422, {
+            Code: 9001,
+            Error: 'Human verification required',
+            Details: {
+              WebUrl: captchaUrl
+            }
+          });
+        }
+
+        return toRequestUrlResponse(200, createAuthResponse());
+      }
+
+      if (url.endsWith('/auth/v4/info')) {
+        return toRequestUrlResponse(200, {
+          AuthInfo: {
+            SRPSession: 'srp-session'
+          }
+        });
+      }
+
+      throw new Error(`Unexpected URL in test: ${url}`);
+    }) as never);
+
+    const requestCaptchaChallenge = vi.fn(async (_url: string) => ({
+      token: 'token',
+      verificationMethod: 'captcha'
+    }));
+
+    await service.signIn('test@example.com', 'login-password', {
+      requestTwoFactorCode: async () => undefined,
+      requestMailboxPassword: async () => undefined,
+      requestCaptchaChallenge
+    });
+
+    expect(requestCaptchaChallenge).toHaveBeenCalledWith(captchaUrl);
+    expect(
+      requestUrlMock.mock.calls.filter(([request]) => ((request as { url?: string }).url ?? '').endsWith('/auth/v4'))
+    ).toHaveLength(2);
   });
 
   it('does not call delegates when not required', async () => {
@@ -231,7 +299,11 @@ describe('ProtonSessionService signIn delegates', () => {
 
     await service.signIn('test@example.com', 'login-password', {
       requestTwoFactorCode,
-      requestMailboxPassword
+      requestMailboxPassword,
+      requestCaptchaChallenge: async () => ({
+        token: 'token',
+        verificationMethod: 'captcha'
+      })
     });
 
     expect(requestTwoFactorCode).not.toHaveBeenCalled();

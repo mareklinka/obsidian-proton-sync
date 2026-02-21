@@ -21,6 +21,7 @@ import { SyncIndexStateService } from './services/SyncIndexStateService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
+import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   private settingsService!: SettingsService;
@@ -141,7 +142,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     try {
       await this.protonSessionService.signIn(credentials.email.trim(), credentials.password, {
         requestTwoFactorCode: () => promptFromModal(this.app, app => new ProtonDriveTwoFactorModal(app)),
-        requestMailboxPassword: () => promptFromModal(this.app, app => new ProtonDriveMailboxPasswordModal(app))
+        requestMailboxPassword: () => promptFromModal(this.app, app => new ProtonDriveMailboxPasswordModal(app)),
+        requestCaptchaChallenge: async (captchaUrl: string) =>
+          await promptFromModal(this.app, app => new ProtonDriveCaptchaModal(app, captchaUrl))
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Login failed.';
@@ -157,7 +160,11 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   private setupSettingsTab(plugin: ProtonDriveSyncPlugin): ProtonDriveSyncSettingTab {
-    const settingTab = new ProtonDriveSyncSettingTab(plugin, this.settingsService);
+    const settingTab = new ProtonDriveSyncSettingTab(
+      plugin,
+      this.settingsService,
+      this.protonSessionService.authState$
+    );
 
     this.subscriptions.push(
       settingTab.loggingChanged$.subscribe(({ isEnabled, maxSize, minLevel }) => {

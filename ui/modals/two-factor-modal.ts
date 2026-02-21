@@ -24,11 +24,7 @@ export class ProtonDriveTwoFactorModal extends Modal {
     contentEl.createEl('h2', { text: 'Two-factor authentication required' });
     const disclosure = contentEl.createEl('div', { cls: 'proton-sync-disclosure' });
     disclosure.createEl('p', {
-      cls: 'proton-sync-disclosure__title',
-      text: '⚠️ Disclaimer'
-    });
-    disclosure.createEl('p', {
-      text: 'This code is used only for this login attempt and is never stored or logged.'
+      text: '⚠️ Your credentials are never stored or logged.'
     });
 
     new Setting(contentEl)

@@ -1,5 +1,5 @@
 import { PluginSettingTab, Setting } from 'obsidian';
-import { Subject, take } from 'rxjs';
+import { Observable, Subject, Subscription, take } from 'rxjs';
 
 import { type LogLevel } from '../logger';
 import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from '../model/settings';
@@ -7,6 +7,7 @@ import { ProtonDriveLoginModal } from './modals/login-modal';
 import ProtonDriveSyncPlugin from '../main';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 import { SettingsService } from '../services/SettingsService';
+import { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 
 export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   private readonly disconnectSubject = new Subject<void>();
@@ -21,9 +22,12 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   private readonly loggingChangedSubject = new Subject<{ isEnabled: boolean; maxSize: number; minLevel: LogLevel }>();
   public readonly loggingChanged$ = this.loggingChangedSubject.asObservable();
 
+  private stateSub: Subscription | undefined = undefined;
+
   constructor(
     plugin: ProtonDriveSyncPlugin,
-    private readonly settingsService: SettingsService
+    private readonly settingsService: SettingsService,
+    private readonly authState: Observable<ProtonAuthStatus>
   ) {
     super(plugin.app, plugin);
   }
@@ -51,34 +55,39 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     const statusDescription = this.buildStatusDescription(settings);
     const connectionSetting = new Setting(containerEl).setName('Connection status').setDesc(statusDescription);
 
-    if (settings.connectionStatus === 'connected') {
-      connectionSetting.addButton(button =>
-        button
-          .setButtonText('Disconnect')
-          .setCta()
-          .onClick(() => {
-            this.disconnectSubject.next();
-          })
-      );
-    } else {
-      connectionSetting.addButton(button =>
-        button
-          .setButtonText('Connect')
-          .setCta()
-          .onClick(() => {
-            const modal = new ProtonDriveLoginModal(this.app);
-            modal.login$.pipe(take(1)).subscribe(async credentials => {
-              await this.settingsService.setAccountEmail(credentials.email);
+    this.stateSub = this.authState.subscribe(status => {
+      connectionSetting.clear();
 
-              this.loginSubject.next(credentials);
+      if (status === 'connected') {
+        connectionSetting.addButton(button =>
+          button
+            .setButtonText('Disconnect')
+            .setCta()
+            .onClick(() => {
+              this.disconnectSubject.next();
+            })
+        );
+      } else {
+        connectionSetting.addButton(button =>
+          button
+            .setButtonText(status === 'connecting' ? 'Connecting...' : 'Connect')
+            .setCta()
+            .setDisabled(status === 'connecting')
+            .onClick(() => {
+              const modal = new ProtonDriveLoginModal(this.app);
+              modal.login$.pipe(take(1)).subscribe(async credentials => {
+                await this.settingsService.setAccountEmail(credentials.email);
 
-              settings = this.settingsService.snapshot();
-              connectionSetting.setDesc(this.buildStatusDescription(settings));
-            });
-            modal.open();
-          })
-      );
-    }
+                this.loginSubject.next(credentials);
+
+                settings = this.settingsService.snapshot();
+                connectionSetting.setDesc(this.buildStatusDescription(settings));
+              });
+              modal.open();
+            })
+        );
+      }
+    });
 
     containerEl.createEl('h3', { text: 'Debug logging' });
 
@@ -130,6 +139,12 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
       );
   }
 
+  public hide() {
+    this.stateSub?.unsubscribe();
+    this.stateSub = undefined;
+    super.hide();
+  }
+
   private buildStatusDescription(settings: ProtonDriveSyncSettings): DocumentFragment {
     const fragment = document.createDocumentFragment();
     const list = document.createElement('ul');
@@ -163,6 +178,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
     return fragment;
   }
+
   private emitLogSettingsChange(settints: ProtonDriveSyncSettings): void {
     this.loggingChangedSubject.next({
       isEnabled: settints.enableFileLogging,
