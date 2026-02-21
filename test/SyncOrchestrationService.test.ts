@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BehaviorSubject, Subject } from 'rxjs';
 
-import { SyncOrchestrationService, type OrchestrationState } from './SyncOrchestrationService';
-import { SettingsService } from './SettingsService';
-import { SyncIndexStateService } from './SyncIndexStateService';
+import { SyncOrchestrationService, type OrchestrationState } from '../Services/SyncOrchestrationService';
+import { SettingsService } from '../Services/SettingsService';
+import { SyncIndexStateService } from '../Services/SyncIndexStateService';
 import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from '../model/settings';
 import type { ProtonSessionState } from '../proton/auth/ProtonSessionService';
-import type { ReconcileState } from './CloudReconciliationService';
+import type { ReconcileState } from '../Services/CloudReconciliationService';
 import type { ReaderChangeEvent } from '../isolated-sync/ObsidianVaultFileSystemReader';
 import type {
   SyncDispatchResult,

@@ -106,7 +106,6 @@ export interface SyncServiceOptions {
   maxPendingTotal?: number;
   maxPendingPerEntity?: number;
   now?: () => number;
-  caseInsensitivePaths?: boolean;
   classifyError?: (error: unknown) => 'retryable' | 'non-retryable';
 }
 
@@ -187,7 +186,6 @@ export class RxSyncService implements ISyncService {
   private readonly maxPendingTotal: number;
   private readonly maxPendingPerEntity: number;
   private readonly now: () => number;
-  private readonly caseInsensitivePaths: boolean;
   private readonly classifyError: (error: unknown) => 'retryable' | 'non-retryable';
 
   constructor(
@@ -207,7 +205,6 @@ export class RxSyncService implements ISyncService {
     this.maxPendingTotal = options.maxPendingTotal ?? DEFAULT_MAX_PENDING_TOTAL;
     this.maxPendingPerEntity = options.maxPendingPerEntity ?? DEFAULT_MAX_PENDING_PER_ENTITY;
     this.now = options.now ?? (() => Date.now());
-    this.caseInsensitivePaths = options.caseInsensitivePaths ?? true;
     this.classifyError = options.classifyError ?? defaultClassifyError;
 
     this.engineSub = this.engineCommands
@@ -234,8 +231,8 @@ export class RxSyncService implements ISyncService {
     this.byCloudId.clear();
 
     for (const entry of Object.values(snapshot.byPath ?? {})) {
-      const normalized = this.normalizePath(entry.path);
-      const canonical = this.toCanonicalKey(normalized);
+      const normalized = normalizePath(entry.path);
+      const canonical = toCanonicalPathKey(normalized);
       const normalizedEntry: SyncIndexEntry = {
         cloudId: entry.cloudId,
         path: normalized,
@@ -248,8 +245,8 @@ export class RxSyncService implements ISyncService {
 
     for (const entry of Object.values(snapshot.byCloudId ?? {})) {
       if (!this.byCloudId.has(entry.cloudId)) {
-        const normalized = this.normalizePath(entry.path);
-        const canonical = this.toCanonicalKey(normalized);
+        const normalized = normalizePath(entry.path);
+        const canonical = toCanonicalPathKey(normalized);
         const normalizedEntry: SyncIndexEntry = {
           cloudId: entry.cloudId,
           path: normalized,
@@ -691,16 +688,16 @@ export class RxSyncService implements ISyncService {
   }
 
   private upsertIndex(result: CloudUpsertResult, reason: SyncChangeType, oldPath?: string, emit = true): void {
-    const normalizedPath = this.normalizePath(result.path);
-    const canonicalPath = this.toCanonicalKey(normalizedPath);
+    const normalizedPath = normalizePath(result.path);
+    const canonicalPath = toCanonicalPathKey(normalizedPath);
 
     const existing = this.byCloudId.get(result.cloudId);
-    if (existing && this.toCanonicalKey(existing.path) !== canonicalPath) {
-      this.byPath.delete(this.toCanonicalKey(existing.path));
+    if (existing && toCanonicalPathKey(existing.path) !== canonicalPath) {
+      this.byPath.delete(toCanonicalPathKey(existing.path));
     }
 
     if (oldPath) {
-      this.byPath.delete(this.toCanonicalKey(oldPath));
+      this.byPath.delete(toCanonicalPathKey(oldPath));
     }
 
     const next: SyncIndexEntry = {
@@ -719,8 +716,8 @@ export class RxSyncService implements ISyncService {
   }
 
   private rebaseDescendantPaths(oldFolderPath: string, newFolderPath: string): void {
-    const normalizedOld = this.normalizePath(oldFolderPath);
-    const normalizedNew = this.normalizePath(newFolderPath);
+    const normalizedOld = normalizePath(oldFolderPath);
+    const normalizedNew = normalizePath(newFolderPath);
     if (!normalizedOld || !normalizedNew) {
       return;
     }
@@ -734,7 +731,7 @@ export class RxSyncService implements ISyncService {
       }
 
       const suffix = entry.path.slice(normalizedOld.length);
-      const nextPath = this.normalizePath(`${normalizedNew}${suffix}`);
+      const nextPath = normalizePath(`${normalizedNew}${suffix}`);
       if (!nextPath) {
         continue;
       }
@@ -752,8 +749,8 @@ export class RxSyncService implements ISyncService {
         continue;
       }
 
-      this.byPath.delete(this.toCanonicalKey(current.path));
-      this.byPath.set(this.toCanonicalKey(entry.path), entry);
+      this.byPath.delete(toCanonicalPathKey(current.path));
+      this.byPath.set(toCanonicalPathKey(entry.path), entry);
       this.byCloudId.set(entry.cloudId, entry);
     }
   }
@@ -765,7 +762,7 @@ export class RxSyncService implements ISyncService {
     }
 
     this.byCloudId.delete(cloudId);
-    this.byPath.delete(this.toCanonicalKey(existing.path));
+    this.byPath.delete(toCanonicalPathKey(existing.path));
     this.emitSnapshot(reason);
   }
 
@@ -795,12 +792,12 @@ export class RxSyncService implements ISyncService {
   }
 
   private normalizeAndValidate(change: SyncChangeBase): SyncChangeBase {
-    const path = this.normalizePath(change.path);
+    const path = normalizePath(change.path);
     if (!path) {
       throw new Error('Path must not be empty.');
     }
 
-    const oldPath = change.oldPath ? this.normalizePath(change.oldPath) : undefined;
+    const oldPath = change.oldPath ? normalizePath(change.oldPath) : undefined;
 
     if (requiresOldPath(change.type) && !oldPath) {
       throw new Error(`${change.type} requires oldPath.`);
@@ -811,14 +808,6 @@ export class RxSyncService implements ISyncService {
       path,
       oldPath
     };
-  }
-
-  private normalizePath(path: string): string {
-    return normalizePath(path);
-  }
-
-  private toCanonicalKey(path: string): string {
-    return toCanonicalPathKey(path, this.caseInsensitivePaths);
   }
 
   private resolveEntityKey(change: SyncChangeBase): string {
@@ -832,10 +821,10 @@ export class RxSyncService implements ISyncService {
       if (byOldPath) {
         return `cloud:${byOldPath.cloudId}`;
       }
-      return `path:${this.toCanonicalKey(change.oldPath)}`;
+      return `path:${toCanonicalPathKey(change.oldPath)}`;
     }
 
-    return `path:${this.toCanonicalKey(change.path)}`;
+    return `path:${toCanonicalPathKey(change.path)}`;
   }
 
   private resolveCloudId(path: string, oldPath?: string): string | null {
@@ -853,7 +842,7 @@ export class RxSyncService implements ISyncService {
   }
 
   private lookupByPath(path: string): SyncIndexEntry | null {
-    return this.byPath.get(this.toCanonicalKey(path)) ?? null;
+    return this.byPath.get(toCanonicalPathKey(path)) ?? null;
   }
 
   private insertWithCompaction(queue: QueueRecord, incoming: QueuedChange): void {

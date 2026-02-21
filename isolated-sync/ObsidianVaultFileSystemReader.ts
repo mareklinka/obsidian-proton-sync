@@ -34,7 +34,6 @@ interface VaultAdapter {
 export interface FileSystemReaderOptions {
   ignoredPathPrefixes?: string[];
   ignorePredicate?: (path: string, entityType: EntityType) => boolean;
-  caseInsensitivePaths?: boolean;
   now?: () => number;
   binaryAsBlob?: boolean;
   // Test seam; when omitted, real Vault is used.
@@ -66,7 +65,6 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
   private readonly adapter: VaultAdapter;
   private readonly now: () => number;
   private readonly binaryAsBlob: boolean;
-  private readonly caseInsensitivePaths: boolean;
   private readonly ignoredPrefixes: string[];
   private readonly ignorePredicate?: (path: string, entityType: EntityType) => boolean;
   private readonly isFileGuard: (entry: unknown) => entry is TFile;
@@ -82,9 +80,8 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
     this.adapter = options.vaultAdapter ?? (vault as unknown as VaultAdapter);
     this.now = options.now ?? (() => Date.now());
     this.binaryAsBlob = options.binaryAsBlob ?? false;
-    this.caseInsensitivePaths = options.caseInsensitivePaths ?? true;
     this.ignoredPrefixes = (options.ignoredPathPrefixes ?? [])
-      .map(path => this.normalizePath(path))
+      .map(path => normalizePath(path))
       .filter(path => path.length > 0);
     this.ignorePredicate = options.ignorePredicate;
     this.isFileGuard = options.isFile ?? ((entry: unknown): entry is TFile => isLikelyFile(entry));
@@ -133,7 +130,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
   }
 
   async readFile(path: string): Promise<FileDescriptor | null> {
-    const normalizedPath = this.normalizePath(path);
+    const normalizedPath = normalizePath(path);
     if (!normalizedPath) {
       return null;
     }
@@ -150,14 +147,14 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
 
     return {
       name: entry.name,
-      path: this.normalizePath(entry.path),
+      path: normalizePath(entry.path),
       modifiedAt: entry.stat?.mtime ?? this.now(),
       content
     };
   }
 
   async readFolder(path: string): Promise<FolderDescriptor | null> {
-    const normalizedPath = this.normalizePath(path);
+    const normalizedPath = normalizePath(path);
     if (!normalizedPath) {
       return null;
     }
@@ -169,12 +166,12 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
 
     return {
       name: entry.name,
-      path: this.normalizePath(entry.path)
+      path: normalizePath(entry.path)
     };
   }
 
   async exists(path: string, entityType: EntityType): Promise<boolean> {
-    const normalizedPath = this.normalizePath(path);
+    const normalizedPath = normalizePath(path);
     if (!normalizedPath) {
       return false;
     }
@@ -200,7 +197,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
         continue;
       }
 
-      const path = this.normalizePath(entry.path);
+      const path = normalizePath(entry.path);
       if (!path || this.isIgnored(path, 'file')) {
         continue;
       }
@@ -224,7 +221,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
         continue;
       }
 
-      const path = this.normalizePath(entry.path);
+      const path = normalizePath(entry.path);
       if (!path || this.isIgnored(path, 'folder')) {
         continue;
       }
@@ -296,7 +293,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
       return null;
     }
 
-    const oldPath = this.normalizePath(oldPathRaw);
+    const oldPath = normalizePath(oldPathRaw);
     if (!oldPath) {
       return null;
     }
@@ -315,7 +312,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
     }
 
     if (this.isFolderGuard(rawEntry)) {
-      const newPath = this.normalizePath(rawEntry.path);
+      const newPath = normalizePath(rawEntry.path);
       if (!newPath || this.isIgnored(newPath, 'folder')) {
         return null;
       }
@@ -358,8 +355,8 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
     pathRaw: string,
     oldPathRaw?: string
   ): ReaderChangeEvent | null {
-    const path = this.normalizePath(pathRaw);
-    const oldPath = oldPathRaw ? this.normalizePath(oldPathRaw) : undefined;
+    const path = normalizePath(pathRaw);
+    const oldPath = oldPathRaw ? normalizePath(oldPathRaw) : undefined;
 
     if (!path || this.isIgnored(path, entityType)) {
       return null;
@@ -375,15 +372,15 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
   }
 
   private isIgnored(path: string, entityType: EntityType): boolean {
-    const normalized = this.normalizePath(path);
+    const normalized = normalizePath(path);
     if (!normalized) {
       return false;
     }
 
-    const canonical = this.toCanonicalKey(normalized);
+    const canonical = toCanonicalPathKey(normalized);
 
     for (const prefix of this.ignoredPrefixes) {
-      const canonicalPrefix = this.toCanonicalKey(prefix);
+      const canonicalPrefix = toCanonicalPathKey(prefix);
       if (canonical === canonicalPrefix || canonical.startsWith(`${canonicalPrefix}/`)) {
         return true;
       }
@@ -392,20 +389,12 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
     return this.ignorePredicate?.(normalized, entityType) ?? false;
   }
 
-  private normalizePath(path: string): string {
-    return normalizePath(path);
-  }
-
-  private toCanonicalKey(path: string): string {
-    return toCanonicalPathKey(path, this.caseInsensitivePaths);
-  }
-
   private queuePendingFolderRename(event: ReaderChangeEvent): void {
     if (!event.oldPath) {
       return;
     }
 
-    const key = this.toCanonicalKey(event.oldPath);
+    const key = toCanonicalPathKey(event.oldPath);
     const existing = this.pendingFolderRenames.get(key);
     if (existing) {
       clearTimeout(existing.timer);
@@ -444,8 +433,8 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
       return false;
     }
 
-    const canonicalOldPath = this.toCanonicalKey(oldPath);
-    const canonicalNewPath = this.toCanonicalKey(newPath);
+    const canonicalOldPath = toCanonicalPathKey(oldPath);
+    const canonicalNewPath = toCanonicalPathKey(newPath);
 
     for (const pending of this.pendingFolderRenames.values()) {
       const parentOldPath = pending.event.oldPath;
@@ -454,8 +443,8 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
         continue;
       }
 
-      const canonicalParentOld = this.toCanonicalKey(parentOldPath);
-      const canonicalParentNew = this.toCanonicalKey(parentNewPath);
+      const canonicalParentOld = toCanonicalPathKey(parentOldPath);
+      const canonicalParentNew = toCanonicalPathKey(parentNewPath);
       const parentOldPrefix = `${canonicalParentOld}/`;
 
       if (!canonicalOldPath.startsWith(parentOldPrefix)) {
@@ -469,7 +458,7 @@ export class ObsidianVaultFileSystemReader implements IFileSystemReaderService {
         continue;
       }
 
-      const canonicalExpectedNew = this.toCanonicalKey(expectedNewPath);
+      const canonicalExpectedNew = toCanonicalPathKey(expectedNewPath);
       if (canonicalExpectedNew !== canonicalNewPath) {
         continue;
       }

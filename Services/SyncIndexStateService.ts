@@ -10,10 +10,7 @@ export class SyncIndexStateService {
 
   public readonly snapshot$: Observable<SyncIndexSnapshot>;
 
-  constructor(
-    private readonly settingsService: SettingsService,
-    private readonly caseInsensitivePaths = true
-  ) {
+  constructor(private readonly settingsService: SettingsService) {
     this.snapshotSubject = new BehaviorSubject<SyncIndexSnapshot>(
       this.buildSnapshotFromMaps(this.settingsService.snapshot().pathMap, this.settingsService.snapshot().folderMap)
     );
@@ -30,9 +27,9 @@ export class SyncIndexStateService {
       return null;
     }
 
-    const canonical = toCanonicalPathKey(normalized, this.caseInsensitivePaths);
+    const canonical = toCanonicalPathKey(normalized);
     for (const entry of Object.values(this.snapshotSubject.value.byPath)) {
-      if (toCanonicalPathKey(entry.path, this.caseInsensitivePaths) === canonical) {
+      if (toCanonicalPathKey(entry.path) === canonical) {
         return entry;
       }
     }

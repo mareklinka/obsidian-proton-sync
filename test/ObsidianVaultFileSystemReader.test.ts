@@ -4,7 +4,7 @@ import {
   FileSystemReaderOptions,
   ObsidianVaultFileSystemReader,
   ReaderChangeEvent
-} from './ObsidianVaultFileSystemReader';
+} from '../isolated-sync/ObsidianVaultFileSystemReader';
 
 type FakeBase = {
   kind: EntityType;
@@ -331,29 +331,21 @@ describe('ObsidianVaultFileSystemReader', () => {
     expect(events[0].path).toBe('notes/ok.md');
   });
 
-  it('ignore prefix matching is case-insensitive by default and tunable', () => {
+  it('ignore prefix matching is case-insensitive and tunable', () => {
     const adapter = new FakeVaultAdapter();
-    const caseInsensitive = makeReader(adapter, {
+    const reader = makeReader(adapter, {
       ignoredPathPrefixes: ['.OBSIDIAN']
-    });
-    const caseSensitive = makeReader(adapter, {
-      ignoredPathPrefixes: ['.OBSIDIAN'],
-      caseInsensitivePaths: false
     });
 
     const insensitiveEvents: ReaderChangeEvent[] = [];
-    const sensitiveEvents: ReaderChangeEvent[] = [];
 
-    caseInsensitive.changes$.subscribe(event => insensitiveEvents.push(event));
-    caseSensitive.changes$.subscribe(event => sensitiveEvents.push(event));
+    reader.changes$.subscribe(event => insensitiveEvents.push(event));
 
-    caseInsensitive.start();
-    caseSensitive.start();
+    reader.start();
 
     adapter.emit('create', makeFile('.obsidian/config.json'));
 
     expect(insensitiveEvents).toHaveLength(0);
-    expect(sensitiveEvents).toHaveLength(1);
   });
 
   it('ignores malformed rename payloads safely', () => {

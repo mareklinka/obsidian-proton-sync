@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MemberRole, NodeType, RevisionState, type MaybeNode, type UploadMetadata } from '@protontech/drive-sdk';
-import { ProtonDriveCloudStorageApi } from './ProtonDriveCloudStorageApi';
-import type { SyncIndexSnapshot } from './RxSyncService';
+import { ProtonDriveCloudStorageApi } from '../isolated-sync/ProtonDriveCloudStorageApi';
+import type { SyncIndexSnapshot } from '../isolated-sync/RxSyncService';
 
 class FakeDriveClient {
   public uploaderCalls: Array<{ parentUid: string; name: string; metadata: UploadMetadata }> = [];
@@ -225,9 +225,7 @@ describe('ProtonDriveCloudStorageApi', () => {
   it('creates missing parent folders and uploads file', async () => {
     const rootUid = 'root';
     const drive = new FakeDriveClient(rootUid);
-    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, fakeLogger, () => emptySnapshot(), {
-      caseInsensitivePaths: true
-    });
+    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, () => emptySnapshot());
 
     const result = await api.createFile(
       {
@@ -248,7 +246,7 @@ describe('ProtonDriveCloudStorageApi', () => {
   it('updates file using revision uploader', async () => {
     const rootUid = 'root';
     const drive = new FakeDriveClient(rootUid);
-    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, fakeLogger, () => emptySnapshot());
+    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, () => emptySnapshot());
 
     const result = await api.updateFile('file-1', {
       name: 'a.md',
@@ -287,7 +285,7 @@ describe('ProtonDriveCloudStorageApi', () => {
       }
     };
 
-    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, fakeLogger, () => snapshot);
+    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, () => snapshot);
 
     const moved = await api.moveFile('file-1', 'archive/new.md', 'old.md');
 
@@ -322,7 +320,7 @@ describe('ProtonDriveCloudStorageApi', () => {
       }
     };
 
-    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, fakeLogger, () => snapshot);
+    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, () => snapshot);
 
     const moved = await api.moveFile('file-1', 'notes/new.md', 'notes/old.md');
 
@@ -369,7 +367,7 @@ describe('ProtonDriveCloudStorageApi', () => {
       }
     };
 
-    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, fakeLogger, () => snapshot);
+    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, () => snapshot);
 
     const moved = await api.moveFolder('folder-1', 'parent/new-name', 'parent/old-name');
 
@@ -429,7 +427,7 @@ describe('ProtonDriveCloudStorageApi', () => {
       }
     };
 
-    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, fakeLogger, () => snapshot);
+    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, () => snapshot);
 
     const moved = await api.moveFolder('folder-1', 'b/new-name', 'a/old-name');
 
@@ -442,7 +440,7 @@ describe('ProtonDriveCloudStorageApi', () => {
   it('delete ignores not-found errors for idempotence', async () => {
     const rootUid = 'root';
     const drive = new FakeDriveClient(rootUid);
-    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, fakeLogger, () => emptySnapshot());
+    const api = new ProtonDriveCloudStorageApi(drive as never, rootUid, () => emptySnapshot());
 
     await expect(api.deleteFile('missing-id')).resolves.toBeUndefined();
     expect(drive.trashCalls).toEqual([['missing-id']]);

@@ -5,7 +5,7 @@ import {
   RxSyncService,
   SyncIndexSnapshot,
   SyncIndexSnapshotEvent
-} from './RxSyncService';
+} from '../isolated-sync/RxSyncService';
 
 class Deferred<T> {
   public readonly promise: Promise<T>;

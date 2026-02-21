@@ -113,13 +113,13 @@ export class CloudReconciliationService {
 
     this.pruneExpiredSuppressions();
 
-    const canonicalPath = this.toCanonicalPath(path);
+    const canonicalPath = toCanonicalPathKey(path);
     if (this.suppressedLocalPathsUntil.has(canonicalPath)) {
       return true;
     }
 
     if (oldPath) {
-      const canonicalOldPath = this.toCanonicalPath(oldPath);
+      const canonicalOldPath = toCanonicalPathKey(oldPath);
       if (this.suppressedLocalPathsUntil.has(canonicalOldPath)) {
         return true;
       }
@@ -228,7 +228,7 @@ export class CloudReconciliationService {
         continue;
       }
 
-      paths.add(this.toCanonicalPath(normalized));
+      paths.add(toCanonicalPathKey(normalized));
     }
 
     return paths;
@@ -270,10 +270,6 @@ export class CloudReconciliationService {
         this.suppressedLocalPathsUntil.delete(path);
       }
     }
-  }
-
-  private toCanonicalPath(path: string): string {
-    return toCanonicalPathKey(path, true);
   }
 
   reset(): void {

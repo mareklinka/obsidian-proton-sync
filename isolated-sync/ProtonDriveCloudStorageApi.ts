@@ -8,16 +8,12 @@ import {
 import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from './path-utils';
 import type { CloudUpsertResult, ICloudStorageApi, SyncIndexSnapshot } from './RxSyncService';
 import type { FileDescriptor, FolderDescriptor } from './shared-types';
-import type { PluginLogger } from '../logger';
 
 export interface ProtonDriveCloudStorageApiOptions {
-  caseInsensitivePaths?: boolean;
   strictDelete?: boolean;
 }
 
 export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
-  private readonly caseInsensitivePaths: boolean;
-  private readonly strictDelete: boolean;
   private readonly folderUidByPath = new Map<string, string>();
   private readonly nodeNameByUid = new Map<string, string>();
   private cacheSeeded = false;
@@ -25,13 +21,10 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
   constructor(
     private readonly driveClient: ProtonDriveClient,
     private readonly vaultRootNodeUid: string,
-    private readonly logger: PluginLogger,
     private readonly snapshotProvider: () => SyncIndexSnapshot,
     options: ProtonDriveCloudStorageApiOptions = {}
   ) {
-    this.caseInsensitivePaths = options.caseInsensitivePaths ?? true;
-    this.strictDelete = options.strictDelete ?? true;
-    this.folderUidByPath.set(this.toCanonical(''), this.vaultRootNodeUid);
+    this.folderUidByPath.set(toCanonicalPathKey(''), this.vaultRootNodeUid);
   }
 
   async createFile(input: FileDescriptor, parentPath?: string): Promise<CloudUpsertResult> {
@@ -77,7 +70,7 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
     const parentUid = await this.ensureFolderPath(targetParentPath, true);
     const sourceParentPath = normalizedOldPath ? getParentPath(normalizedOldPath) : undefined;
     const parentChanged =
-      sourceParentPath === undefined || this.toCanonical(sourceParentPath) !== this.toCanonical(targetParentPath);
+      sourceParentPath === undefined || toCanonicalPathKey(sourceParentPath) !== toCanonicalPathKey(targetParentPath);
 
     if (parentChanged) {
       const moveResult = await this.consumeSingleNodeResult(this.driveClient.moveNodes([cloudId], parentUid));
@@ -150,7 +143,7 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
     const parentUid = await this.ensureFolderPath(targetParentPath, true);
     const sourceParentPath = normalizedOldPath ? getParentPath(normalizedOldPath) : undefined;
     const parentChanged =
-      sourceParentPath === undefined || this.toCanonical(sourceParentPath) !== this.toCanonical(targetParentPath);
+      sourceParentPath === undefined || toCanonicalPathKey(sourceParentPath) !== toCanonicalPathKey(targetParentPath);
 
     if (parentChanged) {
       const moveResult = await this.consumeSingleNodeResult(this.driveClient.moveNodes([cloudId], parentUid));
@@ -182,15 +175,6 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
         return;
       }
       throw new Error(`Delete failed while trashing node ${cloudId}: ${trashResult.error ?? 'unknown error'}`);
-    }
-
-    if (!this.strictDelete) {
-      return;
-    }
-
-    const deleteResult = await this.consumeSingleNodeResult(this.driveClient.deleteNodes([cloudId]));
-    if (!deleteResult.ok && !isNotFoundMessage(deleteResult.error)) {
-      throw new Error(`Delete failed while removing node ${cloudId}: ${deleteResult.error ?? 'unknown error'}`);
     }
   }
 
@@ -235,7 +219,7 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
       }
 
       if (entry.entityType === 'folder') {
-        this.folderUidByPath.set(this.toCanonical(normalizedPath), entry.cloudId);
+        this.folderUidByPath.set(toCanonicalPathKey(normalizedPath), entry.cloudId);
       }
 
       this.nodeNameByUid.set(entry.cloudId, getBaseName(normalizedPath));
@@ -250,7 +234,7 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
       return this.vaultRootNodeUid;
     }
 
-    const cached = this.folderUidByPath.get(this.toCanonical(normalized));
+    const cached = this.folderUidByPath.get(toCanonicalPathKey(normalized));
     if (cached) {
       return cached;
     }
@@ -261,7 +245,7 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
 
     for (const segment of segments) {
       currentPath = currentPath ? `${currentPath}/${segment}` : segment;
-      const currentCanonical = this.toCanonical(currentPath);
+      const currentCanonical = toCanonicalPathKey(currentPath);
       const fromCache = this.folderUidByPath.get(currentCanonical);
       if (fromCache) {
         currentUid = fromCache;
@@ -348,7 +332,7 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
 
   private setFolderPath(cloudId: string, path: string): void {
     this.removeFolderByUid(cloudId);
-    this.folderUidByPath.set(this.toCanonical(path), cloudId);
+    this.folderUidByPath.set(toCanonicalPathKey(path), cloudId);
   }
 
   private removeFolderByUid(cloudId: string): void {
@@ -357,10 +341,6 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
         this.folderUidByPath.delete(key);
       }
     }
-  }
-
-  private toCanonical(path: string): string {
-    return toCanonicalPathKey(path, this.caseInsensitivePaths);
   }
 }
 

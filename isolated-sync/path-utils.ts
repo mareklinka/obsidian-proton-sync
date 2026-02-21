@@ -13,9 +13,9 @@ export function normalizePath(path: string, options: NormalizePathOptions = {}):
   return cleaned;
 }
 
-export function toCanonicalPathKey(path: string, caseInsensitive: boolean): string {
+export function toCanonicalPathKey(path: string): string {
   const normalized = normalizePath(path);
-  return caseInsensitive ? normalized.toLocaleLowerCase() : normalized;
+  return normalized.toLocaleLowerCase();
 }
 
 export function getParentPath(path: string): string {

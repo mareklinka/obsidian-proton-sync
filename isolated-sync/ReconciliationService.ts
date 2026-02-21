@@ -11,7 +11,6 @@ import {
 import type { TAbstractFile, TFile, TFolder, Vault } from 'obsidian';
 
 export interface ReconciliationOptions {
-  caseInsensitivePaths?: boolean;
   ignoredPathPrefixes?: string[];
   modifiedAtToleranceMs?: number;
   previousSnapshot?: SyncIndexSnapshot;
@@ -88,7 +87,6 @@ const DEFAULT_TOLERANCE_MS = 3000;
 const DEFAULT_TOMBSTONE_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 
 export class ReconciliationService {
-  private readonly caseInsensitivePaths: boolean;
   private readonly modifiedAtToleranceMs: number;
   private readonly ignoredPrefixes: string[];
   private readonly now: () => number;
@@ -103,7 +101,6 @@ export class ReconciliationService {
     private readonly logger?: PluginLogger,
     options: ReconciliationOptions = {}
   ) {
-    this.caseInsensitivePaths = options.caseInsensitivePaths ?? true;
     this.modifiedAtToleranceMs = options.modifiedAtToleranceMs ?? DEFAULT_TOLERANCE_MS;
     this.previousSnapshot = options.previousSnapshot ?? null;
     this.tombstoneTtlMs = options.tombstoneTtlMs ?? DEFAULT_TOMBSTONE_TTL_MS;
@@ -162,12 +159,12 @@ export class ReconciliationService {
       }
 
       if (isVaultFolder(entry)) {
-        folders.set(this.toCanonical(path), { path });
+        folders.set(toCanonicalPathKey(path), { path });
         continue;
       }
 
       if (isVaultFile(entry)) {
-        files.set(this.toCanonical(path), {
+        files.set(toCanonicalPathKey(path), {
           path,
           modifiedAt: entry.stat?.mtime ?? this.now()
         });
@@ -199,7 +196,7 @@ export class ReconciliationService {
       }
 
       if (node.type === NodeType.Folder) {
-        folders.set(this.toCanonical(path), {
+        folders.set(toCanonicalPathKey(path), {
           path,
           uid: node.uid,
           modifiedAt: node.modificationTime.getTime()
@@ -210,7 +207,7 @@ export class ReconciliationService {
 
       if (node.type === NodeType.File) {
         const modifiedAt = node.activeRevision?.claimedModificationTime?.getTime() ?? node.modificationTime.getTime();
-        files.set(this.toCanonical(path), {
+        files.set(toCanonicalPathKey(path), {
           path,
           uid: node.uid,
           modifiedAt
@@ -251,7 +248,7 @@ export class ReconciliationService {
       }
 
       const newPath = remote.path;
-      if (this.toCanonical(oldPath) === this.toCanonical(newPath)) {
+      if (toCanonicalPathKey(oldPath) === toCanonicalPathKey(newPath)) {
         continue;
       }
 
@@ -294,18 +291,18 @@ export class ReconciliationService {
         continue;
       }
 
-      const canonical = this.toCanonical(path);
+      const canonical = toCanonicalPathKey(path);
       const localExists = entry.entityType === 'folder' ? local.folders.has(canonical) : local.files.has(canonical);
       const remote =
         entry.entityType === 'folder' ? remoteFoldersByUid.get(entry.cloudId) : remoteFilesByUid.get(entry.cloudId);
 
-      if (!localExists && remote && this.toCanonical(remote.path) === canonical) {
+      if (!localExists && remote && toCanonicalPathKey(remote.path) === canonical) {
         this.recordTombstone(entry.entityType, path, entry.cloudId, 'local');
         await this.deleteRemoteNode(entry.cloudId);
         if (entry.entityType === 'folder') {
-          remoteFolders.delete(this.toCanonical(remote.path));
+          remoteFolders.delete(toCanonicalPathKey(remote.path));
         } else {
-          remoteFiles.delete(this.toCanonical(remote.path));
+          remoteFiles.delete(toCanonicalPathKey(remote.path));
         }
         stats.remoteDeletesApplied += 1;
         continue;
@@ -346,7 +343,7 @@ export class ReconciliationService {
       .sort((a, b) => depth(a) - depth(b));
 
     for (const path of remoteOnly) {
-      const remote = remoteFolders.get(this.toCanonical(path));
+      const remote = remoteFolders.get(toCanonicalPathKey(path));
       if (!remote) {
         continue;
       }
@@ -354,7 +351,7 @@ export class ReconciliationService {
       if (this.findRelevantTombstone('folder', path, remote.uid, 'local', remote.modifiedAt)) {
         await this.deleteRemoteNode(remote.uid);
         stats.remoteDeletesApplied += 1;
-        remoteFolders.delete(this.toCanonical(path));
+        remoteFolders.delete(toCanonicalPathKey(path));
         continue;
       }
 
@@ -569,7 +566,7 @@ export class ReconciliationService {
       return this.vaultRootNodeUid;
     }
 
-    const canonical = this.toCanonical(normalized);
+    const canonical = toCanonicalPathKey(normalized);
     const existing = remoteFolders.get(canonical);
     if (existing) {
       return existing.uid;
@@ -638,14 +635,10 @@ export class ReconciliationService {
     return { byPath, byCloudId };
   }
 
-  private toCanonical(path: string): string {
-    return toCanonicalPathKey(path, this.caseInsensitivePaths);
-  }
-
   private isIgnored(path: string): boolean {
-    const canonical = this.toCanonical(path);
+    const canonical = toCanonicalPathKey(path);
     for (const prefix of this.ignoredPrefixes) {
-      const canonicalPrefix = this.toCanonical(prefix);
+      const canonicalPrefix = toCanonicalPathKey(prefix);
       if (canonical === canonicalPrefix || canonical.startsWith(`${canonicalPrefix}/`)) {
         return true;
       }
@@ -683,7 +676,7 @@ export class ReconciliationService {
     expectedOrigin: 'local' | 'remote',
     counterpartModifiedAt: number
   ): ReconciliationTombstone | null {
-    const canonicalPath = this.toCanonical(path);
+    const canonicalPath = toCanonicalPathKey(path);
     let best: ReconciliationTombstone | null = null;
 
     for (const item of this.tombstones) {
@@ -691,7 +684,7 @@ export class ReconciliationService {
         continue;
       }
 
-      const pathMatch = this.toCanonical(item.path) === canonicalPath;
+      const pathMatch = toCanonicalPathKey(item.path) === canonicalPath;
       const cloudMatch = Boolean(cloudId && item.cloudId && item.cloudId === cloudId);
       if (!pathMatch && !cloudMatch) {
         continue;
