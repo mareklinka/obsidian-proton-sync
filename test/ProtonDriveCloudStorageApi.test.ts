@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MemberRole, NodeType, RevisionState, type MaybeNode, type UploadMetadata } from '@protontech/drive-sdk';
-import { ProtonDriveCloudStorageApi } from '../isolated-sync/ProtonDriveCloudStorageApi';
-import type { SyncIndexSnapshot } from '../isolated-sync/RxSyncService';
+import { ProtonDriveCloudStorageApi } from '../services/ProtonDriveCloudStorageApi';
+import { SyncIndexSnapshot } from '../services/ObsidianSyncService';
 
 class FakeDriveClient {
   public uploaderCalls: Array<{ parentUid: string; name: string; metadata: UploadMetadata }> = [];

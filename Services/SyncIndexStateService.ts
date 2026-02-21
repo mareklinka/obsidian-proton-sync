@@ -1,8 +1,8 @@
 import { BehaviorSubject, type Observable } from 'rxjs';
 
-import type { SyncIndexEntry, SyncIndexSnapshot } from '../isolated-sync/RxSyncService';
+import type { SyncIndexEntry, SyncIndexSnapshot } from './ObsidianSyncService';
 import type { ProtonDriveSyncSettings } from '../model/settings';
-import { normalizePath, toCanonicalPathKey } from '../isolated-sync/path-utils';
+import { normalizePath, toCanonicalPathKey } from './path-utils';
 import { SettingsService } from './SettingsService';
 
 export class SyncIndexStateService {

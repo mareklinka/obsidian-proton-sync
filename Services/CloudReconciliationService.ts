@@ -2,10 +2,10 @@ import type { ProtonDriveClient } from '@protontech/drive-sdk';
 import type { Vault } from 'obsidian';
 import { BehaviorSubject, Subject, type Observable, type Subscription } from 'rxjs';
 
-import { ReconciliationService, type ReconciliationTombstone } from '../isolated-sync/ReconciliationService';
-import type { ObsidianVaultFileSystemReader } from '../isolated-sync/ObsidianVaultFileSystemReader';
-import { normalizePath, toCanonicalPathKey } from '../isolated-sync/path-utils';
-import type { RxSyncService, SyncIndexSnapshot } from '../isolated-sync/RxSyncService';
+import { ReconciliationService } from './ReconciliationService';
+import type { ObsidianVaultFileSystemReader } from './ObsidianVaultFileSystemReader';
+import { normalizePath, toCanonicalPathKey } from './path-utils';
+import type { ObsidianSyncService, SyncIndexSnapshot } from './ObsidianSyncService';
 import type { PluginLogger } from '../logger';
 import { SettingsService } from './SettingsService';
 import { SyncIndexStateService } from './SyncIndexStateService';
@@ -33,7 +33,7 @@ export class CloudReconciliationService {
       settingsService: SettingsService;
       syncIndexStateService: SyncIndexStateService;
       getSyncReader: () => ObsidianVaultFileSystemReader | null;
-      getSyncService: () => RxSyncService | null;
+      getSyncService: () => ObsidianSyncService | null;
     }
   ) {
     this.subscriptions.push(

@@ -8,17 +8,14 @@ import {
   concatMap,
   from,
   observeOn,
-  timer
+  timer,
+  distinctUntilChanged
 } from 'rxjs';
-import type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from './shared-types';
 import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from './path-utils';
-
-export type { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from './shared-types';
-
-export type SyncChangeType = FileSystemChangeType;
+import { EntityType, FileDescriptor, FileSystemChangeType, FolderDescriptor } from './ObsidianVaultFileSystemReader';
 
 export interface SyncChangeBase {
-  type: SyncChangeType;
+  type: FileSystemChangeType;
   entityType: EntityType;
   path: string;
   oldPath?: string;
@@ -48,7 +45,7 @@ export interface SyncIndexSnapshot {
 export interface SyncIndexSnapshotEvent {
   seq: number;
   at: number;
-  reason: SyncChangeType | 'init' | 'manual';
+  reason: FileSystemChangeType | 'init' | 'manual';
   snapshot: SyncIndexSnapshot;
 }
 
@@ -147,7 +144,7 @@ export const DEFAULT_JITTER_RATIO = 0.2;
 export const DEFAULT_MAX_PENDING_TOTAL = 5000;
 export const DEFAULT_MAX_PENDING_PER_ENTITY = 500;
 
-export class RxSyncService implements ISyncService {
+export class ObsidianSyncService implements ISyncService {
   public readonly mapChanges$: Observable<SyncIndexSnapshotEvent>;
   public readonly dispatchResults$: Observable<SyncDispatchResult>;
   public readonly syncState$: Observable<SyncEngineState>;
@@ -216,7 +213,7 @@ export class RxSyncService implements ISyncService {
 
     this.mapChanges$ = this.mapChangesSubject.asObservable();
     this.dispatchResults$ = this.dispatchResultsSubject.asObservable();
-    this.syncState$ = this.syncStateSubject.asObservable();
+    this.syncState$ = this.syncStateSubject.pipe(distinctUntilChanged());
   }
 
   initializeIndex(snapshot: SyncIndexSnapshot): void {
@@ -356,7 +353,6 @@ export class RxSyncService implements ISyncService {
     }
 
     this.insertWithCompaction(queue, queued);
-    this.setSyncState('syncing');
 
     if (this.state === 'running' && !hadPending) {
       this.nextDispatchAt = this.now() + this.sendIntervalMs;
@@ -576,10 +572,6 @@ export class RxSyncService implements ISyncService {
   }
 
   private setSyncState(next: SyncEngineState): void {
-    if (this.syncStateSubject.value === next) {
-      return;
-    }
-
     this.syncStateSubject.next(next);
   }
 
@@ -687,7 +679,7 @@ export class RxSyncService implements ISyncService {
     }
   }
 
-  private upsertIndex(result: CloudUpsertResult, reason: SyncChangeType, oldPath?: string, emit = true): void {
+  private upsertIndex(result: CloudUpsertResult, reason: FileSystemChangeType, oldPath?: string, emit = true): void {
     const normalizedPath = normalizePath(result.path);
     const canonicalPath = toCanonicalPathKey(normalizedPath);
 
@@ -755,7 +747,7 @@ export class RxSyncService implements ISyncService {
     }
   }
 
-  private removeIndexByCloudId(cloudId: string, reason: SyncChangeType): void {
+  private removeIndexByCloudId(cloudId: string, reason: FileSystemChangeType): void {
     const existing = this.byCloudId.get(cloudId);
     if (!existing) {
       return;
@@ -979,7 +971,7 @@ export class RxSyncService implements ISyncService {
     return `chg_${this.idCounter}`;
   }
 
-  private computeInitialAvailableAt(type: SyncChangeType, enqueuedAt: number): number {
+  private computeInitialAvailableAt(type: FileSystemChangeType, enqueuedAt: number): number {
     if (type === 'file-created' || type === 'file-edited') {
       return enqueuedAt + this.debounceMs;
     }
@@ -988,7 +980,7 @@ export class RxSyncService implements ISyncService {
   }
 }
 
-function requiresOldPath(type: SyncChangeType): boolean {
+function requiresOldPath(type: FileSystemChangeType): boolean {
   return type === 'file-moved' || type === 'folder-moved' || type === 'folder-renamed';
 }
 

@@ -2,19 +2,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { NodeType } from '@protontech/drive-sdk';
 
-import { SyncOrchestrationService, type OrchestrationState } from '../Services/SyncOrchestrationService';
-import { SettingsService } from '../Services/SettingsService';
-import { SyncIndexStateService } from '../Services/SyncIndexStateService';
+import { SyncOrchestrationService, type OrchestrationState } from '../services/SyncOrchestrationService';
+import { SettingsService } from '../services/SettingsService';
+import { SyncIndexStateService } from '../services/SyncIndexStateService';
 import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from '../model/settings';
 import type { ProtonSessionState } from '../proton/auth/ProtonSessionService';
-import type { ReconcileState } from '../Services/CloudReconciliationService';
-import type { ReaderChangeEvent } from '../isolated-sync/ObsidianVaultFileSystemReader';
+import type { ReconcileState } from '../services/CloudReconciliationService';
+import type { ReaderChangeEvent } from '../services/ObsidianVaultFileSystemReader';
 import type {
   SyncDispatchResult,
   SyncEngineState,
   SyncIndexSnapshot,
   SyncIndexSnapshotEvent
-} from '../isolated-sync/RxSyncService';
+} from '../services/ObsidianSyncService';
 
 vi.mock('../sync-root', () => ({
   ensureSyncRoots: vi.fn(async () => ({

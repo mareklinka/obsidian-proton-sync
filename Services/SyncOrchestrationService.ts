@@ -3,14 +3,14 @@ import type { Vault } from 'obsidian';
 import { BehaviorSubject, type Observable, type Subscription } from 'rxjs';
 
 import { CloudReconciliationService, type ReconcileState } from './CloudReconciliationService';
-import type { ObsidianVaultFileSystemReader, ReaderChangeEvent } from '../isolated-sync/ObsidianVaultFileSystemReader';
+import type { ObsidianVaultFileSystemReader, ReaderChangeEvent } from './ObsidianVaultFileSystemReader';
 import type {
+  ObsidianSyncService,
   SyncDispatchResult,
   SyncEngineState,
   SyncIndexSnapshot,
   SyncIndexSnapshotEvent
-} from '../isolated-sync/RxSyncService';
-import { RxSyncService } from '../isolated-sync/RxSyncService';
+} from './ObsidianSyncService';
 import type { PluginLogger } from '../logger';
 import type { ProtonSessionService, ProtonSessionState } from '../proton/auth/ProtonSessionService';
 import { SettingsService } from './SettingsService';
@@ -37,7 +37,7 @@ export class SyncOrchestrationService {
 
   private readonly subscriptions: Subscription[] = [];
   private reader: ObsidianVaultFileSystemReader | null = null;
-  private syncService: RxSyncService | null = null;
+  private syncService: ObsidianSyncService | null = null;
   private pendingLocalChanges: ReaderChangeEvent[] = [];
   private queueReady = false;
   private pendingCloudInit = false;
@@ -117,7 +117,7 @@ export class SyncOrchestrationService {
     return this.reader;
   }
 
-  getSyncService(): RxSyncService | null {
+  getSyncService(): ObsidianSyncService | null {
     return this.syncService;
   }
 
@@ -461,6 +461,6 @@ type SyncOrchestrationInput = {
   cloudReconciliationService: CloudReconciliationService;
   getDriveClient: () => ProtonDriveClient | null;
   createReader: () => ObsidianVaultFileSystemReader;
-  createSyncService: (vaultRootNodeUid: string, reader: ObsidianVaultFileSystemReader) => RxSyncService;
+  createSyncService: (vaultRootNodeUid: string, reader: ObsidianVaultFileSystemReader) => ObsidianSyncService;
   maxBufferedChanges: number;
 };

@@ -3,21 +3,21 @@ import { type Subscription } from 'rxjs';
 
 import { DEFAULT_SETTINGS, ProtonDriveSyncSettings } from './model/settings';
 import { createFileLogger, getDefaultLogFilePath, type PluginLogger } from './logger';
-import { ObsidianVaultFileSystemReader } from './isolated-sync/ObsidianVaultFileSystemReader';
-import { RxSyncService } from './isolated-sync/RxSyncService';
-import { ProtonDriveCloudStorageApi } from './isolated-sync/ProtonDriveCloudStorageApi';
+import { ObsidianVaultFileSystemReader } from './services/ObsidianVaultFileSystemReader';
+import { ObsidianSyncService } from './services/ObsidianSyncService';
+import { ProtonDriveCloudStorageApi } from './services/ProtonDriveCloudStorageApi';
 import type { ProtonDriveClient } from '@protontech/drive-sdk';
 import { ProtonSessionService } from './proton/auth/ProtonSessionService';
-import { ObsidianSecretRepository } from './Services/ObsidianSecretRepository';
+import { ObsidianSecretRepository } from './services/ObsidianSecretRepository';
 import { ProtonAccount } from './proton/drive/ProtonAccount';
 import { createProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { ObsidianHttpClient } from './proton/drive/ObsidianHttpClient';
 import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-bar';
-import { CloudReconciliationService } from './Services/CloudReconciliationService';
+import { CloudReconciliationService } from './services/CloudReconciliationService';
 import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
-import { SettingsService } from './Services/SettingsService';
-import { SyncOrchestrationService } from './Services/SyncOrchestrationService';
-import { SyncIndexStateService } from './Services/SyncIndexStateService';
+import { SettingsService } from './services/SettingsService';
+import { SyncOrchestrationService } from './services/SyncOrchestrationService';
+import { SyncIndexStateService } from './services/SyncIndexStateService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
@@ -106,7 +106,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
           this.syncIndexStateService.snapshot()
         );
 
-        return new RxSyncService(reader, cloudApi);
+        return new ObsidianSyncService(reader, cloudApi);
       },
       maxBufferedChanges: 5000
     });

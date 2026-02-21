@@ -4,7 +4,7 @@ import {
   FileSystemReaderOptions,
   ObsidianVaultFileSystemReader,
   ReaderChangeEvent
-} from '../isolated-sync/ObsidianVaultFileSystemReader';
+} from '../services/ObsidianVaultFileSystemReader';
 
 type FakeBase = {
   kind: EntityType;

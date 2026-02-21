@@ -12,8 +12,8 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],
-      include: ['isolated-sync/**/*.ts', 'Services/**/*.ts'],
-      exclude: ['isolated-sync/**/*.test.ts', 'proton-integration/**/*.test.ts', 'Services/**/*.test.ts']
+      include: ['isolated-sync/**/*.ts', 'services/**/*.ts'],
+      exclude: ['isolated-sync/**/*.test.ts', 'proton-integration/**/*.test.ts', 'services/**/*.test.ts']
     }
   }
 });

@@ -12,7 +12,7 @@ import type { ProtonSession } from '../auth/ProtonSession';
 import { ProtonAccount } from './ProtonAccount';
 import { createOpenPgpCrypto } from './ProtonOpenPgp';
 import { buildSrpProofsFromParams } from '../auth/ProtonSrp';
-import { SettingsService } from '../../Services/SettingsService';
+import { SettingsService } from '../../services/SettingsService';
 
 export type SessionProvider = () => ProtonSession | null;
 type SrpModule = ProtonDriveClientContructorParameters['srpModule'];

@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  ICloudStorageApi,
   IFileSystemReader,
-  RxSyncService,
+  ICloudStorageApi,
   SyncIndexSnapshot,
+  ObsidianSyncService,
   SyncIndexSnapshotEvent
-} from '../isolated-sync/RxSyncService';
+} from '../services/ObsidianSyncService';
 
 class Deferred<T> {
   public readonly promise: Promise<T>;
@@ -95,13 +95,13 @@ describe('RxSyncService (isolated)', () => {
 
   it('requires initializeIndex before start', () => {
     const calls: string[] = [];
-    const service = new RxSyncService(createFsMock(), createCloudMock(calls));
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock(calls));
     expect(() => service.start()).toThrowError(/initialized/i);
   });
 
   it('accepts enqueue before start and processes after start', async () => {
     const calls: string[] = [];
-    const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock(calls), {
       sendIntervalMs: 50,
       debounceMs: 0
     });
@@ -126,7 +126,7 @@ describe('RxSyncService (isolated)', () => {
     const fs = createFsMock();
     const cloud = createCloudMock(calls);
 
-    const service = new RxSyncService(fs, cloud, {
+    const service = new ObsidianSyncService(fs, cloud, {
       sendIntervalMs: 100,
       debounceMs: 1500
     });
@@ -147,7 +147,7 @@ describe('RxSyncService (isolated)', () => {
 
   it('processes oldest queue head first across entities', async () => {
     const calls: string[] = [];
-    const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock(calls), {
       sendIntervalMs: 20,
       maxOpsPerTick: 1,
       debounceMs: 0
@@ -175,7 +175,7 @@ describe('RxSyncService (isolated)', () => {
       return deferred.promise;
     });
 
-    const service = new RxSyncService(createFsMock(), cloud, {
+    const service = new ObsidianSyncService(createFsMock(), cloud, {
       sendIntervalMs: 10,
       maxOpsPerTick: 1,
       debounceMs: 0
@@ -209,7 +209,7 @@ describe('RxSyncService (isolated)', () => {
       return { cloudId: 'id-1', path: input.path, entityType: 'file' as const };
     });
 
-    const service = new RxSyncService(createFsMock(), cloud, {
+    const service = new ObsidianSyncService(createFsMock(), cloud, {
       sendIntervalMs: 50,
       retryBaseDelayMs: 100,
       jitterRatio: 0,
@@ -238,7 +238,7 @@ describe('RxSyncService (isolated)', () => {
 
   it('emits full snapshot on init and each map mutation', async () => {
     const calls: string[] = [];
-    const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock(calls), {
       sendIntervalMs: 20,
       debounceMs: 0
     });
@@ -261,7 +261,7 @@ describe('RxSyncService (isolated)', () => {
   });
 
   it('validates oldPath for move/rename events', () => {
-    const service = new RxSyncService(createFsMock(), createCloudMock([]));
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock([]));
     service.initializeIndex(emptySnapshot());
 
     expect(() => service.enqueueChange({ type: 'file-moved', entityType: 'file', path: 'new.md' })).toThrowError(
@@ -271,7 +271,7 @@ describe('RxSyncService (isolated)', () => {
 
   it('uses case-insensitive canonical path keys', async () => {
     const calls: string[] = [];
-    const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock(calls), {
       sendIntervalMs: 20,
       debounceMs: 0
     });
@@ -298,7 +298,7 @@ describe('RxSyncService (isolated)', () => {
 
   it('stop pauses and restart resumes processing', async () => {
     const calls: string[] = [];
-    const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock(calls), {
       sendIntervalMs: 20,
       debounceMs: 0
     });
@@ -322,7 +322,7 @@ describe('RxSyncService (isolated)', () => {
   });
 
   it('dispose is terminal', () => {
-    const service = new RxSyncService(createFsMock(), createCloudMock([]));
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock([]));
     service.initializeIndex(emptySnapshot());
     service.dispose();
 
@@ -333,7 +333,7 @@ describe('RxSyncService (isolated)', () => {
 
   it('extends file-created dispatch window when a file-edited event is compacted into it', async () => {
     const calls: string[] = [];
-    const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock(calls), {
       sendIntervalMs: 10,
       debounceMs: 100
     });
@@ -366,7 +366,7 @@ describe('RxSyncService (isolated)', () => {
       content: new Blob(['content'])
     }));
 
-    const service = new RxSyncService(fs, cloud, {
+    const service = new ObsidianSyncService(fs, cloud, {
       sendIntervalMs: 20,
       debounceMs: 0,
       upToDateToleranceMs: 3000
@@ -393,7 +393,7 @@ describe('RxSyncService (isolated)', () => {
 
   it('rebases descendant index paths when folder rename succeeds', async () => {
     const calls: string[] = [];
-    const service = new RxSyncService(createFsMock(), createCloudMock(calls), {
+    const service = new ObsidianSyncService(createFsMock(), createCloudMock(calls), {
       sendIntervalMs: 20,
       debounceMs: 0
     });

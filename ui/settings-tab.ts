@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from '../model/setting
 import { ProtonDriveLoginModal } from './modals/login-modal';
 import ProtonDriveSyncPlugin from '../main';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
-import { SettingsService } from '../Services/SettingsService';
+import { SettingsService } from '../services/SettingsService';
 
 export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   private readonly disconnectSubject = new Subject<void>();

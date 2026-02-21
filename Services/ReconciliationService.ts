@@ -1,5 +1,5 @@
 import type { PluginLogger } from '../logger';
-import type { SyncIndexSnapshot } from './RxSyncService';
+import type { SyncIndexSnapshot } from './ObsidianSyncService';
 import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from './path-utils';
 import {
   NodeType,
@@ -71,7 +71,7 @@ type NodeResult = {
   error?: string;
 };
 
-type DriveLike = {
+interface DriveLike {
   iterateFolderChildren(parentNodeUid: string, filterOptions?: { type?: NodeType }): AsyncGenerator<MaybeNode>;
   createFolder(parentNodeUid: string, name: string, modificationTime?: Date): Promise<MaybeNode>;
   getFileUploader(parentFolderUid: string, name: string, metadata: UploadMetadata): Promise<FileUploader>;
@@ -81,7 +81,7 @@ type DriveLike = {
   moveNodes(nodeUids: string[], newParentNodeUid: string): AsyncGenerator<NodeResult>;
   trashNodes(nodeUids: string[]): AsyncGenerator<NodeResult>;
   deleteNodes(nodeUids: string[]): AsyncGenerator<NodeResult>;
-};
+}
 
 const DEFAULT_TOLERANCE_MS = 3000;
 const DEFAULT_TOMBSTONE_TTL_MS = 1000 * 60 * 60 * 24 * 30;

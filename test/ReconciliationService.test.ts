@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MemberRole, NodeType, RevisionState, type MaybeNode, type UploadMetadata } from '@protontech/drive-sdk';
-import { ReconciliationService, type ReconciliationTombstone } from '../isolated-sync/ReconciliationService';
+import { ReconciliationService, ReconciliationTombstone } from '../services/ReconciliationService';
 
 type FakeNode = {
   uid: string;

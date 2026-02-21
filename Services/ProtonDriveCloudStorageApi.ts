@@ -6,8 +6,8 @@ import {
   type UploadMetadata
 } from '@protontech/drive-sdk';
 import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from './path-utils';
-import type { CloudUpsertResult, ICloudStorageApi, SyncIndexSnapshot } from './RxSyncService';
-import type { FileDescriptor, FolderDescriptor } from './shared-types';
+import type { CloudUpsertResult, ICloudStorageApi, SyncIndexSnapshot } from './ObsidianSyncService';
+import { FileDescriptor, FolderDescriptor } from './ObsidianVaultFileSystemReader';
 
 export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
   private readonly folderUidByPath = new Map<string, string>();

@@ -1,7 +1,7 @@
 import type { DriveEvent } from '@protontech/drive-sdk';
 import { BehaviorSubject, type Observable } from 'rxjs';
 
-import type { ReconciliationTombstone } from '../isolated-sync/ReconciliationService';
+import type { ReconciliationTombstone } from './ReconciliationService';
 import { type ProtonDriveSyncSettings } from '../model/settings';
 import type { ProtonSessionState } from '../proton/auth/ProtonSessionService';
 
