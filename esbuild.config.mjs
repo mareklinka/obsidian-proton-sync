@@ -8,7 +8,7 @@ const context = await esbuild.context({
   outfile: 'main.js',
   platform: 'browser',
   format: 'cjs',
-  sourcemap: !isProduction,
+  sourcemap: isProduction ? false : 'inline',
   minify: isProduction,
   external: ['obsidian'],
   logLevel: 'info',

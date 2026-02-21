@@ -113,6 +113,12 @@ export class SettingsService {
     await this.persist();
   }
 
+  async setSyncRoots(containerNodeUid: string, vaultRootNodeUid: string): Promise<void> {
+    this.settings.containerNodeUid = containerNodeUid;
+    this.settings.vaultRootNodeUid = vaultRootNodeUid;
+    await this.persist();
+  }
+
   async setLogging(options: {
     enableFileLogging?: boolean;
     logLevel?: ProtonDriveSyncSettings['logLevel'];

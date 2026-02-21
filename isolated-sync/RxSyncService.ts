@@ -634,6 +634,12 @@ export class RxSyncService implements ISyncService {
         if (!descriptor) {
           throw new Error(`Folder not found: ${change.path}`);
         }
+
+        const known = this.lookupByPath(change.path);
+        if (known && known.cloudId) {
+          return;
+        }
+
         const result = await this.cloudApi.createFolder(descriptor, getParentPath(change.path));
         this.upsertIndex(result, change.type);
         return;

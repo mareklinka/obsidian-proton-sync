@@ -1,11 +1,10 @@
 import { Notice, Plugin } from 'obsidian';
-import { of, type Observable, type Subscription } from 'rxjs';
+import { type Subscription } from 'rxjs';
 
 import { DEFAULT_SETTINGS, ProtonDriveSyncSettings } from './model/settings';
 import { createFileLogger, getDefaultLogFilePath, type PluginLogger } from './logger';
-import { ensureSyncRoots } from './sync-root';
 import { ObsidianVaultFileSystemReader } from './isolated-sync/ObsidianVaultFileSystemReader';
-import { RxSyncService, type SyncEngineState, type SyncIndexSnapshot } from './isolated-sync/RxSyncService';
+import { RxSyncService } from './isolated-sync/RxSyncService';
 import { ProtonDriveCloudStorageApi } from './isolated-sync/ProtonDriveCloudStorageApi';
 import type { ProtonDriveClient } from '@protontech/drive-sdk';
 import { ProtonSessionService } from './proton/auth/ProtonSessionService';
@@ -17,6 +16,7 @@ import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-b
 import { CloudReconciliationService } from './CloudReconciliationService';
 import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
 import { SettingsService } from './Services/SettingsService';
+import { SyncOrchestrationService } from './Services/SyncOrchestrationService';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   private settingsService!: SettingsService;
@@ -24,12 +24,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private driveClient: ProtonDriveClient | null = null;
   private logger!: PluginLogger;
   private settingTab: ProtonDriveSyncSettingTab | null = null;
-  private isolatedSyncService: RxSyncService | null = null;
-  private syncReader: ObsidianVaultFileSystemReader | null = null;
-  private syncSubscriptions: Subscription[] = [];
-  private sessionSubscription: Subscription | null = null;
-  private syncBootstrapInProgress = false;
-  private syncBootstrapped = false;
+  private orchestrator: SyncOrchestrationService | null = null;
   private cloudReconciliationService: CloudReconciliationService | null = null;
   private statusBarController: SyncStatusBarController | null = null;
   private readonly subscriptions: Subscription[] = [];
@@ -64,7 +59,6 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     const secretStore = new ObsidianSecretRepository(this.app);
 
     this.protonSessionService = new ProtonSessionService(secretStore, this.manifest.version);
-    this.refreshStatusBarBinding();
     const protonAccount = new ProtonAccount(this.protonSessionService);
     this.driveClient = createProtonDriveClient(
       protonAccount,
@@ -77,31 +71,41 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       logger: this.logger,
       vault: this.app.vault,
       settingsService: this.settingsService,
-      getSyncReader: () => this.syncReader,
-      getSyncService: () => this.isolatedSyncService
+      getSyncReader: () => this.orchestrator?.getReader() ?? null,
+      getSyncService: () => this.orchestrator?.getSyncService() ?? null
     });
 
-    this.sessionSubscription = this.protonSessionService.currentSession$.subscribe(session => {
-      void this.settingsService.applyAuthResult(session);
-
-      if (session.state === 'ok') {
-        if (!this.syncBootstrapped && !this.syncBootstrapInProgress) {
-          this.syncBootstrapInProgress = true;
-          void this.bootstrapSyncFromSession().finally(() => {
-            this.syncBootstrapInProgress = false;
-          });
+    this.orchestrator = new SyncOrchestrationService({
+      vault: this.app.vault,
+      logger: this.logger,
+      settingsService: this.settingsService,
+      sessionService: this.protonSessionService,
+      cloudReconciliationService: this.cloudReconciliationService,
+      getDriveClient: () => this.driveClient,
+      createReader: () =>
+        new ObsidianVaultFileSystemReader(this.app.vault, {
+          ignoredPathPrefixes: []
+        }),
+      createSyncService: (vaultRootNodeUid, reader) => {
+        if (!this.driveClient) {
+          throw new Error('Drive client unavailable while creating sync service.');
         }
-        return;
-      }
 
-      if (session.state === 'disconnected' || session.state === 'logged-out') {
-        this.cloudReconciliationService?.reset();
-        this.syncBootstrapped = false;
-        this.disposeIsolatedSync();
-      }
+        const cloudApi = new ProtonDriveCloudStorageApi(this.driveClient, vaultRootNodeUid, this.logger, () =>
+          this.settingsService.buildInitialSyncSnapshot()
+        );
+
+        return new RxSyncService(reader, cloudApi);
+      },
+      maxBufferedChanges: 5000
     });
 
-    await this.protonSessionService.loadSession();
+    this.statusBarController = createSyncStatusBar(this, {
+      loginState$: this.protonSessionService.authState$,
+      syncState$: this.orchestrator.syncState$,
+      reconcileState$: this.orchestrator.reconcileState$
+    });
+    await this.orchestrator.start();
 
     this.settingTab = this.setupSettingsTab(this);
   }
@@ -110,14 +114,11 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.logger.info('Unloading Proton Drive Sync plugin');
     this.subscriptions.forEach(subscription => subscription.unsubscribe());
     this.subscriptions.length = 0;
-    this.sessionSubscription?.unsubscribe();
-    this.sessionSubscription = null;
-    this.protonSessionService?.dispose();
-    this.disposeIsolatedSync();
-    this.cloudReconciliationService?.dispose();
-    this.cloudReconciliationService = null;
+    await this.orchestrator?.dispose();
+    this.orchestrator = null;
     this.statusBarController?.dispose();
     this.statusBarController = null;
+    this.protonSessionService?.dispose();
   }
 
   async signIn(credentials: {
@@ -142,11 +143,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   async disconnect(): Promise<void> {
     this.logger.info('Disconnecting from Proton Drive');
     this.protonSessionService.signOut();
-    this.cloudReconciliationService?.reset();
-    this.syncBootstrapped = false;
-
-    await this.settingsService.resetForDisconnect();
-    this.disposeIsolatedSync();
+    await this.orchestrator?.disconnect();
     new Notice('Disconnected from Proton Drive.');
   }
 
@@ -173,130 +170,5 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.addSettingTab(settingTab);
 
     return settingTab;
-  }
-
-  private async bootstrapSyncFromSession(): Promise<void> {
-    if (!this.driveClient || !this.cloudReconciliationService) {
-      return;
-    }
-
-    try {
-      await this.cloudReconciliationService.run(async () => {
-        const vaultName = this.app.vault.getName();
-        const info = await ensureSyncRoots(this.driveClient!, this.settings, vaultName, this.logger);
-        const initialSnapshot = await this.cloudReconciliationService!.runInitialReconciliation(info.vaultRootNodeUid);
-
-        this.initializeIsolatedSync(initialSnapshot);
-        await this.cloudReconciliationService!.ensureCloudEventSubscription();
-        this.syncBootstrapped = true;
-        this.logger.info('Sync roots ready', { ...info });
-      });
-    } catch (error) {
-      this.syncBootstrapped = false;
-      this.logger.error('Failed to ensure sync roots', {}, error);
-      new Notice('Failed to initialize Proton Drive sync bootstrap.');
-    }
-  }
-
-  private initializeIsolatedSync(initialSnapshot?: SyncIndexSnapshot): void {
-    if (this.isolatedSyncService || this.syncReader || !this.driveClient || !this.settings.vaultRootNodeUid) {
-      return;
-    }
-
-    const reader = new ObsidianVaultFileSystemReader(this.app.vault, {
-      ignoredPathPrefixes: []
-    });
-
-    const cloudApi = new ProtonDriveCloudStorageApi(this.driveClient, this.settings.vaultRootNodeUid, this.logger, () =>
-      this.settingsService.buildInitialSyncSnapshot()
-    );
-
-    const syncService = new RxSyncService(reader, cloudApi);
-    syncService.initializeIndex(initialSnapshot ?? this.settingsService.buildInitialSyncSnapshot());
-    this.refreshStatusBarBinding(syncService.syncState$);
-
-    this.syncSubscriptions.push(
-      reader.changes$.subscribe(change => {
-        if (this.cloudReconciliationService?.shouldSuppressLocalChange(change.path, change.oldPath)) {
-          this.logger.debug('Suppressed local change generated by remote apply', {
-            type: change.type,
-            path: change.path,
-            oldPath: change.oldPath
-          });
-          return;
-        }
-
-        const changeId = syncService.enqueueChange(change);
-        this.logger.debug('Isolated sync change enqueued', {
-          changeId,
-          type: change.type,
-          path: change.path,
-          oldPath: change.oldPath
-        });
-      })
-    );
-
-    this.syncSubscriptions.push(
-      syncService.dispatchResults$.subscribe(result => {
-        if (result.success) {
-          this.logger.info('Isolated sync operation dispatched to Proton Drive', {
-            changeId: result.changeId
-          });
-          return;
-        }
-
-        this.logger.warn('Isolated sync operation failed', {
-          changeId: result.changeId,
-          retryScheduled: result.retryScheduled,
-          retryable: result.retryable,
-          errorMessage: result.errorMessage
-        });
-      })
-    );
-
-    this.syncSubscriptions.push(
-      syncService.mapChanges$.subscribe(event => {
-        void this.settingsService.applySyncSnapshot(event.snapshot);
-
-        this.logger.debug('Isolated sync index snapshot updated', {
-          sequence: event.seq,
-          reason: event.reason,
-          byPathCount: Object.keys(event.snapshot.byPath).length,
-          byCloudIdCount: Object.keys(event.snapshot.byCloudId).length
-        });
-      })
-    );
-
-    reader.start();
-    syncService.start();
-
-    this.syncReader = reader;
-    this.isolatedSyncService = syncService;
-
-    this.logger.info('Isolated sync queue initialized with Proton cloud service');
-  }
-
-  private disposeIsolatedSync(): void {
-    for (const subscription of this.syncSubscriptions) {
-      subscription.unsubscribe();
-    }
-    this.syncSubscriptions = [];
-
-    this.isolatedSyncService?.dispose();
-    this.syncReader?.dispose();
-
-    this.isolatedSyncService = null;
-    this.syncReader = null;
-    this.cloudReconciliationService?.reset();
-    this.refreshStatusBarBinding();
-  }
-
-  private refreshStatusBarBinding(syncState$: Observable<SyncEngineState> = of('idle')): void {
-    this.statusBarController?.dispose();
-    this.statusBarController = createSyncStatusBar(this, {
-      loginState$: this.protonSessionService.authState$,
-      syncState$,
-      reconcileState$: this.cloudReconciliationService?.state$ ?? of('idle')
-    });
   }
 }
