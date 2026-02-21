@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from '../model/setting
 import { ProtonDriveLoginModal } from '../login-modal';
 import ProtonDriveSyncPlugin from '../main';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
+import { SettingsService } from '../Services/SettingsService';
 
 export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   private readonly disconnectSubject = new Subject<void>();
@@ -22,13 +23,16 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   private readonly loggingChangedSubject = new Subject<{ isEnabled: boolean; maxSize: number; minLevel: LogLevel }>();
   public readonly loggingChanged$ = this.loggingChangedSubject.asObservable();
 
-  constructor(private readonly plugin: ProtonDriveSyncPlugin) {
+  constructor(
+    plugin: ProtonDriveSyncPlugin,
+    private readonly settingsService: SettingsService
+  ) {
     super(plugin.app, plugin);
   }
 
   async display(): Promise<void> {
     const { containerEl } = this;
-    let settings = await this.loadSettings();
+    let settings = this.settingsService.snapshot();
 
     containerEl.empty();
 
@@ -66,14 +70,11 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
           .onClick(() => {
             const modal = new ProtonDriveLoginModal(this.app);
             modal.login$.pipe(take(1)).subscribe(async credentials => {
-              settings.accountEmail = credentials.email;
-
-              await this.saveSettings(settings);
-              this.emitLogSettingsChange(settings);
+              await this.settingsService.setAccountEmail(credentials.email);
 
               this.loginSubject.next(credentials);
 
-              settings = await this.loadSettings();
+              settings = this.settingsService.snapshot();
               connectionSetting.setDesc(this.buildStatusDescription(settings));
             });
             modal.open();
@@ -87,9 +88,9 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
       .setName('Enable file logging')
       .setDesc('Write debug logs to a file inside the vault for troubleshooting.')
       .addToggle(toggle =>
-        toggle.setValue(settings.enableFileLogging).onChange(value => {
-          settings.enableFileLogging = value;
-          this.saveSettings(settings);
+        toggle.setValue(settings.enableFileLogging).onChange(async value => {
+          await this.settingsService.setLogging({ enableFileLogging: value });
+          settings = this.settingsService.snapshot();
           this.emitLogSettingsChange(settings);
         })
       );
@@ -106,9 +107,9 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             error: 'Error'
           })
           .setValue(settings.logLevel)
-          .onChange(value => {
-            settings.logLevel = value as LogLevel;
-            this.saveSettings(settings);
+          .onChange(async value => {
+            await this.settingsService.setLogging({ logLevel: value as LogLevel });
+            settings = this.settingsService.snapshot();
             this.emitLogSettingsChange(settings);
           })
       );
@@ -120,9 +121,12 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         text
           .setPlaceholder('1024')
           .setValue(String(settings.logMaxSizeKb))
-          .onChange(value => {
-            settings.logMaxSizeKb = Number(value);
-            this.saveSettings(settings);
+          .onChange(async value => {
+            const parsed = Number(value);
+            await this.settingsService.setLogging({
+              logMaxSizeKb: Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.logMaxSizeKb
+            });
+            settings = this.settingsService.snapshot();
             this.emitLogSettingsChange(settings);
           })
       );
@@ -161,16 +165,6 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
     return fragment;
   }
-
-  private async loadSettings(): Promise<ProtonDriveSyncSettings> {
-    return Object.assign({}, DEFAULT_SETTINGS, await this.plugin.loadData());
-  }
-
-  private async saveSettings(settings: ProtonDriveSyncSettings): Promise<void> {
-    await this.plugin.saveData(settings);
-    await this.display();
-  }
-
   private emitLogSettingsChange(settints: ProtonDriveSyncSettings): void {
     this.loggingChangedSubject.next({
       isEnabled: settints.enableFileLogging,

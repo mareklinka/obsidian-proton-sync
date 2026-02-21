@@ -1,10 +1,10 @@
 import type { Plugin } from 'obsidian';
 import { combineLatest, map, type Observable } from 'rxjs';
 
-import type { ReconcileState } from '../CloudReconciliationQueue';
 import type { SyncEngineState } from '../isolated-sync/RxSyncService';
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
+import { ReconcileState } from '../CloudReconciliationService';
 
 type StatusBarSyncState = 'idle' | 'reconciling' | 'syncing' | 'retrying' | 'error';
 
