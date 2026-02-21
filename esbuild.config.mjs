@@ -10,6 +10,7 @@ const context = await esbuild.context({
   format: 'cjs',
   sourcemap: isProduction ? false : 'inline',
   minify: isProduction,
+  inject: ['polyfills/buffer.js'],
   external: ['obsidian'],
   logLevel: 'info',
   treeShaking: true
