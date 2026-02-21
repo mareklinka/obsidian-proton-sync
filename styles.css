@@ -43,3 +43,12 @@
 .proton-sync-disclosure__title {
   font-weight: 600;
 }
+
+.proton-sync-status-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.proton-sync-status-list li + li {
+  margin-top: 4px;
+}

@@ -4,8 +4,8 @@ export interface ProtonSession {
   accessToken: string;
   refreshToken: string;
   scope: string | null;
-  createdAt: string;
-  updatedAt: string;
-  expiresAt: number;
-  lastRefreshAt: number;
+  createdAt: Date;
+  updatedAt: Date;
+  expiresAt: Date;
+  lastRefreshAt: Date;
 }

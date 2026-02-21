@@ -16,9 +16,9 @@ import { ObsidianHttpClient } from './proton/drive/ObsidianHttpClient';
 import { ReconciliationService, type ReconciliationTombstone } from './isolated-sync/ReconciliationService';
 import { normalizePath, toCanonicalPathKey } from './isolated-sync/path-utils';
 import type { DriveEvent, LatestEventIdProvider } from '@protontech/drive-sdk';
-import { createSyncStatusBar, type SyncStatusBarController } from './status-bar';
+import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-bar';
 import { CloudReconciliationQueue } from './CloudReconciliationQueue';
-import { ProtonDriveSyncSettingTab } from './settings-tab';
+import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   settings!: ProtonDriveSyncSettings;
@@ -593,9 +593,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     if (sessionState.state === 'ok') {
       this.settings.connectionStatus = 'connected';
       this.settings.lastLoginError = null;
-      this.settings.lastLoginAt = sessionState.session.updatedAt;
-      this.settings.lastRefreshAt = new Date(sessionState.session.lastRefreshAt).toISOString();
-      this.settings.sessionExpiresAt = new Date(sessionState.session.expiresAt).toISOString();
+      this.settings.lastLoginAt = sessionState.session.updatedAt.getTime();
+      this.settings.lastRefreshAt = sessionState.session.lastRefreshAt.getTime();
+      this.settings.sessionExpiresAt = sessionState.session.expiresAt.getTime();
     } else {
       this.settings.connectionStatus = 'disconnected';
       this.settings.sessionExpiresAt = null;

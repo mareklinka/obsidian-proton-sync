@@ -62,7 +62,7 @@ export class ProtonSessionService {
         return of(sessionState);
       }
 
-      const msUntilExpiry = sessionState.session.expiresAt - new Date().getTime();
+      const msUntilExpiry = sessionState.session.expiresAt.getTime() - new Date().getTime();
 
       return merge(
         of<ProtonSessionState>(sessionState),
@@ -148,10 +148,10 @@ export class ProtonSessionService {
           accessToken: authResponse.AccessToken,
           refreshToken: authResponse.RefreshToken,
           scope: authResponse.Scope || null,
-          createdAt: now.toISOString(),
-          updatedAt: now.toISOString(),
-          expiresAt: now.getTime() + authResponse.ExpiresIn * 1000,
-          lastRefreshAt: now.getTime()
+          createdAt: now,
+          updatedAt: now,
+          expiresAt: new Date(now.getTime() + authResponse.ExpiresIn * 1000),
+          lastRefreshAt: now
         }
       });
 
@@ -231,9 +231,9 @@ export class ProtonSessionService {
         accessToken: response.AccessToken,
         refreshToken: response.RefreshToken,
         scope: response.Scope || session.scope,
-        updatedAt: refreshedAt.toISOString(),
-        expiresAt: refreshedAt.getTime() + response.ExpiresIn * 1000,
-        lastRefreshAt: refreshedAt.getTime()
+        updatedAt: refreshedAt,
+        expiresAt: new Date(refreshedAt.getTime() + response.ExpiresIn * 1000),
+        lastRefreshAt: refreshedAt
       }
     });
   }

@@ -1,11 +1,11 @@
 import type { Plugin } from 'obsidian';
 import { combineLatest, map, type Observable } from 'rxjs';
 
-import type { ReconcileState } from './CloudReconciliationQueue';
-import type { SyncEngineState } from './isolated-sync/RxSyncService';
-import type { ProtonAuthStatus } from './proton/auth/ProtonSessionService';
+import type { ReconcileState } from '../CloudReconciliationQueue';
+import type { SyncEngineState } from '../isolated-sync/RxSyncService';
+import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import { toLoginIcon, toLoginLabel } from './ui-helpers';
 
-export type StatusBarLoginState = ProtonAuthStatus;
 type StatusBarSyncState = 'idle' | 'reconciling' | 'syncing' | 'retrying' | 'error';
 
 export interface SyncStatusBarController {
@@ -15,7 +15,7 @@ export interface SyncStatusBarController {
 export function createSyncStatusBar(
   plugin: Plugin,
   input: {
-    loginState$: Observable<StatusBarLoginState>;
+    loginState$: Observable<ProtonAuthStatus>;
     syncState$: Observable<SyncEngineState>;
     reconcileState$: Observable<ReconcileState>;
   }
@@ -72,34 +72,6 @@ function toEffectiveSyncState(syncState: SyncEngineState, reconcileState: Reconc
   }
 
   return 'idle';
-}
-
-function toLoginLabel(state: StatusBarLoginState): string {
-  switch (state) {
-    case 'connected':
-      return 'Connected';
-    case 'connecting':
-      return 'Connecting';
-    case 'error':
-      return 'Error';
-    case 'disconnected':
-    default:
-      return 'Disconnected';
-  }
-}
-
-function toLoginIcon(state: StatusBarLoginState): string {
-  switch (state) {
-    case 'connected':
-      return '🟢';
-    case 'connecting':
-      return '⏳';
-    case 'error':
-      return '⚠️';
-    case 'disconnected':
-    default:
-      return '⚫';
-  }
 }
 
 function toSyncLabel(state: StatusBarSyncState): string {

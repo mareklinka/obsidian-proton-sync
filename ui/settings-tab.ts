@@ -1,10 +1,11 @@
 import { PluginSettingTab, Setting } from 'obsidian';
 import { Subject, take } from 'rxjs';
 
-import { type LogLevel } from './logger';
-import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from './model/settings';
-import { ProtonDriveLoginModal } from './login-modal';
-import ProtonDriveSyncPlugin from './main';
+import { type LogLevel } from '../logger';
+import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from '../model/settings';
+import { ProtonDriveLoginModal } from '../login-modal';
+import ProtonDriveSyncPlugin from '../main';
+import { toLoginIcon, toLoginLabel } from './ui-helpers';
 
 export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   private readonly disconnectSubject = new Subject<void>();
@@ -129,24 +130,34 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
   private buildStatusDescription(settings: ProtonDriveSyncSettings): DocumentFragment {
     const fragment = document.createDocumentFragment();
+    const list = document.createElement('ul');
+    list.className = 'proton-sync-status-list';
 
-    fragment.appendText(`Status: ${settings.connectionStatus}`);
+    const appendLine = (text: string): void => {
+      const item = document.createElement('li');
+      item.textContent = text;
+      list.appendChild(item);
+    };
+
+    appendLine(`Status: ${toLoginIcon(settings.connectionStatus)} ${toLoginLabel(settings.connectionStatus)}`);
 
     if (settings.lastLoginAt) {
-      fragment.appendText(` • Last login: ${settings.lastLoginAt}`);
+      appendLine(`Last login: ${new Date(settings.lastLoginAt).toLocaleString()}`);
     }
 
     if (settings.lastRefreshAt) {
-      fragment.appendText(` • Last refresh: ${settings.lastRefreshAt}`);
+      appendLine(`Last refresh: ${new Date(settings.lastRefreshAt).toLocaleString()}`);
     }
 
     if (settings.sessionExpiresAt) {
-      fragment.appendText(` • Expires: ${settings.sessionExpiresAt}`);
+      appendLine(`Expires: ${new Date(settings.sessionExpiresAt).toLocaleString()}`);
     }
 
     if (settings.lastLoginError) {
-      fragment.appendText(` • Error: ${settings.lastLoginError}`);
+      appendLine(`Error: ${settings.lastLoginError}`);
     }
+
+    fragment.appendChild(list);
 
     return fragment;
   }

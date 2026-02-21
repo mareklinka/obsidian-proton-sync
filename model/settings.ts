@@ -1,12 +1,13 @@
 import type { LogLevel } from '../logger';
+import { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 
 export interface ProtonDriveSyncSettings {
   accountEmail: string;
-  connectionStatus: 'disconnected' | 'pending' | 'connected' | 'error';
-  lastLoginAt: string | null;
+  connectionStatus: ProtonAuthStatus;
+  lastLoginAt: number | null;
+  lastRefreshAt: number | null;
+  sessionExpiresAt: number | null;
   lastLoginError: string | null;
-  lastRefreshAt: string | null;
-  sessionExpiresAt: string | null;
   containerNodeUid: string | null;
   vaultRootNodeUid: string | null;
   pathMap: Record<string, SyncMapEntry>;
