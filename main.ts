@@ -96,7 +96,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
           throw new Error('Drive client unavailable while creating sync service.');
         }
 
-        const cloudApi = new ProtonDriveCloudStorageApi(this.driveClient, vaultRootNodeUid, this.logger, () =>
+        const cloudApi = new ProtonDriveCloudStorageApi(this.driveClient, vaultRootNodeUid, () =>
           this.syncIndexStateService.snapshot()
         );
 

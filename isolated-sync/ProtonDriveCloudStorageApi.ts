@@ -9,10 +9,6 @@ import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from '.
 import type { CloudUpsertResult, ICloudStorageApi, SyncIndexSnapshot } from './RxSyncService';
 import type { FileDescriptor, FolderDescriptor } from './shared-types';
 
-export interface ProtonDriveCloudStorageApiOptions {
-  strictDelete?: boolean;
-}
-
 export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
   private readonly folderUidByPath = new Map<string, string>();
   private readonly nodeNameByUid = new Map<string, string>();
@@ -21,8 +17,7 @@ export class ProtonDriveCloudStorageApi implements ICloudStorageApi {
   constructor(
     private readonly driveClient: ProtonDriveClient,
     private readonly vaultRootNodeUid: string,
-    private readonly snapshotProvider: () => SyncIndexSnapshot,
-    options: ProtonDriveCloudStorageApiOptions = {}
+    private readonly snapshotProvider: () => SyncIndexSnapshot
   ) {
     this.folderUidByPath.set(toCanonicalPathKey(''), this.vaultRootNodeUid);
   }

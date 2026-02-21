@@ -68,7 +68,7 @@ export class CloudReconciliationService {
     }
 
     const driveClient = this.input.getDriveClient();
-    const vaultRootNodeUid = this.input.settingsService.getVaultRootNodeUid();
+    const { vaultRootNodeUid } = this.input.settingsService.getSyncRoots();
 
     if (!driveClient || !vaultRootNodeUid) {
       return;
@@ -130,7 +130,7 @@ export class CloudReconciliationService {
 
   private async runCloudReconciliationPass(): Promise<void> {
     const driveClient = this.input.getDriveClient();
-    const vaultRootNodeUid = this.input.settingsService.getVaultRootNodeUid();
+    const { vaultRootNodeUid } = this.input.settingsService.getSyncRoots();
     const syncReader = this.input.getSyncReader();
     const syncService = this.input.getSyncService();
 

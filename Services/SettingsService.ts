@@ -26,10 +26,6 @@ export class SettingsService {
     return this.settings;
   }
 
-  getVaultRootNodeUid(): string | null {
-    return this.settings.vaultRootNodeUid;
-  }
-
   getLatestEventId(treeEventScopeId: string): string | null {
     const id = this.settings.latestEventIds[treeEventScopeId];
     if (!id || !id.trim()) {
@@ -52,6 +48,13 @@ export class SettingsService {
     this.settings.containerNodeUid = containerNodeUid;
     this.settings.vaultRootNodeUid = vaultRootNodeUid;
     await this.persist();
+  }
+
+  getSyncRoots(): { containerNodeUid: string | null; vaultRootNodeUid: string | null } {
+    return {
+      containerNodeUid: this.settings.containerNodeUid,
+      vaultRootNodeUid: this.settings.vaultRootNodeUid
+    };
   }
 
   async setSyncMaps(

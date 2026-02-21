@@ -3,7 +3,7 @@ import { Subject, take } from 'rxjs';
 
 import { type LogLevel } from '../logger';
 import { DEFAULT_SETTINGS, type ProtonDriveSyncSettings } from '../model/settings';
-import { ProtonDriveLoginModal } from '../login-modal';
+import { ProtonDriveLoginModal } from './login-modal';
 import ProtonDriveSyncPlugin from '../main';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 import { SettingsService } from '../Services/SettingsService';
