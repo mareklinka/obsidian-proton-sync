@@ -9,6 +9,7 @@ import {
   type FileDownloader
 } from '@protontech/drive-sdk';
 import type { TAbstractFile, TFile, TFolder, Vault } from 'obsidian';
+import { LocalChangeSuppressionService, type LocalSuppressionLockOptions } from './LocalChangeSuppressionService';
 
 export interface ReconciliationOptions {
   ignoredPathPrefixes?: string[];
@@ -98,6 +99,7 @@ export class ReconciliationService {
     private readonly vault: Vault,
     private readonly driveClient: DriveLike,
     private readonly vaultRootNodeUid: string,
+    private readonly localChangeSuppressionService: LocalChangeSuppressionService,
     private readonly logger?: PluginLogger,
     options: ReconciliationOptions = {}
   ) {
@@ -259,8 +261,17 @@ export class ReconciliationService {
         continue;
       }
 
-      await this.ensureLocalFolderPath(getParentPath(newPath));
-      await this.vault.rename(localOld, newPath);
+      await this.withSuppressionLock(
+        oldPath,
+        {
+          subtree: entry.entityType === 'folder',
+          aliasPaths: [newPath]
+        },
+        async () => {
+          await this.ensureLocalFolderPath(getParentPath(newPath));
+          await this.vault.rename(localOld, newPath);
+        }
+      );
       stats.localMovesApplied += 1;
     }
   }
@@ -514,27 +525,31 @@ export class ReconciliationService {
       return;
     }
 
-    await this.vault.delete(existing, true);
+    await this.withSuppressionLock(path, { subtree: isVaultFolder(existing) }, async () => {
+      await this.vault.delete(existing, true);
+    });
   }
 
   private async writeLocalBinary(path: string, bytes: ArrayBuffer): Promise<void> {
-    const parent = getParentPath(path);
-    if (parent) {
-      await this.ensureLocalFolderPath(parent);
-    }
+    await this.withSuppressionLock(path, {}, async () => {
+      const parent = getParentPath(path);
+      if (parent) {
+        await this.ensureLocalFolderPath(parent);
+      }
 
-    const existing = this.vault.getAbstractFileByPath(path);
-    if (!existing) {
-      await this.vault.createBinary(path, bytes);
-      return;
-    }
+      const existing = this.vault.getAbstractFileByPath(path);
+      if (!existing) {
+        await this.vault.createBinary(path, bytes);
+        return;
+      }
 
-    if (isVaultFile(existing)) {
-      await this.vault.modifyBinary(existing, bytes);
-      return;
-    }
+      if (isVaultFile(existing)) {
+        await this.vault.modifyBinary(existing, bytes);
+        return;
+      }
 
-    throw new Error(`Cannot write file because path points to a folder: ${path}`);
+      throw new Error(`Cannot write file because path points to a folder: ${path}`);
+    });
   }
 
   private async ensureLocalFolderPath(path: string): Promise<void> {
@@ -556,7 +571,27 @@ export class ReconciliationService {
         continue;
       }
 
-      await this.vault.createFolder(current);
+      await this.withSuppressionLock(current, { subtree: true }, async () => {
+        await this.vault.createFolder(current);
+      });
+    }
+  }
+
+  private async withSuppressionLock<T>(
+    path: string,
+    options: LocalSuppressionLockOptions,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const normalizedPath = normalizePath(path);
+    if (!this.localChangeSuppressionService || !normalizedPath) {
+      return operation();
+    }
+
+    const lock = this.localChangeSuppressionService.acquirePathLock(normalizedPath, options);
+    try {
+      return await operation();
+    } finally {
+      lock.release();
     }
   }
 

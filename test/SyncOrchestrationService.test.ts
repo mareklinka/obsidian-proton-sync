@@ -234,4 +234,74 @@ describe('SyncOrchestrationService', () => {
 
     await service.dispose();
   });
+
+  it('drops local changes while path is suppressed', async () => {
+    const runInitialReconciliation = vi.fn(async () => ({ byPath: {}, byCloudId: {} }) as SyncIndexSnapshot);
+    const driveClient = createDriveClient();
+
+    const shouldSuppress = vi.fn(() => true);
+
+    const service = new SyncOrchestrationService({
+      vault: {
+        getName: () => 'TestVault'
+      } as never,
+      logger: logger as never,
+      settingsService,
+      syncIndexStateService,
+      sessionService: {
+        currentSession$: sessionSubject.asObservable(),
+        loadSession: vi.fn(async () => {
+          sessionSubject.next({ state: 'disconnected' });
+        })
+      } as never,
+      localChangeSuppressionService: {
+        shouldSuppress
+      } as never,
+      cloudReconciliationService: {
+        state$: reconcileStateSubject.asObservable(),
+        reset: vi.fn(),
+        dispose: vi.fn(),
+        run: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
+        runInitialReconciliation,
+        ensureCloudEventSubscription: vi.fn(async () => {})
+      } as never,
+      getDriveClient: () => driveClient as never,
+      createReader: () => reader as never,
+      createSyncService: () => syncService as never,
+      maxBufferedChanges: 100
+    });
+
+    await service.start();
+
+    reader.emit({
+      type: 'file-edited',
+      entityType: 'file',
+      path: 'foo.md',
+      occurredAt: Date.now()
+    });
+
+    sessionSubject.next({
+      state: 'ok',
+      session: {
+        uid: 'uid',
+        userId: 'user',
+        accessToken: 'token',
+        refreshToken: 'refresh',
+        scope: 'scope',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+        lastRefreshAt: new Date()
+      }
+    });
+
+    for (let attempt = 0; attempt < 100 && runInitialReconciliation.mock.calls.length === 0; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+
+    expect(shouldSuppress).toHaveBeenCalled();
+    expect(syncService.enqueueChange).not.toHaveBeenCalled();
+
+    await service.dispose();
+  });
 });

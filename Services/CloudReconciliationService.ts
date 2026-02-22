@@ -4,7 +4,6 @@ import { BehaviorSubject, Subject, type Observable, type Subscription } from 'rx
 
 import { ReconciliationService } from './ReconciliationService';
 import type { ObsidianVaultFileSystemReader } from './ObsidianVaultFileSystemReader';
-import { normalizePath, toCanonicalPathKey } from './path-utils';
 import type { ObsidianSyncService, SyncIndexSnapshot } from './ObsidianSyncService';
 import type { PluginLogger } from '../logger';
 import { SettingsService } from './SettingsService';
@@ -115,9 +114,6 @@ export class CloudReconciliationService {
       return;
     }
 
-    const before = this.captureLocalPaths();
-    this.input.localChangeSuppressionService.beginRemoteApply();
-
     try {
       const reconciliationResult = await this.executeReconciliation(vaultRootNodeUid);
 
@@ -125,17 +121,12 @@ export class CloudReconciliationService {
       syncService.initializeIndex(reconciliationResult.snapshot);
       syncService.start();
 
-      const after = this.captureLocalPaths();
-      this.input.localChangeSuppressionService.markSuppressedPaths(this.diffTouchedLocalPaths(before, after));
-
       this.input.logger.info('Applied cloud reconciliation pass', {
         ...reconciliationResult.stats
       });
     } catch (error) {
       this.input.logger.error('Cloud reconciliation pass failed', {}, error);
       throw error;
-    } finally {
-      this.input.localChangeSuppressionService.endRemoteApply();
     }
   }
 
@@ -180,6 +171,7 @@ export class CloudReconciliationService {
       this.input.vault,
       driveClient,
       vaultRootNodeUid,
+      this.input.localChangeSuppressionService,
       this.input.logger,
       {
         previousSnapshot,
@@ -194,40 +186,6 @@ export class CloudReconciliationService {
 
     return reconciliationResult;
   }
-
-  private captureLocalPaths(): Set<string> {
-    const paths = new Set<string>();
-
-    for (const entry of this.input.vault.getAllLoadedFiles()) {
-      const normalized = normalizePath(entry.path ?? '');
-      if (!normalized) {
-        continue;
-      }
-
-      paths.add(toCanonicalPathKey(normalized));
-    }
-
-    return paths;
-  }
-
-  private diffTouchedLocalPaths(before: Set<string>, after: Set<string>): string[] {
-    const touched = new Set<string>();
-
-    for (const path of before) {
-      if (!after.has(path)) {
-        touched.add(path);
-      }
-    }
-
-    for (const path of after) {
-      if (!before.has(path)) {
-        touched.add(path);
-      }
-    }
-
-    return Array.from(touched);
-  }
-
   reset(): void {
     this.cloudEventSubscription?.dispose();
     this.cloudEventSubscription = null;

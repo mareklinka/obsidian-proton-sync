@@ -7,27 +7,66 @@ export type LocalChangeSuppressionServiceOptions = {
   now?: () => number;
 };
 
+export type LocalSuppressionLock = {
+  id: number;
+  release: () => void;
+};
+
+export type LocalSuppressionLockOptions = {
+  subtree?: boolean;
+  aliasPaths?: string[];
+};
+
+type LockEntry = {
+  id: number;
+  canonicalPath: string;
+  subtree: boolean;
+  aliases: Set<string>;
+};
+
 export class LocalChangeSuppressionService {
   private readonly suppressedLocalPathsUntil = new Map<string, number>();
   private readonly localSuppressionTtlMs: number;
   private readonly now: () => number;
-  private applyingRemoteChanges = false;
+  private readonly locks = new Map<number, LockEntry>();
+  private nextLockId = 0;
 
   constructor(options: LocalChangeSuppressionServiceOptions = {}) {
     this.localSuppressionTtlMs = options.localSuppressionTtlMs ?? DEFAULT_LOCAL_SUPPRESSION_TTL_MS;
     this.now = options.now ?? (() => Date.now());
   }
 
-  beginRemoteApply(): void {
-    this.applyingRemoteChanges = true;
+  acquirePathLock(path: string, options: LocalSuppressionLockOptions = {}): LocalSuppressionLock {
+    const canonicalPath = toCanonicalPathKey(path);
+    const id = this.nextLockId + 1;
+    this.nextLockId = id;
+
+    const aliases = new Set<string>();
+    for (const aliasPath of options.aliasPaths ?? []) {
+      aliases.add(toCanonicalPathKey(aliasPath));
+    }
+
+    this.locks.set(id, {
+      id,
+      canonicalPath,
+      subtree: options.subtree ?? false,
+      aliases
+    });
+
+    return {
+      id,
+      release: () => {
+        this.releaseLock(id);
+      }
+    };
   }
 
-  endRemoteApply(): void {
-    this.applyingRemoteChanges = false;
+  releaseLock(id: number): void {
+    this.locks.delete(id);
   }
 
   shouldSuppress(path: string, oldPath?: string): boolean {
-    if (this.applyingRemoteChanges) {
+    if (this.matchesActiveLock(path, oldPath)) {
       return true;
     }
 
@@ -48,6 +87,10 @@ export class LocalChangeSuppressionService {
     return false;
   }
 
+  getActiveLockCount(): number {
+    return this.locks.size;
+  }
+
   markSuppressedPaths(paths: string[]): void {
     if (paths.length === 0) {
       return;
@@ -61,7 +104,49 @@ export class LocalChangeSuppressionService {
 
   reset(): void {
     this.suppressedLocalPathsUntil.clear();
-    this.applyingRemoteChanges = false;
+    this.locks.clear();
+  }
+
+  private matchesActiveLock(path: string, oldPath?: string): boolean {
+    const canonicalPath = toCanonicalPathKey(path);
+    const canonicalOldPath = oldPath ? toCanonicalPathKey(oldPath) : null;
+
+    for (const lock of this.locks.values()) {
+      if (this.matchesLock(lock, canonicalPath)) {
+        return true;
+      }
+
+      if (canonicalOldPath && this.matchesLock(lock, canonicalOldPath)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private matchesLock(lock: LockEntry, candidatePath: string): boolean {
+    if (!candidatePath) {
+      return false;
+    }
+
+    if (candidatePath === lock.canonicalPath || lock.aliases.has(candidatePath)) {
+      return true;
+    }
+
+    if (lock.subtree) {
+      const prefix = `${lock.canonicalPath}/`;
+      if (candidatePath.startsWith(prefix)) {
+        return true;
+      }
+
+      for (const alias of lock.aliases) {
+        if (candidatePath.startsWith(`${alias}/`)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   private pruneExpiredSuppressions(): void {
