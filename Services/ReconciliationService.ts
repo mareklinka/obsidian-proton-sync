@@ -6,7 +6,11 @@ import {
   type MaybeNode,
   type UploadMetadata,
   type FileUploader,
-  type FileDownloader
+  type FileDownloader,
+  Revision,
+  NodeOrUid,
+  RevisionOrUid,
+  RevisionState
 } from '@protontech/drive-sdk';
 import type { TAbstractFile, TFile, TFolder, Vault } from 'obsidian';
 import { LocalChangeSuppressionService, type LocalSuppressionLockOptions } from './LocalChangeSuppressionService';
@@ -73,6 +77,8 @@ type NodeResult = {
 };
 
 interface DriveLike {
+  iterateRevisions(nodeUid: NodeOrUid, signal?: AbortSignal): AsyncGenerator<Revision>;
+  deleteRevision(revisionUid: RevisionOrUid): Promise<void>;
   iterateFolderChildren(parentNodeUid: string, filterOptions?: { type?: NodeType }): AsyncGenerator<MaybeNode>;
   createFolder(parentNodeUid: string, name: string, modificationTime?: Date): Promise<MaybeNode>;
   getFileUploader(parentFolderUid: string, name: string, metadata: UploadMetadata): Promise<FileUploader>;
@@ -388,13 +394,32 @@ export class ReconciliationService {
         stats.comparedFiles += 1;
 
         if (local.modifiedAt > remote.modifiedAt + this.modifiedAtToleranceMs) {
-          const uploadedUid = await this.uploadLocalFileAsRevision(path, remote.uid);
-          remoteFiles.set(key, {
-            path,
-            uid: uploadedUid,
-            modifiedAt: local.modifiedAt
-          });
-          stats.remoteFilesCreatedOrUpdated += 1;
+          try {
+            const uploadedUid = await this.uploadLocalFileAsRevision(path, remote.uid);
+            remoteFiles.set(key, {
+              path,
+              uid: uploadedUid,
+              modifiedAt: local.modifiedAt
+            });
+            stats.remoteFilesCreatedOrUpdated += 1;
+          } catch (error) {
+            if (error instanceof Error && error.message.includes('Draft revision already exists for this link')) {
+              this.logger?.warn('Revision conflict detected, attempting to resolve by replacing the existing file');
+
+              await this.deleteRemoteNode(remote.uid);
+
+              const uid = await this.uploadLocalFileAsCreate(path, remoteFolders);
+
+              remoteFiles.set(key, {
+                path,
+                uid: uid,
+                modifiedAt: local.modifiedAt
+              });
+              stats.remoteFilesCreatedOrUpdated += 1;
+            }
+
+            throw error;
+          }
           continue;
         }
 
@@ -461,9 +486,11 @@ export class ReconciliationService {
 
     const bytes = await this.vault.readBinary(local);
     const metadata = this.buildUploadMetadata(path, bytes.byteLength, local.stat?.mtime ?? this.now());
+
     const uploader = await this.driveClient.getFileRevisionUploader(nodeUid, metadata);
     const controller = await uploader.uploadFromStream(this.arrayBufferToReadableStream(bytes), []);
     const completion = await controller.completion();
+
     return completion.nodeUid;
   }
 

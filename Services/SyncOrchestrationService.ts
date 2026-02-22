@@ -319,7 +319,6 @@ export class SyncOrchestrationService {
     this.input.logger.warn('Isolated sync operation failed', {
       changeId: result.changeId,
       retryScheduled: result.retryScheduled,
-      retryable: result.retryable,
       errorMessage: result.errorMessage
     });
   }

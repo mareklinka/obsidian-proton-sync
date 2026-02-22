@@ -29,7 +29,7 @@ export class CloudReconciliationService {
       vault: Vault;
       settingsService: SettingsService;
       syncIndexStateService: SyncIndexStateService;
-      getSyncReader: () => ObsidianVaultFileSystemReader | null;
+      getFileReader: () => ObsidianVaultFileSystemReader | null;
       getSyncService: () => ObsidianSyncService | null;
       localChangeSuppressionService: LocalChangeSuppressionService;
     }
@@ -107,7 +107,7 @@ export class CloudReconciliationService {
   private async runCloudReconciliationPass(): Promise<void> {
     const driveClient = this.input.getDriveClient();
     const { vaultRootNodeUid } = this.input.settingsService.getSyncRoots();
-    const syncReader = this.input.getSyncReader();
+    const syncReader = this.input.getFileReader();
     const syncService = this.input.getSyncService();
 
     if (!driveClient || !vaultRootNodeUid || !syncReader || !syncService) {

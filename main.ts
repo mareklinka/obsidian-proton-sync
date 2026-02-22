@@ -91,7 +91,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       vault: this.app.vault,
       settingsService: this.settingsService,
       syncIndexStateService: this.syncIndexStateService,
-      getSyncReader: () => this.orchestrator?.getReader() ?? null,
+      getFileReader: () => this.orchestrator?.getReader() ?? null,
       getSyncService: () => this.orchestrator?.getSyncService() ?? null,
       localChangeSuppressionService
     });

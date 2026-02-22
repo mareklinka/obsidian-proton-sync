@@ -87,7 +87,6 @@ export interface SyncDispatchResult {
   success: boolean;
   retryScheduled: boolean;
   errorMessage?: string;
-  retryable?: boolean;
 }
 
 export type SyncEngineState = 'idle' | 'syncing' | 'retrying' | 'error';
@@ -97,13 +96,11 @@ export interface SyncServiceOptions {
   sendIntervalMs?: number;
   maxOpsPerTick?: number;
   upToDateToleranceMs?: number;
-  retryMaxAttempts?: number;
   retryBaseDelayMs?: number;
   jitterRatio?: number;
   maxPendingTotal?: number;
   maxPendingPerEntity?: number;
   now?: () => number;
-  classifyError?: (error: unknown) => 'retryable' | 'non-retryable';
 }
 
 export interface ISyncService {
@@ -138,7 +135,6 @@ export const DEFAULT_DEBOUNCE_MS = 10000;
 export const DEFAULT_SEND_INTERVAL_MS = 500;
 export const DEFAULT_MAX_OPS_PER_TICK = 1;
 export const DEFAULT_UP_TO_DATE_TOLERANCE_MS = 3000;
-export const DEFAULT_RETRY_MAX_ATTEMPTS = 5;
 export const DEFAULT_RETRY_BASE_DELAY_MS = 1000;
 export const DEFAULT_JITTER_RATIO = 0.2;
 export const DEFAULT_MAX_PENDING_TOTAL = 5000;
@@ -169,7 +165,6 @@ export class ObsidianSyncService implements ISyncService {
 
   private seq = 0;
   private droppedByCompaction = 0;
-  private retried = 0;
   private failedTerminal = 0;
   private idCounter = 0;
 
@@ -177,13 +172,11 @@ export class ObsidianSyncService implements ISyncService {
   private readonly sendIntervalMs: number;
   private readonly maxOpsPerTick: number;
   private readonly upToDateToleranceMs: number;
-  private readonly retryMaxAttempts: number;
   private readonly retryBaseDelayMs: number;
   private readonly jitterRatio: number;
   private readonly maxPendingTotal: number;
   private readonly maxPendingPerEntity: number;
   private readonly now: () => number;
-  private readonly classifyError: (error: unknown) => 'retryable' | 'non-retryable';
 
   constructor(
     private readonly fsReader: IFileSystemReader,
@@ -196,13 +189,11 @@ export class ObsidianSyncService implements ISyncService {
     this.sendIntervalMs = options.sendIntervalMs ?? DEFAULT_SEND_INTERVAL_MS;
     this.maxOpsPerTick = options.maxOpsPerTick ?? DEFAULT_MAX_OPS_PER_TICK;
     this.upToDateToleranceMs = options.upToDateToleranceMs ?? DEFAULT_UP_TO_DATE_TOLERANCE_MS;
-    this.retryMaxAttempts = options.retryMaxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS;
     this.retryBaseDelayMs = options.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS;
     this.jitterRatio = options.jitterRatio ?? DEFAULT_JITTER_RATIO;
     this.maxPendingTotal = options.maxPendingTotal ?? DEFAULT_MAX_PENDING_TOTAL;
     this.maxPendingPerEntity = options.maxPendingPerEntity ?? DEFAULT_MAX_PENDING_PER_ENTITY;
     this.now = options.now ?? (() => Date.now());
-    this.classifyError = options.classifyError ?? defaultClassifyError;
 
     this.engineSub = this.engineCommands
       .pipe(
@@ -335,8 +326,7 @@ export class ObsidianSyncService implements ISyncService {
         changeId: queued.id,
         success: false,
         retryScheduled: false,
-        errorMessage: `Max pending total (${this.maxPendingTotal}) exceeded.`,
-        retryable: false
+        errorMessage: `Max pending total (${this.maxPendingTotal}) exceeded.`
       });
       return queued.id;
     }
@@ -346,8 +336,7 @@ export class ObsidianSyncService implements ISyncService {
         changeId: queued.id,
         success: false,
         retryScheduled: false,
-        errorMessage: `Max pending per entity (${this.maxPendingPerEntity}) exceeded.`,
-        retryable: false
+        errorMessage: `Max pending per entity (${this.maxPendingPerEntity}) exceeded.`
       });
       return queued.id;
     }
@@ -537,32 +526,11 @@ export class ObsidianSyncService implements ISyncService {
       this.dispatchResultsSubject.next(success);
       return success;
     } catch (error) {
-      const classification = this.classifyError(error);
-      const retryable = classification === 'retryable';
-
-      if (retryable && change.attempt < this.retryMaxAttempts) {
-        change.attempt += 1;
-        change.availableAt = this.now() + this.computeBackoffMs(change.attempt);
-        this.retried += 1;
-
-        const retryResult: SyncDispatchResult = {
-          changeId: change.id,
-          success: false,
-          retryScheduled: true,
-          retryable: true,
-          errorMessage: this.toErrorMessage(error)
-        };
-        this.setSyncState('retrying');
-        this.dispatchResultsSubject.next(retryResult);
-        return retryResult;
-      }
-
       this.failedTerminal += 1;
       const failure: SyncDispatchResult = {
         changeId: change.id,
         success: false,
         retryScheduled: false,
-        retryable,
         errorMessage: this.toErrorMessage(error)
       };
       this.setSyncState('error');
@@ -589,9 +557,24 @@ export class ObsidianSyncService implements ISyncService {
           return;
         }
 
-        const result = known
-          ? await this.cloudApi.updateFile(known.cloudId, descriptor)
-          : await this.cloudApi.createFile(descriptor, getParentPath(change.path));
+        let result: CloudUpsertResult;
+
+        if (known) {
+          try {
+            result = await this.cloudApi.updateFile(known.cloudId, descriptor);
+          } catch (error) {
+            if (error instanceof Error && error.message.includes('Draft revision already exists for this link')) {
+              await this.cloudApi.deleteFile(known.cloudId);
+
+              result = await this.cloudApi.createFile(descriptor, getParentPath(change.path));
+            } else {
+              throw error;
+            }
+          }
+        } else {
+          result = await this.cloudApi.createFile(descriptor, getParentPath(change.path));
+        }
+
         this.upsertIndex(result, change.type);
         return;
       }
@@ -982,19 +965,4 @@ export class ObsidianSyncService implements ISyncService {
 
 function requiresOldPath(type: FileSystemChangeType): boolean {
   return type === 'file-moved' || type === 'folder-moved' || type === 'folder-renamed';
-}
-
-function defaultClassifyError(error: unknown): 'retryable' | 'non-retryable' {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-  if (
-    message.includes('timeout') ||
-    message.includes('network') ||
-    message.includes('temporar') ||
-    message.includes('429') ||
-    message.includes('5xx')
-  ) {
-    return 'retryable';
-  }
-
-  return 'non-retryable';
 }
