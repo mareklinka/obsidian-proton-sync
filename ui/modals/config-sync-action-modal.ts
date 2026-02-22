@@ -28,8 +28,8 @@ export class ProtonDriveConfigSyncActionModal extends Modal {
     new Setting(contentEl)
       .addButton(button =>
         button
-          .setButtonText('Push config')
-          .setCta()
+          .setIcon('cloud-upload')
+          .setClass('proton-sync-config-push-button')
           .onClick(() => {
             this.didResolve = true;
             this.submittedSubject.next('push');
@@ -38,21 +38,12 @@ export class ProtonDriveConfigSyncActionModal extends Modal {
       )
       .addButton(button =>
         button
-          .setButtonText('Pull config')
+          .setIcon('cloud-download')
+          .setClass('proton-sync-config-pull-button')
           .setWarning()
           .onClick(() => {
             this.didResolve = true;
             this.submittedSubject.next('pull');
-            this.close();
-          })
-      )
-      .addExtraButton(button =>
-        button
-          .setIcon('cross')
-          .setTooltip('Cancel')
-          .onClick(() => {
-            this.didResolve = true;
-            this.canceledSubject.next();
             this.close();
           })
       );

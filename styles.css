@@ -73,3 +73,19 @@
   margin: 0 0 10px;
   color: var(--text-muted);
 }
+
+.proton-sync-config-pull-button::after {
+  content: 'Pull config';
+  margin-left: 5px;
+  display: inline-block;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.proton-sync-config-push-button::after {
+  content: 'Push config';
+  margin-left: 5px;
+  display: inline-block;
+  margin-top: auto;
+  margin-bottom: auto;
+}

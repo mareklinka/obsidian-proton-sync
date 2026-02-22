@@ -36,29 +36,17 @@ export class ProtonDriveTwoFactorModal extends Modal {
         })
       );
 
-    new Setting(contentEl)
-      .addButton(button =>
-        button
-          .setButtonText('Submit')
-          .setCta()
-          .onClick(() => {
-            this.didResolve = true;
-            this.submittedSubject.next(this.twoFactorCode);
-            this.clearSensitiveInputs();
-            this.close();
-          })
-      )
-      .addExtraButton(button =>
-        button
-          .setIcon('cross')
-          .setTooltip('Cancel')
-          .onClick(() => {
-            this.didResolve = true;
-            this.canceledSubject.next();
-            this.clearSensitiveInputs();
-            this.close();
-          })
-      );
+    new Setting(contentEl).addButton(button =>
+      button
+        .setButtonText('Submit')
+        .setCta()
+        .onClick(() => {
+          this.didResolve = true;
+          this.submittedSubject.next(this.twoFactorCode);
+          this.clearSensitiveInputs();
+          this.close();
+        })
+    );
   }
 
   onClose(): void {

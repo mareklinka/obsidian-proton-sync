@@ -50,29 +50,19 @@ export class ProtonDriveLoginModal extends Modal {
         });
       });
 
-    new Setting(contentEl)
-      .addButton(button =>
-        button
-          .setButtonText('Connect')
-          .setCta()
-          .onClick(async () => {
-            this.loginSubject.next({
-              email: this.email,
-              password: this.password
-            });
-            this.clearSensitiveInputs();
-            this.close();
-          })
-      )
-      .addExtraButton(button =>
-        button
-          .setIcon('cross')
-          .setTooltip('Cancel')
-          .onClick(() => {
-            this.clearSensitiveInputs();
-            this.close();
-          })
-      );
+    new Setting(contentEl).addButton(button =>
+      button
+        .setButtonText('Connect')
+        .setCta()
+        .onClick(async () => {
+          this.loginSubject.next({
+            email: this.email,
+            password: this.password
+          });
+          this.clearSensitiveInputs();
+          this.close();
+        })
+    );
   }
 
   onClose(): void {

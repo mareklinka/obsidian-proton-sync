@@ -125,13 +125,14 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     });
     await this.orchestrator.start();
 
-    this.addRibbonIcon('cloud', 'Vault configuration sync', () => {
+    this.addRibbonIcon('cloud-cog', 'Vault configuration sync', () => {
       void this.openConfigSyncActionDialog();
     });
 
     this.addCommand({
       id: PUSH_CONFIG_COMMAND_ID,
       name: 'Push vault configuration to Proton Drive',
+      icon: 'cloud-upload',
       callback: () => {
         void this.pushVaultConfig();
       }
@@ -140,6 +141,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.addCommand({
       id: PULL_CONFIG_COMMAND_ID,
       name: 'Pull vault configuration from Proton Drive',
+      icon: 'cloud-download',
       callback: () => {
         void this.pullVaultConfig();
       }
@@ -299,13 +301,13 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     if (direction === 'push') {
       new Notice(
-        `Configuration push complete. Uploaded ${result.uploadedFiles} file(s), deleted ${result.deletedRemoteFiles} remote file(s), and deleted ${result.deletedRemoteFolders} remote folder(s).`
+        `Configuration push complete.\nUploaded ${result.uploadedFiles} file(s), deleted ${result.deletedRemoteFiles} remote file(s), and deleted ${result.deletedRemoteFolders} remote folder(s).`
       );
       return;
     }
 
     new Notice(
-      `Configuration pull complete. Downloaded ${result.downloadedFiles} file(s), deleted ${result.deletedLocalFiles} local file(s), and deleted ${result.deletedLocalFolders} local folder(s).`
+      `Configuration pull complete. Reopen the vault to apply changes.\nDownloaded ${result.downloadedFiles} file(s), deleted ${result.deletedLocalFiles} local file(s), and deleted ${result.deletedLocalFolders} local folder(s).`
     );
   }
 
