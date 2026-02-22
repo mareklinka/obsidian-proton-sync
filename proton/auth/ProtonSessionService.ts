@@ -1,4 +1,4 @@
-import { requestUrl, RequestUrlResponse } from 'obsidian';
+import { Platform, requestUrl, RequestUrlResponse } from 'obsidian';
 
 import {
   buildSrpProofs,
@@ -18,6 +18,9 @@ import { CaptchaVerification } from '../../ui/modals/captcha-modal';
 const AUTH_SCOPE = 'full locked';
 const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
 const SALTED_PASSPHRASES_SECRET_KEY = 'proton-drive-sync-salted-passphrases';
+
+// this is only used on Mobile where the CSP policy for frame-ancestors prevents us from properly displaying the captcha challenge
+const CAPTCHA_FALLBACK_APPVERSION = 'Other';
 
 export const SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -206,25 +209,34 @@ export class ProtonSessionService {
     proofs: ProtonSrpProofs,
     delegates: ProtonSignInDelegates
   ) {
+    let appVersionHeader = this.appVersionHeader;
     let authResponse: ProtonAuthResponse | undefined = undefined;
     let captchaData: CaptchaVerification | undefined = undefined;
 
     while (!authResponse) {
-      const authResponseRaw = await this.authenticate(authInfo, email, proofs, captchaData);
+      const authResponseRaw = await this.authenticate(authInfo, email, appVersionHeader, proofs, captchaData);
 
       if (this.requiresCaptcha(authResponseRaw)) {
-        const captchaUrl = this.extractCaptchaUrl(authResponseRaw.json);
-        if (!captchaUrl) {
-          throw new Error('CAPTCHA verification is required, but no challenge URL was provided.');
+        if (Platform.isMobile) {
+          // on mobile, we can't display the captcha challenge properly, we try to bypass it by setting a fallback app version
+          appVersionHeader = CAPTCHA_FALLBACK_APPVERSION;
+          continue;
+        } else {
+          // on desktop, the captcha challenge can be handled normally
+          // we elicit the captcha token from the user in a modal
+          const captchaUrl = this.extractCaptchaUrl(authResponseRaw.json);
+          if (!captchaUrl) {
+            throw new Error('CAPTCHA verification is required, but no challenge URL was provided.');
+          }
+
+          captchaData = await delegates.requestCaptchaChallenge(captchaUrl);
+
+          if (!captchaData) {
+            throw new Error('CAPTCHA verification required to continue sign-in.');
+          }
+
+          continue;
         }
-
-        captchaData = await delegates.requestCaptchaChallenge(captchaUrl);
-
-        if (!captchaData) {
-          throw new Error('CAPTCHA verification required to continue sign-in.');
-        }
-
-        continue;
       }
 
       if (authResponseRaw.status >= 400) {
@@ -333,6 +345,7 @@ export class ProtonSessionService {
   private async authenticate(
     authInfo: ProtonAuthInfo,
     username: string,
+    appVersionHeader: string,
     proofs: { clientProof: Uint8Array; clientEphemeral: Uint8Array },
     captchaData?: CaptchaVerification
   ): Promise<RequestUrlResponse> {
@@ -345,6 +358,7 @@ export class ProtonSessionService {
         SRPSession: authInfo.SRPSession,
         Scope: AUTH_SCOPE
       },
+      appVersionHeader,
       captchaData
         ? {
             'x-pm-human-verification-token': captchaData.token,
@@ -429,7 +443,7 @@ export class ProtonSessionService {
   }
 
   private async request<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
-    const response = await this.requestRaw(path, body, headers);
+    const response = await this.requestRaw(path, body, this.appVersionHeader, headers);
 
     if (response.status >= 400) {
       const message = extractApiError(response.json) ?? `Auth request failed (${response.status}).`;
@@ -439,13 +453,18 @@ export class ProtonSessionService {
     return response.json as T;
   }
 
-  private async requestRaw(path: string, body: unknown, headers?: Record<string, string>): Promise<RequestUrlResponse> {
+  private async requestRaw(
+    path: string,
+    body: unknown,
+    appVersionHeader: string,
+    headers?: Record<string, string>
+  ): Promise<RequestUrlResponse> {
     const response = await requestUrl({
       url: `${PROTON_BASE_URL}${path}`,
       method: 'POST',
       contentType: 'application/json',
       headers: {
-        'x-pm-appversion': this.appVersionHeader,
+        'x-pm-appversion': appVersionHeader,
         ...(headers ?? {})
       },
       body: JSON.stringify(body),
