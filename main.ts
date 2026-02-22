@@ -1,4 +1,4 @@
-import { Notice, Plugin } from 'obsidian';
+import { App, Notice, Plugin } from 'obsidian';
 import { type Subscription } from 'rxjs';
 
 import { DEFAULT_SETTINGS, ProtonDriveSyncSettings } from './model/settings';
@@ -22,6 +22,12 @@ import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
 import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
+import { ConfigSyncService, type ConfigSyncResult } from './services/ConfigSyncService';
+import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
+import { ProtonDriveConfigSyncActionModal, type ConfigSyncAction } from './ui/modals/config-sync-action-modal';
+
+const PUSH_CONFIG_COMMAND_ID = 'push-vault-config';
+const PULL_CONFIG_COMMAND_ID = 'pull-vault-config';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   private settingsService!: SettingsService;
@@ -119,6 +125,26 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     });
     await this.orchestrator.start();
 
+    this.addRibbonIcon('cloud', 'Vault configuration sync', () => {
+      void this.openConfigSyncActionDialog();
+    });
+
+    this.addCommand({
+      id: PUSH_CONFIG_COMMAND_ID,
+      name: 'Push vault configuration to Proton Drive',
+      callback: () => {
+        void this.pushVaultConfig();
+      }
+    });
+
+    this.addCommand({
+      id: PULL_CONFIG_COMMAND_ID,
+      name: 'Pull vault configuration from Proton Drive',
+      callback: () => {
+        void this.pullVaultConfig();
+      }
+    });
+
     this.settingTab = this.setupSettingsTab(this);
   }
 
@@ -157,6 +183,130 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.protonSessionService.signOut();
     await this.orchestrator?.disconnect();
     new Notice('Disconnected from Proton Drive.');
+  }
+
+  private async openConfigSyncActionDialog(): Promise<void> {
+    const action = await promptFromModal(this.app, app => new ProtonDriveConfigSyncActionModal(app));
+    if (!action) {
+      return;
+    }
+
+    await this.executeRegisteredConfigSyncAction(action);
+  }
+
+  private async executeRegisteredConfigSyncAction(action: ConfigSyncAction): Promise<void> {
+    const commandId = action === 'push' ? PUSH_CONFIG_COMMAND_ID : PULL_CONFIG_COMMAND_ID;
+    const fullCommandId = `${this.manifest.id}:${commandId}`;
+    const commands = (
+      this.app as App & {
+        commands?: {
+          executeCommandById: (id: string) => boolean;
+        };
+      }
+    ).commands;
+
+    const executed = commands?.executeCommandById(fullCommandId) ?? false;
+
+    if (!executed) {
+      new Notice('Unable to execute configuration sync action.');
+    }
+  }
+
+  private async pushVaultConfig(): Promise<void> {
+    const configSyncService = this.getConfigSyncService();
+    if (!configSyncService || !this.cloudReconciliationService) {
+      return;
+    }
+
+    new Notice('Pushing vault configuration to Proton Drive...');
+
+    try {
+      const result = await this.cloudReconciliationService.run(async () => configSyncService.pushConfig());
+      this.handleConfigSyncResult(result, 'push');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('Config push failed', {}, error);
+      new Notice(`Configuration push failed: ${message}`);
+    }
+  }
+
+  private async pullVaultConfig(): Promise<void> {
+    const configSyncService = this.getConfigSyncService();
+    if (!configSyncService || !this.cloudReconciliationService) {
+      return;
+    }
+
+    const confirmed = await promptFromModal(
+      this.app,
+      app =>
+        new ProtonDriveConfirmModal(
+          app,
+          'Pull vault configuration?',
+          'This can be destructive. Local vault configuration files will be replaced by remote configuration files.',
+          'Pull and replace local config'
+        )
+    );
+
+    if (!confirmed) {
+      new Notice('Configuration pull canceled.');
+      return;
+    }
+
+    new Notice('Pulling vault configuration from Proton Drive...');
+
+    try {
+      const result = await this.cloudReconciliationService.run(async () => configSyncService.pullConfig());
+      this.handleConfigSyncResult(result, 'pull');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error('Config pull failed', {}, error);
+      new Notice(`Configuration pull failed: ${message}`);
+    }
+  }
+
+  private getConfigSyncService(): ConfigSyncService | null {
+    if (this.settings.connectionStatus !== 'connected') {
+      new Notice('Connect to Proton Drive before syncing configuration.');
+      return null;
+    }
+
+    if (!this.driveClient) {
+      new Notice('Drive client is not available.');
+      return null;
+    }
+
+    const { vaultRootNodeUid } = this.settingsService.getSyncRoots();
+    if (!vaultRootNodeUid) {
+      new Notice('Sync roots are not ready yet. Please wait and try again.');
+      return null;
+    }
+
+    return new ConfigSyncService(this.app.vault, this.driveClient, vaultRootNodeUid);
+  }
+
+  private handleConfigSyncResult(result: ConfigSyncResult, direction: 'push' | 'pull'): void {
+    if (result.status === 'aborted') {
+      if (result.reason === 'invalid-config-dir') {
+        new Notice('Configuration sync is only supported when configDir is inside the vault root.');
+        return;
+      }
+
+      if (result.reason === 'remote-empty') {
+        new Notice('Remote configuration is empty. Pull aborted to avoid clearing local configuration.');
+        return;
+      }
+    }
+
+    if (direction === 'push') {
+      new Notice(
+        `Configuration push complete. Uploaded ${result.uploadedFiles} file(s), deleted ${result.deletedRemoteFiles} remote file(s), and deleted ${result.deletedRemoteFolders} remote folder(s).`
+      );
+      return;
+    }
+
+    new Notice(
+      `Configuration pull complete. Downloaded ${result.downloadedFiles} file(s), deleted ${result.deletedLocalFiles} local file(s), and deleted ${result.deletedLocalFolders} local folder(s).`
+    );
   }
 
   private setupSettingsTab(plugin: ProtonDriveSyncPlugin): ProtonDriveSyncSettingTab {
