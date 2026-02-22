@@ -41,6 +41,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private cloudReconciliationService: CloudReconciliationService | null = null;
   private statusBarController: SyncStatusBarController | null = null;
   private readonly subscriptions: Subscription[] = [];
+  private configSyncService: ConfigSyncService | null = null;
 
   private get settings(): ProtonDriveSyncSettings {
     return this.settingsService.snapshot();
@@ -123,10 +124,13 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       maxBufferedChanges: 5000
     });
 
+    this.configSyncService = this.getConfigSyncService();
+
     this.statusBarController = createSyncStatusBar(this, {
       loginState$: this.protonSessionService.authState$,
       syncState$: this.orchestrator.syncState$,
-      reconcileState$: this.orchestrator.reconcileState$
+      reconcileState$: this.orchestrator.reconcileState$,
+      configSyncState$: this.configSyncService.state$
     });
     await this.orchestrator.start();
 
@@ -220,7 +224,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   private async pushVaultConfig(): Promise<void> {
-    const configSyncService = this.getConfigSyncService();
+    const configSyncService = this.configSyncService;
     if (!configSyncService || !this.cloudReconciliationService) {
       return;
     }
@@ -228,7 +232,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     new Notice('Pushing vault configuration to Proton Drive...');
 
     try {
-      const result = await this.cloudReconciliationService.run(async () => configSyncService.pushConfig());
+      const result = await configSyncService.pushConfig();
       this.handleConfigSyncResult(result, 'push');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -238,7 +242,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   private async pullVaultConfig(): Promise<void> {
-    const configSyncService = this.getConfigSyncService();
+    const configSyncService = this.configSyncService;
     if (!configSyncService || !this.cloudReconciliationService) {
       return;
     }
@@ -262,7 +266,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     new Notice('Pulling vault configuration from Proton Drive...');
 
     try {
-      const result = await this.cloudReconciliationService.run(async () => configSyncService.pullConfig());
+      const result = await configSyncService.pullConfig();
       this.handleConfigSyncResult(result, 'pull');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -271,21 +275,16 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     }
   }
 
-  private getConfigSyncService(): ConfigSyncService | null {
-    if (this.settings.connectionStatus !== 'connected') {
-      new Notice('Connect to Proton Drive before syncing configuration.');
-      return null;
-    }
-
+  private getConfigSyncService(): ConfigSyncService {
     if (!this.driveClient) {
       new Notice('Drive client is not available.');
-      return null;
+      throw new Error('Drive client unavailable while creating config sync service.');
     }
 
     const { vaultRootNodeUid } = this.settingsService.getSyncRoots();
     if (!vaultRootNodeUid) {
       new Notice('Sync roots are not ready yet. Please wait and try again.');
-      return null;
+      throw new Error('Sync roots not ready while creating config sync service.');
     }
 
     return new ConfigSyncService(this.app.vault, this.driveClient, vaultRootNodeUid);

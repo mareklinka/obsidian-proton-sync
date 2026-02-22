@@ -9,6 +9,7 @@ import {
 import type { Vault } from 'obsidian';
 
 import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from './path-utils';
+import { BehaviorSubject } from 'rxjs';
 
 const EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH = 'plugins/proton-drive-sync';
 
@@ -56,8 +57,13 @@ export type ConfigSyncResult = {
   deletedLocalFolders: number;
 };
 
+export type ConfigSyncState = 'idle' | 'pushing' | 'pulling';
+
 export class ConfigSyncService {
   private readonly adapter: VaultAdapter;
+
+  private readonly stateSubject = new BehaviorSubject<ConfigSyncState>('idle');
+  public readonly state$ = this.stateSubject.asObservable();
 
   constructor(
     private readonly vault: Vault,
@@ -68,6 +74,16 @@ export class ConfigSyncService {
   }
 
   async pushConfig(): Promise<ConfigSyncResult> {
+    this.stateSubject.next('pushing');
+
+    try {
+      return await this.pushConfigImpl();
+    } finally {
+      this.stateSubject.next('idle');
+    }
+  }
+
+  private async pushConfigImpl(): Promise<ConfigSyncResult> {
     const validated = this.validateConfigDir();
     if (!validated.ok) {
       return createAbortedResult('invalid-config-dir');
@@ -141,6 +157,16 @@ export class ConfigSyncService {
   }
 
   async pullConfig(): Promise<ConfigSyncResult> {
+    this.stateSubject.next('pulling');
+
+    try {
+      return await this.pullConfigImpl();
+    } finally {
+      this.stateSubject.next('idle');
+    }
+  }
+
+  private async pullConfigImpl(): Promise<ConfigSyncResult> {
     const validated = this.validateConfigDir();
     if (!validated.ok) {
       return createAbortedResult('invalid-config-dir');

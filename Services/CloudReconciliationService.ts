@@ -1,4 +1,4 @@
-import type { ProtonDriveClient } from '@protontech/drive-sdk';
+import { MaybeNode, NodeType, type NodeEntity, type ProtonDriveClient } from '@protontech/drive-sdk';
 import type { Vault } from 'obsidian';
 import { BehaviorSubject, Subject, type Observable, type Subscription } from 'rxjs';
 
@@ -10,7 +10,9 @@ import { SettingsService } from './SettingsService';
 import { SyncIndexStateService } from './SyncIndexStateService';
 import { LocalChangeSuppressionService } from './LocalChangeSuppressionService';
 
-export type ReconcileState = 'idle' | 'reconciling' | 'error';
+export type ReconcileState = 'idle' | 'reconciling';
+
+const SYNC_CONTAINER_NAME = 'obsidian-notes';
 
 export class CloudReconciliationService {
   private readonly stateSubject = new BehaviorSubject<ReconcileState>('idle');
@@ -47,20 +49,32 @@ export class CloudReconciliationService {
     );
   }
 
-  async run<T>(operation: () => Promise<T>): Promise<T> {
+  async setupCloudIntegration(): Promise<{ snapshot: SyncIndexSnapshot; vaultRootNodeUid: string }> {
+    const rootInfo = await this.ensureCloudRootFolder();
+
+    const reconciliationResult = await this.executeReconciliation(rootInfo.vaultRootNodeUid);
+
+    this.input.logger.info('Initial reconciliation completed', {
+      ...reconciliationResult.stats
+    });
+
+    await this.subscribeToCloudEvents();
+
+    return { snapshot: reconciliationResult.snapshot, vaultRootNodeUid: rootInfo.vaultRootNodeUid };
+  }
+
+  private async runWithState<T>(operation: () => Promise<T>): Promise<T> {
     this.stateSubject.next('reconciling');
 
     try {
       const result = await operation();
-      this.stateSubject.next('idle');
       return result;
-    } catch (error) {
-      this.stateSubject.next('error');
-      throw error;
+    } finally {
+      this.stateSubject.next('idle');
     }
   }
 
-  async ensureCloudEventSubscription(): Promise<void> {
+  async subscribeToCloudEvents(): Promise<void> {
     if (this.cloudEventSubscription) {
       return;
     }
@@ -94,14 +108,138 @@ export class CloudReconciliationService {
     this.input.logger.info('Subscribed to Proton tree events', { treeEventScopeId });
   }
 
-  async runInitialReconciliation(vaultRootNodeUid: string): Promise<SyncIndexSnapshot> {
-    const reconciliationResult = await this.executeReconciliation(vaultRootNodeUid);
+  private async ensureCloudRootFolder(): Promise<{
+    containerNodeUid: string;
+    vaultRootNodeUid: string;
+  }> {
+    const driveClient = this.input.getDriveClient();
 
-    this.input.logger.info('Initial reconciliation completed', {
-      ...reconciliationResult.stats
-    });
+    if (!driveClient) {
+      throw new Error('Drive client unavailable for ensuring cloud sync roots');
+    }
 
-    return reconciliationResult.snapshot;
+    const info = await this.getOrCreateSyncRootFolders(driveClient);
+
+    await this.input.settingsService.setSyncRoots(info.containerNodeUid, info.vaultRootNodeUid);
+
+    return info;
+  }
+
+  private async getOrCreateSyncRootFolders(client: ProtonDriveClient): Promise<{
+    containerNodeUid: string;
+    vaultRootNodeUid: string;
+  }> {
+    this.input.logger.debug('Ensuring sync root folders exist');
+
+    const { containerNodeUid, vaultRootNodeUid } = this.input.settingsService.getSyncRoots();
+
+    const myFilesRoot = await this.requireFolderNode(client.getMyFilesRootFolder(), 'My files root');
+
+    this.input.logger.debug('Ensuring sync container folder exists');
+    const containerNode = await this.ensureFolderByName(client, containerNodeUid, myFilesRoot.uid, SYNC_CONTAINER_NAME);
+
+    this.input.logger.debug('Ensuring vault root folder exists');
+    const vaultRootNode = await this.ensureFolderByName(
+      client,
+      vaultRootNodeUid,
+      containerNode.uid,
+      this.input.vault.getName()
+    );
+
+    await this.input.settingsService.setSyncRoots(containerNode.uid, vaultRootNode.uid);
+
+    return {
+      containerNodeUid: containerNode.uid,
+      vaultRootNodeUid: vaultRootNode.uid
+    };
+  }
+
+  private async ensureFolderByName(
+    client: ProtonDriveClient,
+    cachedUid: string | null,
+    parentUid: string,
+    name: string,
+    logger?: PluginLogger
+  ): Promise<NodeEntity> {
+    const cached = await this.getFolderByUid(client, cachedUid, logger);
+    if (cached && cached.parentUid === parentUid) {
+      return cached;
+    }
+
+    if (cached) {
+      logger?.warn('Cached sync root folder moved or re-parented', {
+        uid: cached.uid,
+        expectedParentUid: parentUid,
+        actualParentUid: cached.parentUid
+      });
+    }
+
+    const existing = await this.findChildFolderByName(client, parentUid, name);
+    if (existing) {
+      return existing;
+    }
+
+    const created = await client.createFolder(parentUid, name);
+    return this.requireFolderNode(Promise.resolve(created), `Folder ${name}`);
+  }
+
+  private async getFolderByUid(
+    client: ProtonDriveClient,
+    uid: string | null,
+    logger?: PluginLogger
+  ): Promise<NodeEntity | null> {
+    if (!uid) {
+      return null;
+    }
+
+    const node = await client.getNode(uid);
+    if (!node.ok) {
+      logger?.warn('Sync root node lookup failed', { uid, error: node.error });
+      return null;
+    }
+
+    if (node.value.type !== NodeType.Folder) {
+      logger?.warn('Sync root node is not a folder', {
+        uid,
+        type: node.value.type
+      });
+      return null;
+    }
+
+    return node.value;
+  }
+
+  private async findChildFolderByName(
+    client: ProtonDriveClient,
+    parentUid: string,
+    name: string
+  ): Promise<NodeEntity | null> {
+    for await (const child of client.iterateFolderChildren(parentUid, {
+      type: NodeType.Folder
+    })) {
+      if (!child.ok) {
+        continue;
+      }
+
+      if (child.value.name === name) {
+        return child.value;
+      }
+    }
+
+    return null;
+  }
+
+  private async requireFolderNode(nodePromise: Promise<MaybeNode>, label: string): Promise<NodeEntity> {
+    const node = await nodePromise;
+    if (!node.ok) {
+      throw new Error(`Failed to load ${label}.`);
+    }
+
+    if (node.value.type !== NodeType.Folder) {
+      throw new Error(`${label} is not a folder.`);
+    }
+
+    return node.value;
   }
 
   private async runCloudReconciliationPass(): Promise<void> {
@@ -145,7 +283,7 @@ export class CloudReconciliationService {
         this.reconcileQueued = false;
 
         try {
-          await this.run(async () => {
+          await this.runWithState(async () => {
             await this.runCloudReconciliationPass();
           });
         } catch {
@@ -186,6 +324,7 @@ export class CloudReconciliationService {
 
     return reconciliationResult;
   }
+
   reset(): void {
     this.cloudEventSubscription?.dispose();
     this.cloudEventSubscription = null;
