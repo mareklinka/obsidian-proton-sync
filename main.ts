@@ -25,6 +25,7 @@ import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
 import { ConfigSyncService, type ConfigSyncResult } from './services/ConfigSyncService';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
 import { ProtonDriveConfigSyncActionModal, type ConfigSyncAction } from './ui/modals/config-sync-action-modal';
+import { LocalChangeSuppressionService } from './services/LocalChangeSuppressionService';
 
 const PUSH_CONFIG_COMMAND_ID = 'push-vault-config';
 const PULL_CONFIG_COMMAND_ID = 'pull-vault-config';
@@ -82,6 +83,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       new ObsidianHttpClient(this.protonSessionService)
     );
 
+    const localChangeSuppressionService = new LocalChangeSuppressionService();
+
     this.cloudReconciliationService = new CloudReconciliationService({
       getDriveClient: () => this.driveClient,
       logger: this.logger,
@@ -89,7 +92,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       settingsService: this.settingsService,
       syncIndexStateService: this.syncIndexStateService,
       getSyncReader: () => this.orchestrator?.getReader() ?? null,
-      getSyncService: () => this.orchestrator?.getSyncService() ?? null
+      getSyncService: () => this.orchestrator?.getSyncService() ?? null,
+      localChangeSuppressionService
     });
 
     this.orchestrator = new SyncOrchestrationService({
@@ -99,6 +103,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       syncIndexStateService: this.syncIndexStateService,
       sessionService: this.protonSessionService,
       cloudReconciliationService: this.cloudReconciliationService,
+      localChangeSuppressionService,
       getDriveClient: () => this.driveClient,
       createReader: () =>
         new ObsidianVaultFileSystemReader(this.app.vault, {

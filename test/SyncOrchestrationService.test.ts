@@ -134,11 +134,13 @@ describe('SyncOrchestrationService', () => {
           sessionSubject.next({ state: 'disconnected' });
         })
       } as never,
+      localChangeSuppressionService: {
+        shouldSuppress: vi.fn(() => false)
+      } as never,
       cloudReconciliationService: {
         state$: reconcileStateSubject.asObservable(),
         reset: vi.fn(),
         dispose: vi.fn(),
-        shouldSuppressLocalChange: vi.fn(() => false),
         run: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
         runInitialReconciliation: vi.fn(async () => ({ byPath: {}, byCloudId: {} }) as SyncIndexSnapshot),
         ensureCloudEventSubscription: vi.fn(async () => {})
@@ -180,11 +182,13 @@ describe('SyncOrchestrationService', () => {
           sessionSubject.next({ state: 'disconnected' });
         })
       } as never,
+      localChangeSuppressionService: {
+        shouldSuppress: vi.fn(() => false)
+      } as never,
       cloudReconciliationService: {
         state$: reconcileStateSubject.asObservable(),
         reset: vi.fn(),
         dispose: vi.fn(),
-        shouldSuppressLocalChange: vi.fn(() => false),
         run: vi.fn(async <T>(operation: () => Promise<T>) => operation()),
         runInitialReconciliation,
         ensureCloudEventSubscription: vi.fn(async () => {})

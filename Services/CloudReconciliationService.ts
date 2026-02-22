@@ -9,6 +9,7 @@ import type { ObsidianSyncService, SyncIndexSnapshot } from './ObsidianSyncServi
 import type { PluginLogger } from '../logger';
 import { SettingsService } from './SettingsService';
 import { SyncIndexStateService } from './SyncIndexStateService';
+import { LocalChangeSuppressionService } from './LocalChangeSuppressionService';
 
 export type ReconcileState = 'idle' | 'reconciling' | 'error';
 
@@ -19,9 +20,6 @@ export class CloudReconciliationService {
   private reconcileInProgress = false;
   private reconcileQueued = false;
   private cloudEventSubscription: { dispose(): void } | null = null;
-  private readonly suppressedLocalPathsUntil = new Map<string, number>();
-  private readonly localSuppressionTtlMs = 5000;
-  private applyingRemoteChanges = false;
 
   public readonly state$: Observable<ReconcileState> = this.stateSubject.asObservable();
 
@@ -34,6 +32,7 @@ export class CloudReconciliationService {
       syncIndexStateService: SyncIndexStateService;
       getSyncReader: () => ObsidianVaultFileSystemReader | null;
       getSyncService: () => ObsidianSyncService | null;
+      localChangeSuppressionService: LocalChangeSuppressionService;
     }
   ) {
     this.subscriptions.push(
@@ -106,28 +105,6 @@ export class CloudReconciliationService {
     return reconciliationResult.snapshot;
   }
 
-  shouldSuppressLocalChange(path: string, oldPath?: string): boolean {
-    if (this.applyingRemoteChanges) {
-      return true;
-    }
-
-    this.pruneExpiredSuppressions();
-
-    const canonicalPath = toCanonicalPathKey(path);
-    if (this.suppressedLocalPathsUntil.has(canonicalPath)) {
-      return true;
-    }
-
-    if (oldPath) {
-      const canonicalOldPath = toCanonicalPathKey(oldPath);
-      if (this.suppressedLocalPathsUntil.has(canonicalOldPath)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
   private async runCloudReconciliationPass(): Promise<void> {
     const driveClient = this.input.getDriveClient();
     const { vaultRootNodeUid } = this.input.settingsService.getSyncRoots();
@@ -139,7 +116,7 @@ export class CloudReconciliationService {
     }
 
     const before = this.captureLocalPaths();
-    this.applyingRemoteChanges = true;
+    this.input.localChangeSuppressionService.beginRemoteApply();
 
     try {
       const reconciliationResult = await this.executeReconciliation(vaultRootNodeUid);
@@ -149,17 +126,16 @@ export class CloudReconciliationService {
       syncService.start();
 
       const after = this.captureLocalPaths();
-      this.markSuppressedLocalPaths(this.diffTouchedLocalPaths(before, after));
+      this.input.localChangeSuppressionService.markSuppressedPaths(this.diffTouchedLocalPaths(before, after));
 
       this.input.logger.info('Applied cloud reconciliation pass', {
-        ...reconciliationResult.stats,
-        suppressedPaths: this.suppressedLocalPathsUntil.size
+        ...reconciliationResult.stats
       });
     } catch (error) {
       this.input.logger.error('Cloud reconciliation pass failed', {}, error);
       throw error;
     } finally {
-      this.applyingRemoteChanges = false;
+      this.input.localChangeSuppressionService.endRemoteApply();
     }
   }
 
@@ -252,31 +228,10 @@ export class CloudReconciliationService {
     return Array.from(touched);
   }
 
-  private markSuppressedLocalPaths(paths: string[]): void {
-    if (paths.length === 0) {
-      return;
-    }
-
-    const until = Date.now() + this.localSuppressionTtlMs;
-    for (const path of paths) {
-      this.suppressedLocalPathsUntil.set(path, until);
-    }
-  }
-
-  private pruneExpiredSuppressions(): void {
-    const now = Date.now();
-    for (const [path, until] of this.suppressedLocalPathsUntil.entries()) {
-      if (until <= now) {
-        this.suppressedLocalPathsUntil.delete(path);
-      }
-    }
-  }
-
   reset(): void {
     this.cloudEventSubscription?.dispose();
     this.cloudEventSubscription = null;
-    this.suppressedLocalPathsUntil.clear();
-    this.applyingRemoteChanges = false;
+    this.input.localChangeSuppressionService.reset();
     this.reconcileInProgress = false;
     this.reconcileQueued = false;
     this.stateSubject.next('idle');
