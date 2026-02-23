@@ -26,6 +26,12 @@ import { ConfigSyncService, type ConfigSyncResult } from './services/ConfigSyncS
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
 import { ProtonDriveConfigSyncActionModal, type ConfigSyncAction } from './ui/modals/config-sync-action-modal';
 import { LocalChangeSuppressionService } from './services/LocalChangeSuppressionService';
+import { initObsidianSecretStore } from './services/vNext/ObsidianSecretStore';
+import { initObsidianFileApi } from './services/vNext/ObsidianFileApi';
+import { initObsidianFileObserver } from './services/vNext/ObsidianVaultObserver';
+import { initProtonCloudApi } from './services/vNext/ProtonCloudApi';
+import { initProtonCloudObserver } from './services/vNext/ProtonCloudObserver';
+import { initObsidianSettingsStore } from './services/vNext/ObsidianSettingsStore';
 
 const PUSH_CONFIG_COMMAND_ID = 'push-vault-config';
 const PULL_CONFIG_COMMAND_ID = 'pull-vault-config';
@@ -48,6 +54,11 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   async onload(): Promise<void> {
+    initObsidianSettingsStore({ save: this.loadData.bind(this), load: this.loadData.bind(this) });
+    initObsidianSecretStore(this.app.secretStorage);
+    initObsidianFileApi(this.app.vault);
+    initObsidianFileObserver(this.app.vault);
+
     this.settingsService = new SettingsService(
       Object.assign({}, DEFAULT_SETTINGS, await this.loadData()),
       nextSettings => this.saveData(nextSettings)
@@ -83,6 +94,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       this.settingsService,
       new ObsidianHttpClient(this.protonSessionService)
     );
+
+    initProtonCloudApi(this.driveClient);
+    initProtonCloudObserver(this.driveClient);
 
     const localChangeSuppressionService = new LocalChangeSuppressionService();
 

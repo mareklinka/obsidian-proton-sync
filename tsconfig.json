@@ -10,7 +10,12 @@
     "isolatedModules": true,
     "strict": true,
     "noImplicitAny": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service"
+      }
+    ]
   },
   "include": ["main.ts", "types/**/*.d.ts"]
 }
