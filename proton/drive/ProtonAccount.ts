@@ -1,9 +1,10 @@
 import * as openpgp from 'openpgp';
 import type { ProtonDriveAccount, ProtonDriveAccountAddress } from '@protontech/drive-sdk';
 import type { PrivateKey, PublicKey } from '@protontech/drive-sdk/dist/crypto';
-import { ProtonSessionService } from '../auth/ProtonSessionService';
 import { ProtonSession } from '../auth/ProtonSession';
 import { getJson } from '../ProtonApiClient';
+import { getProtonSessionService } from '../auth/vNext/ProtonSessionService';
+import { Option } from 'effect';
 
 type ProtonAddressKey = {
   ID: string;
@@ -54,21 +55,9 @@ type CachedValue<T> = {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 export class ProtonAccount implements ProtonDriveAccount {
-  private saltedKeyPasswords: Record<string, string> = {};
   private addressesCache: CachedValue<ProtonDriveAccountAddress[]> | null = null;
   private publicKeysCache = new Map<string, CachedValue<PublicKey[]>>();
-
-  private currentSession: ProtonSession | null = null;
-
-  constructor(private readonly authService: ProtonSessionService) {
-    authService.currentSession$.subscribe(sessionState => {
-      this.currentSession = sessionState.state === 'ok' ? sessionState.session : null;
-    });
-
-    authService.saltedKeyPasswords$.subscribe(passwords => {
-      this.saltedKeyPasswords = passwords;
-    });
-  }
+  private sessionService = getProtonSessionService();
 
   async getOwnPrimaryAddress(): Promise<ProtonDriveAccountAddress> {
     const addresses = await this.getOwnAddresses();
@@ -86,14 +75,15 @@ export class ProtonAccount implements ProtonDriveAccount {
       return cached;
     }
 
-    if (!this.currentSession) {
+    const currentSession = this.sessionService.getCurrentSession();
+    if (Option.isNone(currentSession)) {
       throw new Error('No Proton addresses found for this account.');
     }
 
     const response = await getJson<ProtonAddressesResponse>(
       '/core/v4/addresses',
-      this.currentSession,
-      this.authService.appVersionHeader
+      currentSession.value,
+      this.sessionService.appVersionHeader
     );
 
     const addresses = response.Addresses ?? [];
@@ -103,7 +93,7 @@ export class ProtonAccount implements ProtonDriveAccount {
 
     const user = await this.getUser();
 
-    const userKey = await resolveUserKey(user.Keys ?? [], this.saltedKeyPasswords);
+    const userKey = await resolveUserKey(user.Keys ?? [], this.sessionService.getSaltedKeyPasswords());
 
     const mapped = await Promise.all(addresses.map(address => mapAddress(address, userKey!)));
 
@@ -130,11 +120,12 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 
   async hasProtonAccount(email: string): Promise<boolean> {
-    if (!this.currentSession) {
+    const currentSession = this.sessionService.getCurrentSession();
+    if (Option.isNone(currentSession)) {
       throw new Error('No Proton session available for API request.');
     }
 
-    const response = await this.fetchPublicKeysRaw(email, this.currentSession);
+    const response = await this.fetchPublicKeysRaw(email, currentSession.value);
 
     return (response.Address?.Keys ?? []).length > 0;
   }
@@ -145,11 +136,12 @@ export class ProtonAccount implements ProtonDriveAccount {
       return cached;
     }
 
-    if (!this.currentSession) {
+    const currentSession = this.sessionService.getCurrentSession();
+    if (Option.isNone(currentSession)) {
       throw new Error('No Proton session available for API request.');
     }
 
-    const response = await this.fetchPublicKeysRaw(email, this.currentSession);
+    const response = await this.fetchPublicKeysRaw(email, currentSession.value);
     const keys = response?.Address?.Keys ?? [];
 
     const parsed = await Promise.all(
@@ -170,20 +162,21 @@ export class ProtonAccount implements ProtonDriveAccount {
   }
 
   private async fetchPublicKeysRaw(email: string, session: ProtonSession): Promise<ProtonPublicKeysResponse> {
-    return getJson<ProtonPublicKeysResponse>('/core/v4/keys/all', session, this.authService.appVersionHeader, {
+    return getJson<ProtonPublicKeysResponse>('/core/v4/keys/all', session, this.sessionService.appVersionHeader, {
       Email: email
     });
   }
 
   private async getUser(): Promise<ProtonUser> {
-    if (!this.currentSession) {
+    const currentSession = this.sessionService.getCurrentSession();
+    if (Option.isNone(currentSession)) {
       throw new Error('No Proton session available for API request.');
     }
 
     const response = await getJson<ProtonUserResponse>(
       '/core/v4/users',
-      this.currentSession,
-      this.authService.appVersionHeader
+      currentSession.value,
+      this.sessionService.appVersionHeader
     );
 
     if (!response.User) {

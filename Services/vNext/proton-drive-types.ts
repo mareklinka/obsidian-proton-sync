@@ -10,7 +10,9 @@ export class ProtonFolderId extends ProtonId {
     super(uid);
   }
 
-  public folderId = super.uid;
+  public get folderId(): string {
+    return this.uid;
+  }
 
   public equals(other: ProtonFolderId): boolean {
     return this.uid === other.uid;
@@ -26,7 +28,9 @@ export class ProtonFileId extends ProtonId {
     super(uid);
   }
 
-  public fileId = super.uid;
+  public get fileId(): string {
+    return this.uid;
+  }
 
   public equals(other: ProtonFileId): boolean {
     return this.uid === other.uid;

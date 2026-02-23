@@ -8,12 +8,12 @@ import {
   ProtonAuthInfo,
   ProtonSrpProofs
 } from './ProtonSrp';
-import { BehaviorSubject, map, merge, of, shareReplay, Subject, switchMap, timer } from 'rxjs';
+import { BehaviorSubject, distinctUntilChanged, map, merge, of, shareReplay, Subject, switchMap, timer } from 'rxjs';
 import { ProtonSession } from './ProtonSession';
 import { deleteJson, getJson, postJson } from '../ProtonApiClient';
-import type { ProtonSecretStore } from './ProtonSecretStore';
 import { PROTON_BASE_URL } from '../Constants';
 import { CaptchaVerification } from '../../ui/modals/captcha-modal';
+import { getObsidianSecretStore } from '../../services/vNext/ObsidianSecretStore';
 
 const AUTH_SCOPE = 'full locked';
 const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
@@ -82,7 +82,7 @@ export class ProtonSessionService {
 
   private refreshIntervalId: ReturnType<typeof globalThis.setInterval> | null = null;
   private currentSession: ProtonSession | null = null;
-  public readonly authState$ = this.authStatusSubject.asObservable();
+  public readonly authState$ = this.authStatusSubject.pipe(distinctUntilChanged());
   public readonly currentSession$ = this.currentSessionSubject.pipe(
     switchMap(sessionState => {
       if (!sessionState) {
@@ -106,10 +106,10 @@ export class ProtonSessionService {
     shareReplay({ bufferSize: 1, refCount: true })
   );
 
-  constructor(
-    private readonly secretStore: ProtonSecretStore,
-    public readonly appVersionHeader: string
-  ) {
+  private secretStore: ReturnType<typeof getObsidianSecretStore>;
+
+  constructor(public readonly appVersionHeader: string) {
+    this.secretStore = getObsidianSecretStore();
     const saltedPasswordsJson = this.secretStore.get(SALTED_PASSPHRASES_SECRET_KEY);
     this.saltedKeyPasswordsSubject.next(
       JSON.parse(saltedPasswordsJson ? saltedPasswordsJson : '{}') as Record<string, string>
@@ -549,10 +549,6 @@ function extractApiError(payload: unknown): string | null {
 }
 
 function randomToken(byteLength: number): Uint8Array {
-  return randomBytes(byteLength);
-}
-
-function randomBytes(byteLength: number): Uint8Array {
   const bytes = new Uint8Array(byteLength);
   globalThis.crypto.getRandomValues(bytes);
   return bytes;

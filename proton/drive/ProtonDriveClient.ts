@@ -12,17 +12,13 @@ import type { ProtonSession } from '../auth/ProtonSession';
 import { ProtonAccount } from './ProtonAccount';
 import { createOpenPgpCrypto } from './ProtonOpenPgp';
 import { buildSrpProofsFromParams } from '../auth/ProtonSrp';
-import { SettingsService } from '../../services/SettingsService';
+import { getObsidianSettingsStore } from '../../services/vNext/ObsidianSettingsStore';
 
 export type SessionProvider = () => ProtonSession | null;
 type SrpModule = ProtonDriveClientContructorParameters['srpModule'];
 type SrpVerifier = Awaited<ReturnType<SrpModule['getSrpVerifier']>>;
 
-export function createProtonDriveClient(
-  account: ProtonAccount,
-  settings: SettingsService,
-  httpClient: ProtonDriveHTTPClient
-): ProtonDriveClient {
+export function createProtonDriveClient(account: ProtonAccount, httpClient: ProtonDriveHTTPClient): ProtonDriveClient {
   const entitiesCache: ProtonDriveEntitiesCache = new MemoryCache<string>();
   const cryptoCache: ProtonDriveCryptoCache = new MemoryCache<CachedCryptoMaterial>();
 
@@ -37,8 +33,8 @@ export function createProtonDriveClient(
     openPGPCryptoModule,
     srpModule,
     latestEventIdProvider: {
-      getLatestEventId: (treeEventScopeId: string): string | null => {
-        return settings.getLatestEventId(treeEventScopeId);
+      getLatestEventId: (): string | null => {
+        return getObsidianSettingsStore().getLatestProtonEventId();
       }
     }
   });

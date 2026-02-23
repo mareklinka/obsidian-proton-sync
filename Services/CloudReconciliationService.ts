@@ -5,16 +5,17 @@ import { BehaviorSubject, Subject, type Observable, type Subscription } from 'rx
 import { ReconciliationService } from './ReconciliationService';
 import type { ObsidianVaultFileSystemReader } from './ObsidianVaultFileSystemReader';
 import type { ObsidianSyncService, SyncIndexSnapshot } from './ObsidianSyncService';
-import type { PluginLogger } from '../logger';
 import { SettingsService } from './SettingsService';
 import { SyncIndexStateService } from './SyncIndexStateService';
 import { LocalChangeSuppressionService } from './LocalChangeSuppressionService';
+import { getLogger } from './vNext/ObsidianSyncLogger';
 
 export type ReconcileState = 'idle' | 'reconciling';
 
 const SYNC_CONTAINER_NAME = 'obsidian-notes';
 
 export class CloudReconciliationService {
+  private readonly logger = getLogger('CloudReconciliationService');
   private readonly stateSubject = new BehaviorSubject<ReconcileState>('idle');
   private readonly reconcileRequests = new Subject<void>();
   private readonly subscriptions: Subscription[] = [];
@@ -27,7 +28,6 @@ export class CloudReconciliationService {
   constructor(
     private readonly input: {
       getDriveClient: () => ProtonDriveClient | null;
-      logger: PluginLogger;
       vault: Vault;
       settingsService: SettingsService;
       syncIndexStateService: SyncIndexStateService;
@@ -54,7 +54,7 @@ export class CloudReconciliationService {
 
     const reconciliationResult = await this.executeReconciliation(rootInfo.vaultRootNodeUid);
 
-    this.input.logger.info('Initial reconciliation completed', {
+    this.logger.info('Initial reconciliation completed', {
       ...reconciliationResult.stats
     });
 
@@ -88,7 +88,7 @@ export class CloudReconciliationService {
 
     const rootNode = await driveClient.getNode(vaultRootNodeUid);
     if (!rootNode.ok) {
-      this.input.logger.warn('Cannot subscribe to cloud tree events: failed to load vault root node', {
+      this.logger.warn('Cannot subscribe to cloud tree events: failed to load vault root node', {
         error: String(rootNode.error)
       });
       return;
@@ -97,7 +97,7 @@ export class CloudReconciliationService {
     const treeEventScopeId = rootNode.value.treeEventScopeId;
     this.cloudEventSubscription = await driveClient.subscribeToTreeEvents(treeEventScopeId, async event => {
       await this.input.settingsService.recordLatestEventId(event);
-      this.input.logger.debug('Received Proton tree event', {
+      this.logger.debug('Received Proton tree event', {
         type: (event as { type?: string }).type,
         eventId: (event as { eventId?: string }).eventId
       });
@@ -105,7 +105,7 @@ export class CloudReconciliationService {
       this.requestReconciliationPass();
     });
 
-    this.input.logger.info('Subscribed to Proton tree events', { treeEventScopeId });
+    this.logger.info('Subscribed to Proton tree events', { treeEventScopeId });
   }
 
   private async ensureCloudRootFolder(): Promise<{
@@ -129,16 +129,16 @@ export class CloudReconciliationService {
     containerNodeUid: string;
     vaultRootNodeUid: string;
   }> {
-    this.input.logger.debug('Ensuring sync root folders exist');
+    this.logger.debug('Ensuring sync root folders exist');
 
     const { containerNodeUid, vaultRootNodeUid } = this.input.settingsService.getSyncRoots();
 
     const myFilesRoot = await this.requireFolderNode(client.getMyFilesRootFolder(), 'My files root');
 
-    this.input.logger.debug('Ensuring sync container folder exists');
+    this.logger.debug('Ensuring sync container folder exists');
     const containerNode = await this.ensureFolderByName(client, containerNodeUid, myFilesRoot.uid, SYNC_CONTAINER_NAME);
 
-    this.input.logger.debug('Ensuring vault root folder exists');
+    this.logger.debug('Ensuring vault root folder exists');
     const vaultRootNode = await this.ensureFolderByName(
       client,
       vaultRootNodeUid,
@@ -158,16 +158,15 @@ export class CloudReconciliationService {
     client: ProtonDriveClient,
     cachedUid: string | null,
     parentUid: string,
-    name: string,
-    logger?: PluginLogger
+    name: string
   ): Promise<NodeEntity> {
-    const cached = await this.getFolderByUid(client, cachedUid, logger);
+    const cached = await this.getFolderByUid(client, cachedUid);
     if (cached && cached.parentUid === parentUid) {
       return cached;
     }
 
     if (cached) {
-      logger?.warn('Cached sync root folder moved or re-parented', {
+      this.logger.warn('Cached sync root folder moved or re-parented', {
         uid: cached.uid,
         expectedParentUid: parentUid,
         actualParentUid: cached.parentUid
@@ -183,23 +182,19 @@ export class CloudReconciliationService {
     return this.requireFolderNode(Promise.resolve(created), `Folder ${name}`);
   }
 
-  private async getFolderByUid(
-    client: ProtonDriveClient,
-    uid: string | null,
-    logger?: PluginLogger
-  ): Promise<NodeEntity | null> {
+  private async getFolderByUid(client: ProtonDriveClient, uid: string | null): Promise<NodeEntity | null> {
     if (!uid) {
       return null;
     }
 
     const node = await client.getNode(uid);
     if (!node.ok) {
-      logger?.warn('Sync root node lookup failed', { uid, error: node.error });
+      this.logger.warn('Sync root node lookup failed', { uid, error: node.error });
       return null;
     }
 
     if (node.value.type !== NodeType.Folder) {
-      logger?.warn('Sync root node is not a folder', {
+      this.logger.warn('Sync root node is not a folder', {
         uid,
         type: node.value.type
       });
@@ -259,11 +254,11 @@ export class CloudReconciliationService {
       syncService.initializeIndex(reconciliationResult.snapshot);
       syncService.start();
 
-      this.input.logger.info('Applied cloud reconciliation pass', {
+      this.logger.info('Applied cloud reconciliation pass', {
         ...reconciliationResult.stats
       });
     } catch (error) {
-      this.input.logger.error('Cloud reconciliation pass failed', {}, error);
+      this.logger.error('Cloud reconciliation pass failed', {}, error);
       throw error;
     }
   }
@@ -310,7 +305,6 @@ export class CloudReconciliationService {
       driveClient,
       vaultRootNodeUid,
       this.input.localChangeSuppressionService,
-      this.input.logger,
       {
         previousSnapshot,
         tombstones

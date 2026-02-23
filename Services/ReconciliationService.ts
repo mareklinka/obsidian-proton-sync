@@ -1,4 +1,3 @@
-import type { PluginLogger } from '../logger';
 import type { SyncIndexSnapshot } from './ObsidianSyncService';
 import { getBaseName, getParentPath, normalizePath, toCanonicalPathKey } from './path-utils';
 import {
@@ -9,11 +8,11 @@ import {
   type FileDownloader,
   Revision,
   NodeOrUid,
-  RevisionOrUid,
-  RevisionState
+  RevisionOrUid
 } from '@protontech/drive-sdk';
 import type { TAbstractFile, TFile, TFolder, Vault } from 'obsidian';
 import { LocalChangeSuppressionService, type LocalSuppressionLockOptions } from './LocalChangeSuppressionService';
+import { getLogger } from './vNext/ObsidianSyncLogger';
 
 export interface ReconciliationOptions {
   ignoredPathPrefixes?: string[];
@@ -106,7 +105,6 @@ export class ReconciliationService {
     private readonly driveClient: DriveLike,
     private readonly vaultRootNodeUid: string,
     private readonly localChangeSuppressionService: LocalChangeSuppressionService,
-    private readonly logger?: PluginLogger,
     options: ReconciliationOptions = {}
   ) {
     this.modifiedAtToleranceMs = options.modifiedAtToleranceMs ?? DEFAULT_TOLERANCE_MS;
@@ -190,7 +188,7 @@ export class ReconciliationService {
   ): Promise<void> {
     for await (const child of this.driveClient.iterateFolderChildren(parentUid)) {
       if (!child.ok) {
-        this.logger?.warn('Skipping degraded remote node during reconciliation', {
+        getLogger('ReconciliationService').warn('Skipping remote node due to error during folder scan', {
           parentUid,
           error: String(child.error)
         });
@@ -404,7 +402,9 @@ export class ReconciliationService {
             stats.remoteFilesCreatedOrUpdated += 1;
           } catch (error) {
             if (error instanceof Error && error.message.includes('Draft revision already exists for this link')) {
-              this.logger?.warn('Revision conflict detected, attempting to resolve by replacing the existing file');
+              getLogger('ReconciliationService').warn(
+                'Revision conflict detected, attempting to resolve by replacing the existing file'
+              );
 
               await this.deleteRemoteNode(remote.uid);
 

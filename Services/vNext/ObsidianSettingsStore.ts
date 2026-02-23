@@ -1,7 +1,6 @@
 import { ProtonAuthStatus, ProtonSessionState } from '../../proton/auth/ProtonSessionService';
-import { ProtonEventId } from './proton-drive-types';
+import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
 import { BehaviorSubject } from 'rxjs';
-import { LogLevel } from '../../logger';
 
 export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } = (function () {
   let instance: ObsidianSettingsStore | null = null;
@@ -31,9 +30,9 @@ class ObsidianSettingsStore {
     lastRefreshAt: null,
     sessionExpiresAt: null,
     latestEventId: null,
+    vaultRootNodeUid: null,
     enableFileLogging: false,
-    logLevel: 'info',
-    logMaxSizeKb: 1024
+    logLevel: LogLevel.info
   });
   public readonly settings$ = this.settingsSubject.asObservable();
 
@@ -52,9 +51,9 @@ class ObsidianSettingsStore {
         sessionExpiresAt: model.sessionExpiresAt ? new Date(model.sessionExpiresAt) : null,
         lastLoginError: model.lastLoginError,
         latestEventId: model.latestEventId ? new ProtonEventId(model.latestEventId) : null,
+        vaultRootNodeUid: model.vaultRootNodeUid ? new ProtonFolderId(model.vaultRootNodeUid) : null,
         enableFileLogging: model.enableFileLogging,
-        logLevel: model.logLevel,
-        logMaxSizeKb: model.logMaxSizeKb
+        logLevel: model.logLevel
       });
     });
 
@@ -67,10 +66,22 @@ class ObsidianSettingsStore {
         sessionExpiresAt: settings.sessionExpiresAt ? settings.sessionExpiresAt.getTime() : null,
         lastLoginError: settings.lastLoginError,
         latestEventId: settings.latestEventId?.eventId || null,
+        vaultRootNodeUid: settings.vaultRootNodeUid?.uid || null,
         enableFileLogging: settings.enableFileLogging,
-        logLevel: settings.logLevel,
-        logMaxSizeKb: settings.logMaxSizeKb
+        logLevel: settings.logLevel
       });
+    });
+  }
+
+  public getVaultRootNodeUid(): ProtonFolderId | null {
+    const settings = this.settingsSubject.getValue();
+    return settings.vaultRootNodeUid;
+  }
+
+  public setVaultRootNodeUid(vaultRootNodeUid: ProtonFolderId | null): void {
+    this.settingsSubject.next({
+      ...this.settingsSubject.getValue(),
+      vaultRootNodeUid: vaultRootNodeUid
     });
   }
 
@@ -81,6 +92,11 @@ class ObsidianSettingsStore {
     });
   }
 
+  public getLatestProtonEventId(): string | null {
+    const settings = this.settingsSubject.getValue();
+    return settings.latestEventId?.eventId || null;
+  }
+
   public setLatestProtonEventId(eventId: ProtonEventId): void {
     this.settingsSubject.next({
       ...this.settingsSubject.getValue(),
@@ -88,12 +104,11 @@ class ObsidianSettingsStore {
     });
   }
 
-  public setLogging(enabled: boolean, logLevel: LogLevel, logMaxSizeKb: number): void {
+  public setLogging(enabled: boolean, logLevel: LogLevel): void {
     this.settingsSubject.next({
       ...this.settingsSubject.getValue(),
       enableFileLogging: enabled,
-      logLevel: logLevel,
-      logMaxSizeKb: logMaxSizeKb
+      logLevel: logLevel
     });
   }
 
@@ -137,9 +152,9 @@ interface PluginSettingsStorageModel {
   sessionExpiresAt: number | null;
   lastLoginError: string | null;
   latestEventId: string | null;
+  vaultRootNodeUid: string | null;
   enableFileLogging: boolean;
   logLevel: LogLevel;
-  logMaxSizeKb: number;
 }
 
 export interface PluginSettings {
@@ -150,7 +165,14 @@ export interface PluginSettings {
   sessionExpiresAt: Date | null;
   lastLoginError: string | null;
   latestEventId: ProtonEventId | null;
+  vaultRootNodeUid: ProtonFolderId | null;
   enableFileLogging: boolean;
   logLevel: LogLevel;
-  logMaxSizeKb: number;
+}
+
+export enum LogLevel {
+  debug = 'debug',
+  info = 'info',
+  warn = 'warn',
+  error = 'error'
 }

@@ -1,3 +1,4 @@
+import { Effect, Option } from 'effect';
 import { App, Modal } from 'obsidian';
 import { Observable, firstValueFrom, map, merge, take } from 'rxjs';
 
@@ -6,29 +7,31 @@ type PromptableModal<T> = Modal & {
   canceled$: Observable<void>;
 };
 
-export async function promptFromModal<T>(
+export function promptFromModal<T>(
   app: App,
   createModal: (app: App) => PromptableModal<T>
-): Promise<T | undefined> {
-  const modal = createModal(app);
+): Effect.Effect<Option.Option<T>> {
+  return Effect.promise(async () => {
+    const modal = createModal(app);
 
-  const submitted$ = modal.submitted$.pipe(
-    take(1),
-    map(value => ({ kind: 'submitted' as const, value }))
-  );
+    const submitted$ = modal.submitted$.pipe(
+      take(1),
+      map(value => ({ kind: 'submitted' as const, value }))
+    );
 
-  const canceled$ = modal.canceled$.pipe(
-    take(1),
-    map(() => ({ kind: 'canceled' as const }))
-  );
+    const canceled$ = modal.canceled$.pipe(
+      take(1),
+      map(() => ({ kind: 'canceled' as const }))
+    );
 
-  modal.open();
+    modal.open();
 
-  const result = await firstValueFrom(merge(submitted$, canceled$));
+    const result = await firstValueFrom(merge(submitted$, canceled$));
 
-  if (result.kind === 'submitted') {
-    return result.value;
-  }
+    if (result.kind === 'submitted') {
+      return Option.some(result.value);
+    }
 
-  return undefined;
+    return Option.none();
+  });
 }

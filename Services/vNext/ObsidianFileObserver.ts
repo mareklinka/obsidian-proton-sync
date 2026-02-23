@@ -1,6 +1,7 @@
 import { TFile, TFolder, Vault } from 'obsidian';
 import { Subject } from 'rxjs';
 import { canonicalizePath, CanonicalPath, toVaultFile, toVaultFolder, VaultFile, VaultFolder } from './ObsidianFileApi';
+import { getLogger } from './ObsidianSyncLogger';
 
 export const { init: initObsidianFileObserver, get: getObsidianFileObserver } = (function () {
   let instance: ObsidianFileObserver | null = null;
@@ -25,6 +26,8 @@ class ObsidianFileObserver {
   public constructor(private readonly vault: Vault) {}
 
   public start() {
+    getLogger('ObsidianFileObserver').info('Starting to observe vault changes');
+
     this.vault.on('create', item => {
       this.changeStream.next(
         item instanceof TFile

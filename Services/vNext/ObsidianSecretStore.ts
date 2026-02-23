@@ -32,4 +32,4 @@ class ObsidianSecretStore {
   }
 }
 
-export type ObsidianSecretKey = 'proton-session' | 'proton-key-passphrases';
+export type ObsidianSecretKey = 'proton-drive-sync-session' | 'proton-drive-sync-salted-passphrases';

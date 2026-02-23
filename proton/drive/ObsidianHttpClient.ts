@@ -6,17 +6,11 @@ import type {
 import { requestUrl } from 'obsidian';
 import { headersToObject } from './ProtonDriveClient';
 import type { ProtonSession } from '../auth/ProtonSession';
-import { ProtonSessionService } from '../auth/ProtonSessionService';
-import { map } from 'rxjs';
+import { getProtonSessionService } from '../auth/vNext/ProtonSessionService';
+import { Option } from 'effect';
 
 export class ObsidianHttpClient implements ProtonDriveHTTPClient {
-  private currentSession: ProtonSession | null = null;
-
-  constructor(private readonly authService: ProtonSessionService) {
-    authService.currentSession$.pipe(map(_ => (_.state === 'ok' ? _.session : null))).subscribe(session => {
-      this.currentSession = session;
-    });
-  }
+  private readonly sessionService = getProtonSessionService();
 
   async fetchJson(request: ProtonDriveHTTPClientJsonRequest): Promise<Response> {
     return this.fetch(request, true);
@@ -30,11 +24,12 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     request: ProtonDriveHTTPClientJsonRequest | ProtonDriveHTTPClientBlobRequest,
     isJson: boolean
   ): Promise<Response> {
-    if (!this.currentSession) {
+    const currentSession = this.sessionService.getCurrentSession();
+    if (Option.isNone(currentSession)) {
       throw new Error('No Proton session available for SDK requests.');
     }
 
-    const headers = this.buildHeaders(request.headers, this.currentSession);
+    const headers = this.buildHeaders(request.headers, currentSession.value);
     const { body, contentType } = await this.prepareRequestBody(request);
 
     const response = await requestUrl({
@@ -99,7 +94,7 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
 
     headers.set('x-pm-uid', session.uid);
     headers.set('authorization', `Bearer ${session.accessToken}`);
-    headers.set('x-pm-appversion', this.authService.appVersionHeader);
+    headers.set('x-pm-appversion', this.sessionService.appVersionHeader);
 
     return headers;
   }
