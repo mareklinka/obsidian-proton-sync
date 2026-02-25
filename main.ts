@@ -24,7 +24,7 @@ import { initProtonCloudObserver } from './services/vNext/ProtonCloudObserver';
 import { getObsidianSettingsStore, initObsidianSettingsStore } from './services/vNext/ObsidianSettingsStore';
 import { getProtonSessionService, initProtonSessionService } from './proton/auth/vNext/ProtonSessionService';
 import { getLogger } from './services/vNext/ObsidianSyncLogger';
-import { Effect, Either, Option } from 'effect';
+import { Effect, Option } from 'effect';
 
 const PUSH_CONFIG_COMMAND_ID = 'push-vault-config';
 const PULL_CONFIG_COMMAND_ID = 'pull-vault-config';
@@ -143,7 +143,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     const app = this.app;
 
-    const e = Effect.either(
+    Effect.runPromise(
       Effect.gen(
         (this,
         function* () {
@@ -154,29 +154,28 @@ export default class ProtonDriveSyncPlugin extends Plugin {
               promptFromModal(app, app => new ProtonDriveCaptchaModal(app, captchaUrl))
           });
         })
+      ).pipe(
+        Effect.catchTags({
+          CaptchaDataNotProvidedError: () =>
+            Effect.succeed(new Notice('Captcha data was not provided. Login aborted.')),
+          CaptchaRequiredError: () => Effect.succeed(new Notice('Captcha is required to login. Login aborted.')),
+          TwoFactorCodeRequiredError: () =>
+            Effect.succeed(new Notice('Two-factor code is required to login. Login aborted.')),
+          EncryptionPasswordRequiredError: () =>
+            Effect.succeed(new Notice('Mailbox password is required to login. Login aborted.')),
+          ProtonApiCommunicationError: error =>
+            Effect.succeed(new Notice(`Failed to communicate with Proton API: ${error.message}. Login aborted.`))
+        })
       )
     );
-
-    const r = await Effect.runPromise(e);
-    if (Either.isLeft(r)) {
-      const error = r.left;
-      const message = error instanceof Error ? error.message : 'Login failed.';
-      new Notice(message);
-    }
   }
 
   async disconnect(): Promise<void> {
     this.logger.info('Disconnecting from Proton Drive');
     await this.orchestrator?.disconnect();
 
-    const r = await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
-    if (Either.isLeft(r)) {
-      const error = r.left;
-      const message = error instanceof Error ? error.message : 'Logout failed.';
-      new Notice(message);
-    } else {
-      new Notice('Disconnected from Proton Drive.');
-    }
+    await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
+    new Notice('Disconnected from Proton Drive.');
   }
 
   private async openConfigSyncActionDialog(): Promise<void> {
