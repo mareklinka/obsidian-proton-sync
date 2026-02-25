@@ -93,20 +93,19 @@ export default class ProtonDriveSyncPlugin extends Plugin {
             getObsidianSettingsStore().setVaultRootNodeUid(null);
 
             return yield* error;
-          }).pipe(
-            Effect.catchTags({
-              InvalidName: () => Effect.succeed(new Notice('Invalid folder name.')),
-              ItemAlreadyExists: () => Effect.succeed(new Notice('Folder already exists.')),
-              MyFilesRootFilesNotFound: () =>
-                Effect.succeed(new Notice('The "My Files" root folder was not found in Proton Drive.')),
-              GenericProtonDriveError: () =>
-                Effect.succeed(
-                  new Notice(
-                    'An error occurred while setting up the vault root folder in Proton Drive. Please try again later.'
-                  )
-                )
-            })
-          );
+          });
+        }),
+        Effect.catchTags({
+          InvalidName: () => Effect.succeed(new Notice('Invalid folder name.')),
+          ItemAlreadyExists: () => Effect.succeed(new Notice('Folder already exists.')),
+          MyFilesRootFilesNotFound: () =>
+            Effect.succeed(new Notice('The "My Files" root folder was not found in Proton Drive.')),
+          GenericProtonDriveError: () =>
+            Effect.succeed(
+              new Notice(
+                'An error occurred while setting up the vault root folder in Proton Drive. Please try again later.'
+              )
+            )
         })
       );
 
