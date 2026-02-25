@@ -1,3 +1,4 @@
+import { Option } from 'effect';
 import { ProtonAuthStatus, ProtonSessionState } from '../../proton/auth/ProtonSessionService';
 import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
 import { BehaviorSubject } from 'rxjs';
@@ -73,9 +74,13 @@ class ObsidianSettingsStore {
     });
   }
 
-  public getVaultRootNodeUid(): ProtonFolderId | null {
+  public getVaultRootNodeUid(): Option.Option<ProtonFolderId> {
     const settings = this.settingsSubject.getValue();
-    return settings.vaultRootNodeUid;
+    if (settings.vaultRootNodeUid) {
+      return Option.some(settings.vaultRootNodeUid);
+    } else {
+      return Option.none();
+    }
   }
 
   public setVaultRootNodeUid(vaultRootNodeUid: ProtonFolderId | null): void {

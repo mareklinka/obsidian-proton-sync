@@ -1,0 +1,249 @@
+import { MaybeNode, NodeType, ProtonDriveClient, UploadMetadata, ValidationError } from '@protontech/drive-sdk';
+import { Effect, Option } from 'effect';
+import {
+  FileUploadError,
+  GenericProtonDriveError,
+  InvalidNameError,
+  ItemAlreadyExistsError,
+  MyFilesRootFilesNotFound,
+  NotAFolderError,
+  ProtonFileId,
+  ProtonFolderId,
+  TreeEventScopeId
+} from './proton-drive-types';
+import { getProtonDriveClient } from '../../proton/drive/ProtonDriveClient';
+
+export interface ProtonFolder {
+  _tag: 'folder';
+  id: ProtonFolderId;
+  parentId: Option.Option<ProtonFolderId>;
+  treeEventScopeId: TreeEventScopeId;
+  name: string;
+}
+
+export interface ProtonFile {
+  _tag: 'file';
+  id: ProtonFileId;
+  parentId: Option.Option<ProtonFolderId>;
+  modifiedAt: Date;
+  name: string;
+}
+
+export const { init: initProtonDriveApi, get: getProtonDriveApi } = (function () {
+  let instance: ProtonDriveApi | null = null;
+
+  return {
+    init: function initProtonDriveApi(): ProtonDriveApi {
+      return (instance ??= new ProtonDriveApi(getProtonDriveClient()));
+    },
+    get: function getProtonDriveApi(): ProtonDriveApi {
+      if (!instance) {
+        throw new Error('ProtonCloudApi has not been initialized. Please call initProtonDriveApi first.');
+      }
+      return instance;
+    }
+  };
+})();
+
+class ProtonDriveApi {
+  public constructor(private readonly client: ProtonDriveClient) {}
+
+  public getRootFolder(): Effect.Effect<ProtonFolder, MyFilesRootFilesNotFound | GenericProtonDriveError> {
+    return Effect.gen(this, function* () {
+      const node = yield* Effect.tryPromise<MaybeNode, GenericProtonDriveError>({
+        try: async () => {
+          return await this.client.getMyFilesRootFolder();
+        },
+        catch: () => {
+          return new GenericProtonDriveError();
+        }
+      });
+
+      if (!node.ok) {
+        throw new MyFilesRootFilesNotFound();
+      }
+
+      return ProtonDriveApi.createFolderFromNode(node.value);
+    });
+  }
+
+  public getFolder(
+    folderUid: ProtonFolderId
+  ): Effect.Effect<Option.Option<ProtonFolder>, NotAFolderError | GenericProtonDriveError> {
+    return Effect.tryPromise({
+      try: async () => {
+        const node = await this.client.getNode(folderUid.uid);
+
+        if (!node.ok) {
+          return Option.none();
+        }
+
+        if (node.value.type !== 'folder') {
+          throw new NotAFolderError();
+        }
+
+        return Option.some(ProtonDriveApi.createFolderFromNode(node.value));
+      },
+      catch: error => {
+        if (error instanceof NotAFolderError) {
+          return error;
+        }
+
+        return new GenericProtonDriveError();
+      }
+    });
+  }
+
+  public getChildren(
+    folderId: ProtonFolderId
+  ): Effect.Effect<(ProtonFile | ProtonFolder)[], NotAFolderError | GenericProtonDriveError> {
+    return Effect.tryPromise({
+      try: async () => {
+        const children: (ProtonFile | ProtonFolder)[] = [];
+        for await (const child of this.client.iterateFolderChildren(folderId.uid)) {
+          if (!child.ok) {
+            continue;
+          }
+
+          if (child.value.type === NodeType.Folder) {
+            children.push(ProtonDriveApi.createFolderFromNode(child.value));
+          } else if (child.value.type === NodeType.File) {
+            children.push(ProtonDriveApi.createFileFromNode(child.value));
+          }
+        }
+
+        return children;
+      },
+      catch: () => {
+        return new GenericProtonDriveError();
+      }
+    });
+  }
+
+  public getFolderByName(
+    name: string,
+    parentId: ProtonFolderId
+  ): Effect.Effect<Option.Option<ProtonFolder>, GenericProtonDriveError> {
+    return Effect.tryPromise({
+      try: async () => {
+        for await (const child of this.client.iterateFolderChildren(parentId.uid, {
+          type: NodeType.Folder
+        })) {
+          if (!child.ok) {
+            continue;
+          }
+
+          if (child.value.name === name) {
+            return Option.some(ProtonDriveApi.createFolderFromNode(child.value));
+          }
+        }
+
+        return Option.none();
+      },
+      catch: () => {
+        return new GenericProtonDriveError();
+      }
+    });
+  }
+
+  public createFolder(
+    name: string,
+    parentId: ProtonFolderId
+  ): Effect.Effect<ProtonFolder, GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError> {
+    return Effect.tryPromise({
+      try: async () => {
+        const result = await this.client.createFolder(parentId.uid, name);
+
+        if (!result.ok) {
+          throw new GenericProtonDriveError();
+        }
+
+        return ProtonDriveApi.createFolderFromNode(result.value);
+      },
+      catch: error => {
+        if (error instanceof GenericProtonDriveError) {
+          return error;
+        }
+
+        if (error instanceof ValidationError) {
+          return new InvalidNameError();
+        }
+
+        if (error instanceof Error) {
+          return new ItemAlreadyExistsError();
+        }
+
+        return new GenericProtonDriveError();
+      }
+    });
+  }
+
+  public uploadFile(name: string, data: ArrayBuffer, metadata: UploadMetadata, parentId: ProtonFolderId) {
+    return Effect.tryPromise({
+      try: async () => {
+        const result = await this.client.getFileUploader(parentId.uid, name, metadata);
+        const stream = new ReadableStream<Uint8Array>({
+          start: controller => {
+            controller.enqueue(new Uint8Array(data));
+            controller.close();
+          }
+        });
+
+        result.uploadFromStream(stream, []);
+      },
+      catch: () => {
+        return new FileUploadError();
+      }
+    });
+  }
+
+  public uploadRevision(id: ProtonFileId, data: ArrayBuffer, metadata: UploadMetadata) {
+    return Effect.tryPromise({
+      try: async () => {
+        const result = await this.client.getFileRevisionUploader(id.uid, metadata);
+        const stream = new ReadableStream<Uint8Array>({
+          start: controller => {
+            controller.enqueue(new Uint8Array(data));
+            controller.close();
+          }
+        });
+
+        result.uploadFromStream(stream, []);
+      },
+      catch: () => {
+        return new FileUploadError();
+      }
+    });
+  }
+
+  private static createFolderFromNode(node: {
+    name: string;
+    uid: string;
+    treeEventScopeId: string;
+    parentUid?: string;
+  }): ProtonFolder {
+    return {
+      _tag: 'folder',
+      name: node.name,
+      id: new ProtonFolderId(node.uid),
+      treeEventScopeId: new TreeEventScopeId(node.treeEventScopeId),
+      parentId: node.parentUid ? Option.some(new ProtonFolderId(node.parentUid)) : Option.none()
+    };
+  }
+
+  private static createFileFromNode(node: {
+    name: string;
+    uid: string;
+    treeEventScopeId: string;
+    modificationTime: Date;
+    parentUid?: string;
+  }): ProtonFile {
+    return {
+      _tag: 'file',
+      name: node.name,
+      id: new ProtonFileId(node.uid),
+      modifiedAt: node.modificationTime,
+      parentId: node.parentUid ? Option.some(new ProtonFolderId(node.parentUid)) : Option.none()
+    };
+  }
+}

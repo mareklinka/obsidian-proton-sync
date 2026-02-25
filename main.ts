@@ -12,7 +12,7 @@ import { ProtonDriveConfigSyncActionModal, type ConfigSyncAction } from './ui/mo
 import { initObsidianSecretStore } from './services/vNext/ObsidianSecretStore';
 import { initObsidianFileApi } from './services/vNext/ObsidianFileApi';
 import { initObsidianFileObserver } from './services/vNext/ObsidianFileObserver';
-import { getProtonCloudApi, initProtonCloudApi } from './services/vNext/ProtonCloudApi';
+import { getProtonDriveApi, initProtonDriveApi } from './services/vNext/ProtonDriveApi';
 import { initProtonCloudObserver } from './services/vNext/ProtonCloudObserver';
 import { getObsidianSettingsStore, initObsidianSettingsStore } from './services/vNext/ObsidianSettingsStore';
 import { getProtonSessionService, initProtonSessionService } from './proton/auth/vNext/ProtonSessionService';
@@ -20,6 +20,7 @@ import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
 import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { getLogger } from './services/vNext/ObsidianSyncLogger';
 import { Effect, Option } from 'effect';
+import { getConfigSyncService, initConfigSyncService } from './services/vNext/ConfigSyncService';
 
 const PUSH_CONFIG_COMMAND_ID = 'push-vault-config';
 const PULL_CONFIG_COMMAND_ID = 'pull-vault-config';
@@ -58,17 +59,16 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     initProtonAccount();
     initProtonHttpClient();
     initProtonDriveClient();
-    initProtonCloudApi();
+    initProtonDriveApi();
     initProtonCloudObserver();
-
-    // this.configSyncService = this.getConfigSyncService();
+    initConfigSyncService(this.app.vault);
 
     sessionService.authState$.subscribe(async authState => {
       const effect = Effect.gen(this, function* () {
         this.logger.info('Authentication state changed', authState);
 
         if (authState === 'connected') {
-          const protonApi = getProtonCloudApi();
+          const protonApi = getProtonDriveApi();
           const myFilesRoot = yield* protonApi.getRootFolder();
           const maybeSyncRoot = yield* protonApi.getFolderByName(SYNC_CONTAINER_NAME, myFilesRoot.id);
 
@@ -128,7 +128,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       name: 'Push vault configuration to Proton Drive',
       icon: 'cloud-upload',
       callback: () => {
-        // void this.pushVaultConfig();
+        void this.pushVaultConfig();
       }
     });
 
@@ -223,23 +223,20 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     }
   }
 
-  // private async pushVaultConfig(): Promise<void> {
-  //   const configSyncService = this.configSyncService;
-  //   if (!configSyncService || !this.cloudReconciliationService) {
-  //     return;
-  //   }
+  private async pushVaultConfig(): Promise<void> {
+    const configSyncService = getConfigSyncService();
 
-  //   new Notice('Pushing vault configuration to Proton Drive...');
+    new Notice('Pushing vault configuration to Proton Drive...');
 
-  //   try {
-  //     const result = await configSyncService.pushConfig();
-  //     this.handleConfigSyncResult(result, 'push');
-  //   } catch (error) {
-  //     const message = error instanceof Error ? error.message : String(error);
-  //     this.logger.error('Config push failed', error);
-  //     new Notice(`Configuration push failed: ${message}`);
-  //   }
-  // }
+    await Effect.runPromise(
+      configSyncService.pushConfig().pipe(
+        Effect.catchAll(e => {
+          this.logger.error('Configuration push failed', e);
+          return Effect.succeed(new Notice('Configuration push failed. Please try again.'));
+        })
+      )
+    );
+  }
 
   // private async pullVaultConfig(): Promise<void> {
   //   const configSyncService = this.configSyncService;

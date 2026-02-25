@@ -48,6 +48,8 @@ export class GenericProtonDriveError extends Data.TaggedError('GenericProtonDriv
 export class InvalidNameError extends Data.TaggedError('InvalidName') {}
 export class ItemAlreadyExistsError extends Data.TaggedError('ItemAlreadyExists') {}
 export class TreeEventSubscriptionFailed extends Data.TaggedError('TreeEventSubscriptionFailed') {}
+export class FileUploadError extends Data.TaggedError('FileUploadError') {}
+export class FileRevisionUploadError extends Data.TaggedError('FileRevisionUploadError') {}
 
 export class TreeEventScopeId {
   public constructor(public readonly treeEventScopeId: string) {}

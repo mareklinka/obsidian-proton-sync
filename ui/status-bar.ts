@@ -5,7 +5,7 @@ import type { SyncEngineState } from '../services/ObsidianSyncService';
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 import { ReconcileState } from '../services/CloudReconciliationService';
-import { ConfigSyncState } from '../services/ConfigSyncService';
+import { ConfigSyncState } from '../services/vNext/ConfigSyncService';
 
 type StatusBarSyncState = 'idle' | 'downloading' | 'uploading' | 'error';
 

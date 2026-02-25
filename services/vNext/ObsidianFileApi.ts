@@ -38,6 +38,7 @@ class ObsidianFileApi {
         return {
           _type: 'folder',
           name: folder.name,
+          rawPath: folder.path,
           path: canonicalizePath(folder.path),
           children
         };
@@ -47,8 +48,8 @@ class ObsidianFileApi {
     });
   }
 
-  public getConfigFileTree(): Effect.Effect<VaultFolder, UnknownException> {
-    return Effect.tryPromise(async () => {
+  public getConfigFileTree(): Effect.Effect<VaultFolder> {
+    return Effect.promise(async () => {
       const configDir = normalizePath(this.vault.configDir);
 
       const walk = async (path: string): Promise<VaultFolder> => {
@@ -64,22 +65,23 @@ class ObsidianFileApi {
           children.push({
             _type: 'file',
             name: filePath.split('/').pop() ?? filePath,
+            rawPath: filePath,
             path: canonical,
             createdAt: stats ? new Date(stats.ctime) : new Date(),
             modifiedAt: stats ? new Date(stats.mtime) : new Date()
           });
+        }
 
-          for (const folderPath of listed.folders) {
-            const normalized = normalizePath(folderPath);
-            const canonical = canonicalizePath(normalized);
+        for (const folderPath of listed.folders) {
+          const normalized = normalizePath(folderPath);
 
-            children.push(await walk(canonical.path));
-          }
+          children.push(await walk(normalized));
         }
 
         return {
           _type: 'folder',
           name: path.split('/').pop() ?? path,
+          rawPath: path,
           path: canonicalizePath(path),
           children: children
         };
@@ -102,6 +104,10 @@ class ObsidianFileApi {
       return Option.some(content);
     });
   }
+
+  public readConfigFileContent(path: string): Effect.Effect<ArrayBuffer> {
+    return Effect.promise(async () => await this.vault.adapter.readBinary(path));
+  }
 }
 
 export function canonicalizePath(path: string): CanonicalPath {
@@ -119,6 +125,7 @@ export function toVaultFile(file: TFile): VaultFile {
   return {
     _type: 'file',
     name: file.name,
+    rawPath: file.path,
     path: canonicalizePath(file.path),
     createdAt: new Date(file.stat.ctime),
     modifiedAt: new Date(file.stat.mtime)
@@ -129,6 +136,7 @@ export function toVaultFolder(folder: TFolder): VaultFolder {
   return {
     _type: 'folder',
     name: folder.name,
+    rawPath: folder.path,
     path: canonicalizePath(folder.path),
     children: []
   };
@@ -139,6 +147,7 @@ export type VaultNode = VaultFile | VaultFolder;
 export interface VaultFile {
   _type: 'file';
   name: string;
+  rawPath: string;
   path: CanonicalPath;
   createdAt: Date;
   modifiedAt: Date;
@@ -147,6 +156,7 @@ export interface VaultFile {
 export interface VaultFolder {
   _type: 'folder';
   name: string;
+  rawPath: string;
   path: CanonicalPath;
   children: VaultNode[];
 }
