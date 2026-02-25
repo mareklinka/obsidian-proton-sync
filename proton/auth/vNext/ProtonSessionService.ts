@@ -162,12 +162,12 @@ class ProtonSessionService {
         }
       };
 
+      this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(this.session.session));
+
       this.sessionChangeSubject.next();
       this.authStatusSubject.next('connected');
 
       this.startAutoRefresh();
-
-      // how to handle errors in the generator?
     }).pipe(
       Effect.catchAll(e =>
         Effect.gen(this, function* () {
@@ -179,7 +179,7 @@ class ProtonSessionService {
             });
           }
           this.authStatusSubject.next('error');
-          return yield* Effect.fail(e);
+          return yield* e;
         })
       )
     );
@@ -256,7 +256,7 @@ class ProtonSessionService {
       }
 
       this.stopAutoRefresh();
-      this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(undefined));
+      this.secretStore.clear(SESSION_STORAGE_KEY);
       this.saltedKeyPasswords = {};
 
       this.session = { state: 'logged-out' };
@@ -297,6 +297,8 @@ class ProtonSessionService {
 
   private destroySession(session: { uid: string; accessToken: string }): Effect.Effect<void, never> {
     return Effect.promise(async () => {
+      this.secretStore.clear(SESSION_STORAGE_KEY);
+
       try {
         await deleteJson<ProtonKeySaltsResponse>('/auth/v4', session, this.appVersionHeader);
       } catch {
@@ -439,7 +441,7 @@ class ProtonSessionService {
       const code = yield* requestTwoFactorCode();
 
       if (Option.isNone(code) || !code.value.trim()) {
-        return yield* Effect.fail(new TwoFactorCodeRequiredError());
+        return yield* new TwoFactorCodeRequiredError();
       } else {
         return code.value;
       }

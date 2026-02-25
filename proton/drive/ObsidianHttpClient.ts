@@ -4,10 +4,25 @@ import type {
   ProtonDriveHTTPClientBlobRequest
 } from '@protontech/drive-sdk';
 import { requestUrl } from 'obsidian';
-import { headersToObject } from './ProtonDriveClient';
 import type { ProtonSession } from '../auth/ProtonSession';
-import { getProtonSessionService } from '../auth/vNext/ProtonSessionService';
 import { Option } from 'effect';
+import { getProtonSessionService } from '../auth/vNext/ProtonSessionService';
+
+export const { init: initProtonHttpClient, get: getProtonHttpClient } = (function () {
+  let instance: ObsidianHttpClient | null = null;
+
+  return {
+    init: function initProtonHttpClient(): ObsidianHttpClient {
+      return (instance ??= new ObsidianHttpClient());
+    },
+    get: function getProtonHttpClient(): ObsidianHttpClient {
+      if (!instance) {
+        throw new Error('ObsidianHttpClient has not been initialized. Please call initProtonHttpClient first.');
+      }
+      return instance;
+    }
+  };
+})();
 
 export class ObsidianHttpClient implements ProtonDriveHTTPClient {
   private readonly sessionService = getProtonSessionService();
@@ -35,7 +50,7 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     const response = await requestUrl({
       url: request.url,
       method: request.method,
-      headers: headersToObject(headers),
+      headers: this.headersToObject(headers),
       contentType: contentType,
       body: body,
       throw: false
@@ -116,5 +131,13 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     const concatenated = await new Blob([pre_string_encoded, dataBuffer, post_string_encoded]).arrayBuffer();
 
     return { data: concatenated, boundary: `----${randomBoundaryString}` };
+  }
+
+  private headersToObject(headers: Headers): Record<string, string> {
+    const output: Record<string, string> = {};
+    headers.forEach((value, key) => {
+      output[key] = value;
+    });
+    return output;
   }
 }

@@ -1,28 +1,23 @@
 import { App, Notice, Plugin } from 'obsidian';
 import { Subject, type Subscription } from 'rxjs';
 
-import type { ProtonDriveClient } from '@protontech/drive-sdk';
-import { ProtonAccount } from './proton/drive/ProtonAccount';
-import { createProtonDriveClient } from './proton/drive/ProtonDriveClient';
-import { ObsidianHttpClient } from './proton/drive/ObsidianHttpClient';
+import { initProtonAccount } from './proton/drive/ProtonAccount';
 import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-bar';
-import { CloudReconciliationService } from './services/CloudReconciliationService';
 import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
-import { SyncOrchestrationService } from './services/SyncOrchestrationService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
 import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
-import { ConfigSyncService, type ConfigSyncResult } from './services/ConfigSyncService';
-import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
 import { ProtonDriveConfigSyncActionModal, type ConfigSyncAction } from './ui/modals/config-sync-action-modal';
 import { initObsidianSecretStore } from './services/vNext/ObsidianSecretStore';
 import { initObsidianFileApi } from './services/vNext/ObsidianFileApi';
 import { initObsidianFileObserver } from './services/vNext/ObsidianFileObserver';
-import { initProtonCloudApi } from './services/vNext/ProtonCloudApi';
+import { getProtonCloudApi, initProtonCloudApi } from './services/vNext/ProtonCloudApi';
 import { initProtonCloudObserver } from './services/vNext/ProtonCloudObserver';
 import { getObsidianSettingsStore, initObsidianSettingsStore } from './services/vNext/ObsidianSettingsStore';
 import { getProtonSessionService, initProtonSessionService } from './proton/auth/vNext/ProtonSessionService';
+import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
+import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { getLogger } from './services/vNext/ObsidianSyncLogger';
 import { Effect, Option } from 'effect';
 
@@ -32,35 +27,39 @@ const SYNC_CONTAINER_NAME = 'obsidian-notes';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   private readonly logger = getLogger('Main');
-
-  private driveClient: ProtonDriveClient | null = null;
-  private orchestrator: SyncOrchestrationService | null = null;
-  private cloudReconciliationService: CloudReconciliationService | null = null;
   private statusBarController: SyncStatusBarController | null = null;
+
   private readonly subscriptions: Subscription[] = [];
-  private configSyncService: ConfigSyncService | null = null;
 
   async onload(): Promise<void> {
     this.logger.info('Loading Proton Drive Sync plugin', this.manifest.version);
-
-    initObsidianSettingsStore({ save: this.loadData.bind(this), load: this.loadData.bind(this) });
-    initObsidianSecretStore(this.app.secretStorage);
-    initObsidianFileApi(this.app.vault);
-    const fileObserver = initObsidianFileObserver(this.app.vault);
-
     this.app.workspace.onLayoutReady(() => {
       fileObserver.changes$.subscribe(change => {
         this.logger.info('Observed vault change', change);
       });
     });
 
-    const sessionService = initProtonSessionService(`external-drive-obsidiansync@${this.manifest.version}`);
-    await Effect.runPromise(sessionService.loadSession());
-    const protonAccount = new ProtonAccount();
-    this.driveClient = createProtonDriveClient(protonAccount, new ObsidianHttpClient());
+    initObsidianSettingsStore({ save: this.loadData.bind(this), load: this.loadData.bind(this) });
+    initObsidianSecretStore(this.app.secretStorage);
+    initObsidianFileApi(this.app.vault);
+    const fileObserver = initObsidianFileObserver(this.app.vault);
 
-    const protonApi = initProtonCloudApi(this.driveClient);
-    initProtonCloudObserver(this.driveClient);
+    const sessionService = initProtonSessionService(`external-drive-obsidiansync@${this.manifest.version}`);
+    await Effect.runPromise(
+      sessionService
+        .loadSession()
+        .pipe(
+          Effect.catchTag('ProtonApiCommunicationError', error =>
+            Effect.succeed(this.logger.error('Failed to re-establish Proton session. Please log in again.', error))
+          )
+        )
+    );
+
+    initProtonAccount();
+    initProtonHttpClient();
+    initProtonDriveClient();
+    initProtonCloudApi();
+    initProtonCloudObserver();
 
     // this.configSyncService = this.getConfigSyncService();
 
@@ -69,6 +68,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
         this.logger.info('Authentication state changed', authState);
 
         if (authState === 'connected') {
+          const protonApi = getProtonCloudApi();
           const myFilesRoot = yield* protonApi.getRootFolder();
           const maybeSyncRoot = yield* protonApi.getFolderByName(SYNC_CONTAINER_NAME, myFilesRoot.id);
 
@@ -86,7 +86,29 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
           this.logger.info('Vault node root ID is: ', vaultRoot.id);
         }
-      });
+      }).pipe(
+        Effect.catchAll(error => {
+          return Effect.gen(this, function* () {
+            this.logger.error('Error in vault root setup', error);
+            getObsidianSettingsStore().setVaultRootNodeUid(null);
+
+            return yield* error;
+          }).pipe(
+            Effect.catchTags({
+              InvalidName: () => Effect.succeed(new Notice('Invalid folder name.')),
+              ItemAlreadyExists: () => Effect.succeed(new Notice('Folder already exists.')),
+              MyFilesRootFilesNotFound: () =>
+                Effect.succeed(new Notice('The "My Files" root folder was not found in Proton Drive.')),
+              GenericProtonDriveError: () =>
+                Effect.succeed(
+                  new Notice(
+                    'An error occurred while setting up the vault root folder in Proton Drive. Please try again later.'
+                  )
+                )
+            })
+          );
+        })
+      );
 
       await Effect.runPromise(effect);
     });
@@ -107,7 +129,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       name: 'Push vault configuration to Proton Drive',
       icon: 'cloud-upload',
       callback: () => {
-        void this.pushVaultConfig();
+        // void this.pushVaultConfig();
       }
     });
 
@@ -116,7 +138,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       name: 'Pull vault configuration from Proton Drive',
       icon: 'cloud-download',
       callback: () => {
-        void this.pullVaultConfig();
+        // void this.pullVaultConfig();
       }
     });
 
@@ -128,11 +150,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.logger.info('Unloading Proton Drive Sync plugin');
     this.subscriptions.forEach(subscription => subscription.unsubscribe());
     this.subscriptions.length = 0;
-    await this.orchestrator?.dispose();
-    this.orchestrator = null;
     this.statusBarController?.dispose();
     this.statusBarController = null;
-    getProtonSessionService().dispose();
+    await Effect.runPromise(getProtonSessionService().dispose());
   }
 
   async signIn(credentials: { email: string; password: string }): Promise<void> {
@@ -172,7 +192,6 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   async disconnect(): Promise<void> {
     this.logger.info('Disconnecting from Proton Drive');
-    await this.orchestrator?.disconnect();
 
     await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
     new Notice('Disconnected from Proton Drive.');
@@ -205,91 +224,82 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     }
   }
 
-  private async pushVaultConfig(): Promise<void> {
-    const configSyncService = this.configSyncService;
-    if (!configSyncService || !this.cloudReconciliationService) {
-      return;
-    }
+  // private async pushVaultConfig(): Promise<void> {
+  //   const configSyncService = this.configSyncService;
+  //   if (!configSyncService || !this.cloudReconciliationService) {
+  //     return;
+  //   }
 
-    new Notice('Pushing vault configuration to Proton Drive...');
+  //   new Notice('Pushing vault configuration to Proton Drive...');
 
-    try {
-      const result = await configSyncService.pushConfig();
-      this.handleConfigSyncResult(result, 'push');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error('Config push failed', error);
-      new Notice(`Configuration push failed: ${message}`);
-    }
-  }
+  //   try {
+  //     const result = await configSyncService.pushConfig();
+  //     this.handleConfigSyncResult(result, 'push');
+  //   } catch (error) {
+  //     const message = error instanceof Error ? error.message : String(error);
+  //     this.logger.error('Config push failed', error);
+  //     new Notice(`Configuration push failed: ${message}`);
+  //   }
+  // }
 
-  private async pullVaultConfig(): Promise<void> {
-    const configSyncService = this.configSyncService;
-    if (!configSyncService || !this.cloudReconciliationService) {
-      return;
-    }
+  // private async pullVaultConfig(): Promise<void> {
+  //   const configSyncService = this.configSyncService;
+  //   if (!configSyncService || !this.cloudReconciliationService) {
+  //     return;
+  //   }
 
-    const confirmed = await promptFromModal(
-      this.app,
-      app =>
-        new ProtonDriveConfirmModal(
-          app,
-          'Pull vault configuration?',
-          'This can be destructive. Local vault configuration files will be replaced by remote configuration files.',
-          'Pull and replace local config'
-        )
-    );
+  //   const confirmed = await promptFromModal(
+  //     this.app,
+  //     app =>
+  //       new ProtonDriveConfirmModal(
+  //         app,
+  //         'Pull vault configuration?',
+  //         'This can be destructive. Local vault configuration files will be replaced by remote configuration files.',
+  //         'Pull and replace local config'
+  //       )
+  //   );
 
-    if (!confirmed) {
-      new Notice('Configuration pull canceled.');
-      return;
-    }
+  //   if (!confirmed) {
+  //     new Notice('Configuration pull canceled.');
+  //     return;
+  //   }
 
-    new Notice('Pulling vault configuration from Proton Drive...');
+  //   new Notice('Pulling vault configuration from Proton Drive...');
 
-    try {
-      const result = await configSyncService.pullConfig();
-      this.handleConfigSyncResult(result, 'pull');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error('Config pull failed', error);
-      new Notice(`Configuration pull failed: ${message}`);
-    }
-  }
+  //   try {
+  //     const result = await configSyncService.pullConfig();
+  //     this.handleConfigSyncResult(result, 'pull');
+  //   } catch (error) {
+  //     const message = error instanceof Error ? error.message : String(error);
+  //     this.logger.error('Config pull failed', error);
+  //     new Notice(`Configuration pull failed: ${message}`);
+  //   }
+  // }
 
-  private getConfigSyncService(): ConfigSyncService {
-    if (!this.driveClient) {
-      new Notice('Drive client is not available.');
-      throw new Error('Drive client unavailable while creating config sync service.');
-    }
+  // private handleConfigSyncResult(result: ConfigSyncResult, direction: 'push' | 'pull'): void {
+  //   if (result.status === 'aborted') {
+  //     if (result.reason === 'invalid-config-dir') {
+  //       new Notice('Configuration sync is only supported when configDir is inside the vault root.');
+  //       return;
+  //     }
 
-    throw new Error('Config sync service is not implemented yet.');
-  }
+  //     if (result.reason === 'remote-empty') {
+  //       new Notice('Remote configuration is empty. Pull aborted to avoid clearing local configuration.');
+  //       return;
+  //     }
+  //   }
 
-  private handleConfigSyncResult(result: ConfigSyncResult, direction: 'push' | 'pull'): void {
-    if (result.status === 'aborted') {
-      if (result.reason === 'invalid-config-dir') {
-        new Notice('Configuration sync is only supported when configDir is inside the vault root.');
-        return;
-      }
+  //   if (direction === 'push') {
+  //     new Notice(
+  //       `Configuration push complete.\nUploaded ${result.uploadedFiles} file(s), deleted ${result.deletedRemoteFiles} remote file(s), and deleted ${result.deletedRemoteFolders} remote folder(s).`
+  //     );
+  //     return;
+  //   }
 
-      if (result.reason === 'remote-empty') {
-        new Notice('Remote configuration is empty. Pull aborted to avoid clearing local configuration.');
-        return;
-      }
-    }
-
-    if (direction === 'push') {
-      new Notice(
-        `Configuration push complete.\nUploaded ${result.uploadedFiles} file(s), deleted ${result.deletedRemoteFiles} remote file(s), and deleted ${result.deletedRemoteFolders} remote folder(s).`
-      );
-      return;
-    }
-
-    new Notice(
-      `Configuration pull complete. Reopen the vault to apply changes.\nDownloaded ${result.downloadedFiles} file(s), deleted ${result.deletedLocalFiles} local file(s), and deleted ${result.deletedLocalFolders} local folder(s).`
-    );
-  }
+  //   new Notice(
+  //     `Configuration pull complete. Reopen the vault to apply changes.\nDownloaded ${result.downloadedFiles} file(s), deleted ${result.deletedLocalFiles} local file(s), and deleted ${result.deletedLocalFolders} local folder(s).`
+  //   );
+  // }
 
   private setupSettingsTab(plugin: ProtonDriveSyncPlugin): ProtonDriveSyncSettingTab {
     const settingTab = new ProtonDriveSyncSettingTab(plugin, getProtonSessionService().authState$);

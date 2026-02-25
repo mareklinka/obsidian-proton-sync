@@ -1,15 +1,16 @@
 import { Subject } from 'rxjs';
 import { getLogger } from './ObsidianSyncLogger';
 import { ProtonDriveClient } from '@protontech/drive-sdk';
-import { ProtonDriveError, ProtonId } from './proton-drive-types';
+import { ProtonDriveError, ProtonId, TreeEventSubscriptionFailed } from './proton-drive-types';
 import { Effect } from 'effect';
+import { getProtonDriveClient } from '../../proton/drive/ProtonDriveClient';
 
 export const { init: initProtonCloudObserver, get: getProtonCloudObserver } = (function () {
   let instance: ProtonCloudObserver | null = null;
 
   return {
-    init: function initProtonCloudObserver(client: ProtonDriveClient): ProtonCloudObserver {
-      return (instance ??= new ProtonCloudObserver(client));
+    init: function initProtonCloudObserver(): ProtonCloudObserver {
+      return (instance ??= new ProtonCloudObserver(getProtonDriveClient()));
     },
     get: function getProtonCloudObserver(): ProtonCloudObserver {
       if (!instance) {
@@ -28,7 +29,7 @@ class ProtonCloudObserver {
 
   public constructor(private readonly client: ProtonDriveClient) {}
 
-  public subscribeToTreeChanges(nodeId: ProtonId): Effect.Effect<void, ProtonDriveError> {
+  public subscribeToTreeChanges(nodeId: ProtonId): Effect.Effect<void, TreeEventSubscriptionFailed> {
     return Effect.tryPromise({
       try: async () => {
         this.client.subscribeToTreeEvents(nodeId.uid, async cloudEvent => {
@@ -37,7 +38,7 @@ class ProtonCloudObserver {
         });
       },
       catch: () => {
-        throw new ProtonDriveError('TreeSubscriptionFailed');
+        return new TreeEventSubscriptionFailed();
       }
     });
   }

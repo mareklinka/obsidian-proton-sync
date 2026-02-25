@@ -54,7 +54,23 @@ type CachedValue<T> = {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-export class ProtonAccount implements ProtonDriveAccount {
+export const { init: initProtonAccount, get: getProtonAccount } = (function () {
+  let instance: ProtonAccount | null = null;
+
+  return {
+    init: function initProtonAccount(): ProtonAccount {
+      return (instance ??= new ProtonAccount());
+    },
+    get: function getProtonAccount(): ProtonAccount {
+      if (!instance) {
+        throw new Error('ProtonAccount has not been initialized. Please call initProtonAccount first.');
+      }
+      return instance;
+    }
+  };
+})();
+
+class ProtonAccount implements ProtonDriveAccount {
   private addressesCache: CachedValue<ProtonDriveAccountAddress[]> | null = null;
   private publicKeysCache = new Map<string, CachedValue<PublicKey[]>>();
   private sessionService = getProtonSessionService();
