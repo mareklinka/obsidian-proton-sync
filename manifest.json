@@ -3,7 +3,7 @@
   "name": "Proton Drive Sync",
   "version": "0.2.0",
   "minAppVersion": "1.5.0",
-  "description": "Sync Obsidian files with Proton Drive",
+  "description": "Sync Obsidian vaults with Proton Drive",
   "author": "mareklinka",
   "authorUrl": "https://github.com/mareklinka",
   "isDesktopOnly": false
