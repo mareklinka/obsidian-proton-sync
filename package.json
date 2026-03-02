@@ -1,6 +1,6 @@
 {
   "name": "obsidian-proton-drive-sync",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Sync Obsidian files with Proton Drive",
   "author": "mareklinka",
   "license": "MIT",
@@ -52,7 +52,7 @@
     "globals": "^17.4.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.3.1",
-    "obsidian": "latest",
+    "obsidian": "1.12.3",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1",

@@ -1,0 +1,92 @@
+name: Release Obsidian plugin
+
+on:
+  push:
+    branches:
+      - release
+      - beta
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Build plugin
+        run: |
+          npm ci
+          npm run build
+
+      - name: Create and tag beta release
+        if: startsWith(github.ref, 'refs/heads/beta')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v$(node -p "require('./manifest.json').version")"
+          beta_tag="${tag}-pre"
+
+          git fetch --tags origin
+
+          if git rev-parse -q --verify "refs/tags/$beta_tag" >/dev/null; then
+            git tag -d "$beta_tag"
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$beta_tag" >/dev/null 2>&1; then
+            git push origin ":refs/tags/$beta_tag"
+          fi
+
+          git tag "$beta_tag"
+          git push origin "refs/tags/$beta_tag"
+
+          if gh release view "$beta_tag" >/dev/null 2>&1; then
+            gh release edit "$beta_tag" --title="$beta_tag" --draft=true
+            gh release upload "$beta_tag" main.js manifest.json styles.css --clobber
+          else
+            gh release create "$beta_tag" \
+              --title="$beta_tag" \
+              --draft \
+              main.js manifest.json styles.css
+          fi
+
+      - name: Create and tag release
+        if: startsWith(github.ref, 'refs/heads/release')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="v$(node -p "require('./manifest.json').version")"
+
+          git fetch --tags origin
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "Tag '$tag' already exists locally. Refusing to overwrite release tag."
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "Tag '$tag' already exists on origin. Refusing to overwrite release tag."
+            exit 1
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release '$tag' already exists. Refusing to overwrite release."
+            exit 1
+          fi
+
+          git tag "$tag"
+          git push origin "refs/tags/$tag"
+
+          gh release create "$tag" \
+            --title="$tag" \
+            --draft \
+            main.js manifest.json styles.css
