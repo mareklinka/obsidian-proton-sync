@@ -37,7 +37,7 @@ export function toConfigSyncProgressViewState(state: SyncState): ConfigSyncProgr
     case 'applyingChanges': {
       const progressPercent =
         state.totalItems <= 0 ? 0 : clampProgressPercent((state.processedItems / state.totalItems) * 100);
-      const directionText = state.state === 'pulling' ? 'Downloading notes...' : 'Uploading notes...';
+      const directionText = state.state === 'pulling' ? 'Downloading Vault items...' : 'Uploading Vault items...';
 
       return {
         message: directionText,

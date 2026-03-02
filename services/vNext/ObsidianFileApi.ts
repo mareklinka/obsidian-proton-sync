@@ -129,9 +129,9 @@ class ObsidianFileApi {
     });
   }
 
-  public writeFileContent(path: string, data: ArrayBuffer): Effect.Effect<void> {
+  public writeFileContent(path: string, data: ArrayBuffer, modifiedAt: Date): Effect.Effect<void> {
     return Effect.promise(async () => {
-      await this.vault.adapter.writeBinary(path, data);
+      await this.vault.adapter.writeBinary(path, data, { mtime: modifiedAt.getTime() });
     });
   }
 

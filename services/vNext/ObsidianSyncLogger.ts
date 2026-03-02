@@ -6,6 +6,11 @@ export const getLogger = (function () {
 
 class ObsidianSyncLogger {
   public constructor(private readonly scope: string | undefined = undefined) {}
+
+  public withScope(scope: string): ObsidianSyncLogger {
+    return new ObsidianSyncLogger(this.scope ? `${this.scope}:${scope}` : scope);
+  }
+
   public debug(message: string, ...data: unknown[]): void {
     console.debug(`[ObsidianSync]${this.scope ? ` [${this.scope}]` : ''} ${message}`, ...data);
   }

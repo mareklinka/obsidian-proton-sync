@@ -116,6 +116,7 @@ type PullSyncOperation =
   | { type: 'deleteLocalFolder'; details: LocalFolderDelete };
 
 class SyncService {
+  private readonly logger = getLogger('SyncService');
   private readonly stateSubject = new BehaviorSubject<SyncState>({ state: 'idle' });
   public readonly state$ = this.stateSubject.asObservable();
 
@@ -140,7 +141,7 @@ class SyncService {
 
   private pushImpl() {
     return Effect.gen(this, function* () {
-      const logger = getLogger('SyncService');
+      const logger = this.logger.withScope('push');
       logger.info('Starting config push');
 
       const vaultRootNodeId = getObsidianSettingsStore().getVaultRootNodeUid();
@@ -167,7 +168,7 @@ class SyncService {
       const q: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [{ local: localRoot, remote: remoteRoot }];
       while (q.length > 0) {
         const item = q.shift();
-        logger.debug('Processing config folder', { localName: item?.local.name, remoteName: item?.remote.name });
+
         if (!item) {
           continue;
         }
@@ -204,8 +205,12 @@ class SyncService {
               | ProtonFile
               | undefined;
 
-            if (child.modifiedAt.getTime() - (remoteFile?.modifiedAt.getTime() ?? 0) < 5000) {
-              logger.debug('Skipping upload for file with same modified time', { path: child.rawPath });
+            if (child.modifiedAt.getTime() <= (remoteFile?.modifiedAt.getTime() ?? 0)) {
+              logger.debug('Skipping upload for older file', {
+                path: child.rawPath,
+                localModifiedAt: child.modifiedAt,
+                remoteModifiedAt: remoteFile?.modifiedAt
+              });
               continue;
             }
 
@@ -357,7 +362,7 @@ class SyncService {
 
   private pullImpl(deleteLocalOrphans: boolean) {
     return Effect.gen(this, function* () {
-      const logger = getLogger('ConfigSyncService');
+      const logger = this.logger.withScope('pull');
       logger.info('Starting config pull', { deleteLocalOrphans });
 
       const vaultRootNodeId = getObsidianSettingsStore().getVaultRootNodeUid();
@@ -453,10 +458,21 @@ class SyncService {
               continue;
             }
 
-            if (localFile.modifiedAt.getTime() <= remoteChild.modifiedAt.getTime()) {
+            if (localFile.modifiedAt.getTime() < remoteChild.modifiedAt.getTime()) {
+              logger.debug('Local file is older than remote, scheduling for overwrite', {
+                path: localFile.rawPath,
+                localModifiedAt: localFile.modifiedAt,
+                remoteModifiedAt: remoteChild.modifiedAt
+              });
               localFileWrites.set(localPath, {
                 rawPath: localPath,
                 remoteId: remoteChild.id,
+                remoteModifiedAt: remoteChild.modifiedAt
+              });
+            } else {
+              logger.debug('Skipping local file overwrite since it is newer than remote', {
+                path: localFile.rawPath,
+                localModifiedAt: localFile.modifiedAt,
                 remoteModifiedAt: remoteChild.modifiedAt
               });
             }
@@ -542,7 +558,7 @@ class SyncService {
               }
 
               const data = yield* driveApi.downloadFile(op.details.remoteId);
-              yield* fileApi.writeFileContent(op.details.rawPath, data);
+              yield* fileApi.writeFileContent(op.details.rawPath, data, op.details.remoteModifiedAt);
             }
             break;
           case 'deleteLocalFile':
