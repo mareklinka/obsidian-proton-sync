@@ -84,12 +84,36 @@ interface FolderDelete {
   id: ProtonFolderId;
 }
 
+interface LocalFolderCreate {
+  rawPath: string;
+}
+
+interface LocalFileWrite {
+  rawPath: string;
+  remoteId: ProtonFileId;
+  remoteModifiedAt: Date;
+}
+
+interface LocalFileDelete {
+  rawPath: string;
+}
+
+interface LocalFolderDelete {
+  rawPath: string;
+}
+
 type SyncOperation =
   | { type: 'createFolder'; details: FolderCreate }
   | { type: 'uploadFile'; details: FileUpload }
   | { type: 'updateFile'; details: FileUpdate }
   | { type: 'deleteFile'; details: FileDelete }
   | { type: 'deleteFolder'; details: FolderDelete };
+
+type PullSyncOperation =
+  | { type: 'createLocalFolder'; details: LocalFolderCreate }
+  | { type: 'writeLocalFile'; details: LocalFileWrite }
+  | { type: 'deleteLocalFile'; details: LocalFileDelete }
+  | { type: 'deleteLocalFolder'; details: LocalFolderDelete };
 
 class ConfigSyncService {
   private readonly stateSubject = new BehaviorSubject<ConfigSyncState>({ state: 'idle' });
@@ -315,97 +339,234 @@ class ConfigSyncService {
     });
   }
 
-  // async pullConfig(): Promise<ConfigSyncResult> {
-  //   this.stateSubject.next('pulling');
+  public pullConfig(deleteLocalOrphans = false) {
+    return Effect.gen(this, function* () {
+      if (this.stateSubject.value.state !== 'idle') {
+        yield* new SyncAlreadyInProgressError();
+      }
 
-  //   try {
-  //     return await this.pullConfigImpl();
-  //   } finally {
-  //     this.stateSubject.next('idle');
-  //   }
-  // }
+      yield* this.pullConfigImpl(deleteLocalOrphans).pipe(
+        Effect.catchAll(error =>
+          Effect.gen(this, function* () {
+            this.stateSubject.next({ state: 'idle' });
+            yield* error;
+          })
+        )
+      );
+    });
+  }
 
-  // private async pullConfigImpl(): Promise<ConfigSyncResult> {
-  //   const validated = this.validateConfigDir();
-  //   if (!validated.ok) {
-  //     return createAbortedResult('invalid-config-dir');
-  //   }
+  private pullConfigImpl(deleteLocalOrphans: boolean) {
+    return Effect.gen(this, function* () {
+      const logger = getLogger('ConfigSyncService');
+      logger.info('Starting config pull', { deleteLocalOrphans });
 
-  //   const remoteRootUid = await this.ensureRemoteConfigRoot(validated.configDir, false);
-  //   if (!remoteRootUid) {
-  //     return createAbortedResult('remote-empty');
-  //   }
+      const configDir = yield* this.validateConfigDir();
+      const vaultRootNodeId = getObsidianSettingsStore().getVaultRootNodeUid();
 
-  //   const remote = await this.scanRemoteConfig(remoteRootUid);
-  //   if (remote.files.size === 0 && remote.folders.size === 0) {
-  //     return createAbortedResult('remote-empty');
-  //   }
+      if (Option.isNone(vaultRootNodeId)) {
+        throw new VaultRootIdNotAvailableError();
+      }
 
-  //   const local = await this.scanLocalConfig(validated.configDir);
-  //   const result = createSuccessResult();
+      this.stateSubject.next({ state: 'pulling', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });
+      const fileApi = getObsidianFileApi();
+      const localRoot = yield* fileApi.getConfigFileTree();
 
-  //   await this.ensureLocalFolder(validated.configDir);
+      this.stateSubject.next({ state: 'pulling', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
+      const driveApi = getProtonDriveApi();
+      const remoteConfigRootFolder = yield* this.getOrCreateRemoteConfigRoot(configDir, vaultRootNodeId.value);
+      const remoteRoot = yield* this.scanRemoteConfig(remoteConfigRootFolder);
 
-  //   for (const [canonicalPath, remoteFolder] of Array.from(remote.folders.entries()).sort(
-  //     (a, b) => depth(a[1].path) - depth(b[1].path)
-  //   )) {
-  //     const relPath = remoteFolder.path;
-  //     if (local.files.has(canonicalPath)) {
-  //       await this.adapter.remove(this.toAbsoluteConfigPath(validated.configDir, relPath));
-  //       local.files.delete(canonicalPath);
-  //       result.deletedLocalFiles += 1;
-  //     }
+      this.stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
 
-  //     await this.ensureLocalFolder(this.toAbsoluteConfigPath(validated.configDir, relPath));
-  //     local.folders.set(canonicalPath, relPath);
-  //   }
+      const localFolderCreatePaths = new Set<string>();
+      const localFileWrites = new Map<string, LocalFileWrite>();
+      const localFileDeletePaths = new Set<string>();
+      const localFolderDeletePaths = new Set<string>();
 
-  //   for (const [canonicalPath, remoteFile] of Array.from(remote.files.entries()).sort((a, b) =>
-  //     a[0].localeCompare(b[0])
-  //   )) {
-  //     const relPath = remoteFile.path;
-  //     const absolutePath = this.toAbsoluteConfigPath(validated.configDir, relPath);
-  //     if (local.folders.has(canonicalPath)) {
-  //       await this.adapter.rmdir(absolutePath, true);
-  //       local.folders.delete(canonicalPath);
-  //       result.deletedLocalFolders += 1;
-  //     }
+      const q: { local: VaultFolder; remote: ProtonRecursiveFolder; relativePath: string }[] = [
+        { local: localRoot, remote: remoteRoot, relativePath: '' }
+      ];
 
-  //     await this.ensureLocalFolder(this.toAbsoluteConfigPath(validated.configDir, getParentPath(relPath)));
-  //     const bytes = await this.downloadRemoteFile(remoteFile.uid);
-  //     await this.adapter.writeBinary(absolutePath, bytes);
-  //     local.files.set(canonicalPath, {
-  //       absolutePath,
-  //       relativePath: relPath,
-  //       modifiedAt: Date.now()
-  //     });
-  //     result.downloadedFiles += 1;
-  //   }
+      while (q.length > 0) {
+        const item = q.shift();
+        if (!item) {
+          continue;
+        }
 
-  //   for (const [canonicalPath, localFile] of Array.from(local.files.entries())) {
-  //     if (remote.files.has(canonicalPath)) {
-  //       continue;
-  //     }
+        const localChildren = item.local.children.filter(child => !this.isExcluded(child.rawPath));
+        const localFoldersByName = new Map<string, VaultFolder>();
+        const localFilesByName = new Map<string, (typeof localChildren)[number]>();
 
-  //     await this.adapter.remove(localFile.absolutePath);
-  //     local.files.delete(canonicalPath);
-  //     result.deletedLocalFiles += 1;
-  //   }
+        for (const child of localChildren) {
+          if (child._type === 'folder') {
+            localFoldersByName.set(child.name, child);
+          } else {
+            localFilesByName.set(child.name, child);
+          }
+        }
 
-  //   const remoteFolderKeys = new Set(Array.from(remote.folders.keys()));
-  //   const foldersToDelete = Array.from(local.folders.entries())
-  //     .filter(([canonicalPath]) => !remoteFolderKeys.has(canonicalPath))
-  //     .map(([, relPath]) => relPath)
-  //     .sort((a, b) => depth(b) - depth(a));
+        for (const remoteChild of item.remote.children) {
+          const relativePath = normalizePath(
+            item.relativePath ? `${item.relativePath}/${remoteChild.name}` : remoteChild.name
+          );
+          if (!relativePath) {
+            continue;
+          }
 
-  //   for (const relPath of foldersToDelete) {
-  //     await this.adapter.rmdir(this.toAbsoluteConfigPath(validated.configDir, relPath), true);
-  //     local.folders.delete(toCanonicalPathKey(relPath));
-  //     result.deletedLocalFolders += 1;
-  //   }
+          const localPath = toConfigPath(configDir, relativePath);
 
-  //   return result;
-  // }
+          if (remoteChild._tag === 'folder') {
+            const localFolder = localFoldersByName.get(remoteChild.name);
+            const localFile = localFilesByName.get(remoteChild.name);
+
+            if (localFile && localFile._type === 'file') {
+              localFileDeletePaths.add(localFile.rawPath);
+            }
+
+            if (!localFolder) {
+              localFolderCreatePaths.add(localPath);
+              q.push({
+                local: {
+                  _type: 'folder',
+                  name: remoteChild.name,
+                  rawPath: localPath,
+                  path: canonicalizePath(localPath),
+                  children: []
+                },
+                remote: remoteChild,
+                relativePath
+              });
+            } else {
+              q.push({ local: localFolder, remote: remoteChild, relativePath });
+            }
+          } else {
+            const localFolder = localFoldersByName.get(remoteChild.name);
+            const localFile = localFilesByName.get(remoteChild.name);
+
+            if (localFolder) {
+              localFolderDeletePaths.add(localFolder.rawPath);
+            }
+
+            if (!localFile || localFile._type !== 'file') {
+              localFileWrites.set(localPath, {
+                rawPath: localPath,
+                remoteId: remoteChild.id,
+                remoteModifiedAt: remoteChild.modifiedAt
+              });
+              continue;
+            }
+
+            if (localFile.modifiedAt.getTime() <= remoteChild.modifiedAt.getTime()) {
+              localFileWrites.set(localPath, {
+                rawPath: localPath,
+                remoteId: remoteChild.id,
+                remoteModifiedAt: remoteChild.modifiedAt
+              });
+            }
+          }
+        }
+
+        if (deleteLocalOrphans) {
+          for (const localChild of localChildren) {
+            const remoteMatch = item.remote.children.find(
+              remoteChild =>
+                remoteChild.name === localChild.name &&
+                ((remoteChild._tag === 'folder' && localChild._type === 'folder') ||
+                  (remoteChild._tag === 'file' && localChild._type === 'file'))
+            );
+
+            if (remoteMatch) {
+              continue;
+            }
+
+            if (localChild._type === 'folder') {
+              localFolderDeletePaths.add(localChild.rawPath);
+            } else {
+              localFileDeletePaths.add(localChild.rawPath);
+            }
+          }
+        }
+      }
+
+      const keptFolderDeletes: string[] = [];
+      for (const folderPath of Array.from(localFolderDeletePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
+        if (
+          !keptFolderDeletes.some(parentPath => folderPath === parentPath || folderPath.startsWith(`${parentPath}/`))
+        ) {
+          keptFolderDeletes.push(folderPath);
+        }
+      }
+
+      const keptFileDeletes = Array.from(localFileDeletePaths).filter(
+        filePath =>
+          !keptFolderDeletes.some(folderPath => filePath === folderPath || filePath.startsWith(`${folderPath}/`))
+      );
+
+      const pullOps: PullSyncOperation[] = [];
+
+      for (const folderPath of Array.from(localFolderCreatePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
+        pullOps.push({ type: 'createLocalFolder', details: { rawPath: folderPath } });
+      }
+
+      for (const writeOp of localFileWrites.values()) {
+        pullOps.push({ type: 'writeLocalFile', details: writeOp });
+      }
+
+      for (const filePath of keptFileDeletes) {
+        pullOps.push({ type: 'deleteLocalFile', details: { rawPath: filePath } });
+      }
+
+      for (const folderPath of keptFolderDeletes.sort((a, b) => pathDepth(b) - pathDepth(a))) {
+        pullOps.push({ type: 'deleteLocalFolder', details: { rawPath: folderPath } });
+      }
+
+      const totalOps = pullOps.length;
+      let processedOps = 0;
+
+      for (const op of pullOps) {
+        this.stateSubject.next({
+          state: 'pulling',
+          subState: 'applyingChanges',
+          totalItems: totalOps,
+          processedItems: processedOps
+        });
+
+        switch (op.type) {
+          case 'createLocalFolder':
+            {
+              yield* fileApi.ensureConfigFolder(op.details.rawPath);
+            }
+            break;
+          case 'writeLocalFile':
+            {
+              const parentPath = getParentPath(op.details.rawPath);
+              if (parentPath) {
+                yield* fileApi.ensureConfigFolder(parentPath);
+              }
+
+              const data = yield* driveApi.downloadFile(op.details.remoteId);
+              yield* fileApi.writeConfigFileContent(op.details.rawPath, data);
+            }
+            break;
+          case 'deleteLocalFile':
+            {
+              yield* fileApi.deleteConfigFile(op.details.rawPath);
+            }
+            break;
+          case 'deleteLocalFolder':
+            {
+              yield* fileApi.deleteConfigFolder(op.details.rawPath);
+            }
+            break;
+        }
+
+        processedOps += 1;
+      }
+
+      this.stateSubject.next({ state: 'idle' });
+    });
+  }
 
   private validateConfigDir(): Effect.Effect<string, InvalidConfigPathError> {
     return Effect.sync(() => {
@@ -510,6 +671,29 @@ class ConfigSyncService {
 
 function isAbsolutePath(path: string): boolean {
   return /^(?:[a-z]:\/|[a-z]:\\|\\\\|\/)/i.test(path);
+}
+
+function toConfigPath(configDir: string, relativePath: string): string {
+  return normalizePath(relativePath ? `${configDir}/${relativePath}` : configDir);
+}
+
+function getParentPath(path: string): string {
+  const normalized = normalizePath(path);
+  const idx = normalized.lastIndexOf('/');
+  if (idx <= 0) {
+    return '';
+  }
+
+  return normalized.slice(0, idx);
+}
+
+function pathDepth(path: string): number {
+  const normalized = normalizePath(path);
+  if (!normalized) {
+    return 0;
+  }
+
+  return normalized.split('/').filter(Boolean).length;
 }
 
 function inferMediaType(path: string): string {

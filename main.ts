@@ -141,7 +141,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       name: 'Pull vault configuration from Proton Drive',
       icon: 'cloud-download',
       callback: () => {
-        // void this.pullVaultConfig();
+        void this.pullVaultConfig();
       }
     });
 
@@ -259,39 +259,37 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     );
   }
 
-  // private async pullVaultConfig(): Promise<void> {
-  //   const configSyncService = this.configSyncService;
-  //   if (!configSyncService || !this.cloudReconciliationService) {
-  //     return;
-  //   }
+  private async pullVaultConfig(): Promise<void> {
+    const configSyncService = getConfigSyncService();
+    const progressModal = new ProtonDriveConfigSyncProgressModal(this.app, configSyncService.state$);
+    progressModal.open();
 
-  //   const confirmed = await promptFromModal(
-  //     this.app,
-  //     app =>
-  //       new ProtonDriveConfirmModal(
-  //         app,
-  //         'Pull vault configuration?',
-  //         'This can be destructive. Local vault configuration files will be replaced by remote configuration files.',
-  //         'Pull and replace local config'
-  //       )
-  //   );
+    new Notice('Pulling vault configuration from Proton Drive...');
 
-  //   if (!confirmed) {
-  //     new Notice('Configuration pull canceled.');
-  //     return;
-  //   }
-
-  //   new Notice('Pulling vault configuration from Proton Drive...');
-
-  //   try {
-  //     const result = await configSyncService.pullConfig();
-  //     this.handleConfigSyncResult(result, 'pull');
-  //   } catch (error) {
-  //     const message = error instanceof Error ? error.message : String(error);
-  //     this.logger.error('Config pull failed', error);
-  //     new Notice(`Configuration pull failed: ${message}`);
-  //   }
-  // }
+    await Effect.runPromise(
+      configSyncService.pullConfig(false).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            progressModal.markCompleted();
+            new Notice('Configuration pull completed.');
+          })
+        ),
+        Effect.catchTag('SyncAlreadyInProgressError', () =>
+          Effect.sync(() => {
+            progressModal.close();
+            new Notice('A configuration sync is already in progress. Please wait for it to complete.');
+          })
+        ),
+        Effect.catchAll(e => {
+          this.logger.error('Configuration pull failed', e);
+          return Effect.sync(() => {
+            progressModal.markFailed('Configuration pull failed. Please try again.');
+            new Notice('Configuration pull failed. Please try again.');
+          });
+        })
+      )
+    );
+  }
 
   // private handleConfigSyncResult(result: ConfigSyncResult, direction: 'push' | 'pull'): void {
   //   if (result.status === 'aborted') {

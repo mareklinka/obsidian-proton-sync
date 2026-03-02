@@ -216,6 +216,38 @@ class ProtonDriveApi {
     });
   }
 
+  public downloadFile(id: ProtonFileId): Effect.Effect<ArrayBuffer, GenericProtonDriveError> {
+    return Effect.tryPromise({
+      try: async () => {
+        const downloader = await this.client.getFileDownloader(id.uid);
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+
+        const writable = new WritableStream<Uint8Array>({
+          write: async chunk => {
+            chunks.push(chunk);
+            total += chunk.byteLength;
+          }
+        });
+
+        const controller = downloader.downloadToStream(writable);
+        await controller.completion();
+
+        const merged = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+          merged.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+
+        return merged.buffer;
+      },
+      catch: () => {
+        return new GenericProtonDriveError();
+      }
+    });
+  }
+
   public deleteFile(id: ProtonFileId): Effect.Effect<void, GenericProtonDriveError> {
     return this.trashNodes([id]);
   }

@@ -15,14 +15,6 @@ export function toConfigSyncProgressViewState(state: ConfigSyncState): ConfigSyn
     };
   }
 
-  if (state.state === 'pulling') {
-    return {
-      message: 'Pulling configuration…',
-      details: 'Receiving data from Proton Drive.',
-      progressPercent: null
-    };
-  }
-
   switch (state.subState) {
     case 'localTreeBuild':
       return {
@@ -45,9 +37,11 @@ export function toConfigSyncProgressViewState(state: ConfigSyncState): ConfigSyn
     case 'applyingChanges': {
       const progressPercent =
         state.totalItems <= 0 ? 0 : clampProgressPercent((state.processedItems / state.totalItems) * 100);
+      const directionText =
+        state.state === 'pulling' ? 'Applying changes to local configuration…' : 'Applying changes to Proton Drive…';
 
       return {
-        message: 'Applying changes to Proton Drive…',
+        message: directionText,
         details: `Processed ${state.processedItems} of ${state.totalItems} items.`,
         progressPercent
       };

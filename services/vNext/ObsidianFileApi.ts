@@ -108,6 +108,54 @@ class ObsidianFileApi {
   public readConfigFileContent(path: string): Effect.Effect<ArrayBuffer> {
     return Effect.promise(async () => await this.vault.adapter.readBinary(path));
   }
+
+  public ensureConfigFolder(path: string): Effect.Effect<void> {
+    return Effect.promise(async () => {
+      const normalized = normalizePath(path);
+      if (!normalized) {
+        return;
+      }
+
+      const segments = normalized.split('/').filter(Boolean);
+      let current = '';
+
+      for (const segment of segments) {
+        current = current ? `${current}/${segment}` : segment;
+        const exists = await this.vault.adapter.exists(current);
+        if (!exists) {
+          await this.vault.adapter.mkdir(current);
+        }
+      }
+    });
+  }
+
+  public writeConfigFileContent(path: string, data: ArrayBuffer): Effect.Effect<void> {
+    return Effect.promise(async () => {
+      await this.vault.adapter.writeBinary(path, data);
+    });
+  }
+
+  public deleteConfigFile(path: string): Effect.Effect<void> {
+    return Effect.promise(async () => {
+      const exists = await this.vault.adapter.exists(path);
+      if (!exists) {
+        return;
+      }
+
+      await this.vault.adapter.remove(path);
+    });
+  }
+
+  public deleteConfigFolder(path: string): Effect.Effect<void> {
+    return Effect.promise(async () => {
+      const exists = await this.vault.adapter.exists(path);
+      if (!exists) {
+        return;
+      }
+
+      await this.vault.adapter.rmdir(path, true);
+    });
+  }
 }
 
 export function canonicalizePath(path: string): CanonicalPath {
