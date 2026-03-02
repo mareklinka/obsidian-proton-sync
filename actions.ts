@@ -22,20 +22,26 @@ export async function pushVault(app: App, confirm: boolean): Promise<void> {
       Effect.tap(() =>
         Effect.sync(() => {
           progressModal.markCompleted();
-          new Notice('Vault push completed.');
+          new Notice('Push completed.');
         })
       ),
       Effect.catchTag('SyncAlreadyInProgressError', () =>
         Effect.sync(() => {
           progressModal.close();
-          new Notice('A vault sync is already in progress. Please wait for it to complete.');
+          new Notice('A sync is already in progress. Please wait for it to complete.');
+        })
+      ),
+      Effect.catchTag('VaultRootIdNotAvailableError', () =>
+        Effect.sync(() => {
+          progressModal.close();
+          new Notice('Vault root ID is not available. Please ensure your Proton account is connected correctly.');
         })
       ),
       Effect.catchAll(e => {
-        getLogger('SyncActions').error('Vault push failed', e);
+        getLogger('SyncActions').error('Push failed', e);
         return Effect.sync(() => {
-          progressModal.markFailed('Vault push failed. Please try again.');
-          new Notice('Vault push failed. Please try again.');
+          progressModal.markFailed('Push failed. Please try again.');
+          new Notice('Push failed. Please try again.');
         });
       })
     )
@@ -65,6 +71,12 @@ export async function pullVault(app: App, confirm: boolean): Promise<void> {
         Effect.sync(() => {
           progressModal.close();
           new Notice('A sync is already in progress. Please wait for it to complete.');
+        })
+      ),
+      Effect.catchTag('VaultRootIdNotAvailableError', () =>
+        Effect.sync(() => {
+          progressModal.close();
+          new Notice('Vault root ID is not available. Please ensure your Proton account is connected correctly.');
         })
       ),
       Effect.catchAll(e => {

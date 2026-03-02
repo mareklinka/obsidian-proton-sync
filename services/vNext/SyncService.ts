@@ -146,7 +146,7 @@ class SyncService {
       const vaultRootNodeId = getObsidianSettingsStore().getVaultRootNodeUid();
 
       if (Option.isNone(vaultRootNodeId)) {
-        throw new VaultRootIdNotAvailableError();
+        return yield* new VaultRootIdNotAvailableError();
       }
 
       this.stateSubject.next({ state: 'pushing', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });

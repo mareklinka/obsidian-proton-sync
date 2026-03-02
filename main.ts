@@ -191,10 +191,11 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     );
   }
 
-  async disconnect(): Promise<void> {
+  async signOut(): Promise<void> {
     this.logger.info('Disconnecting from Proton Drive');
 
     await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
+    getObsidianSettingsStore().setVaultRootNodeUid(null);
     new Notice('Disconnected from Proton Drive.');
   }
 
@@ -221,7 +222,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.subscriptions.push(
       settingTab.loggingChanged$.subscribe(() => {}),
       settingTab.disconnect$.subscribe(() => {
-        this.disconnect();
+        this.signOut();
       }),
       settingTab.login$.subscribe(credentials => {
         this.signIn(credentials);
