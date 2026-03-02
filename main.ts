@@ -118,7 +118,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       syncState$: syncService.state$
     });
 
-    this.addRibbonIcon('cloud-cog', 'Vault configuration sync', () => {
+    this.addRibbonIcon('cloud-cog', 'Proton Drive Sync', () => {
       void this.openSyncActionDialog();
     });
 
