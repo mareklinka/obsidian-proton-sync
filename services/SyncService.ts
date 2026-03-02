@@ -1,22 +1,23 @@
 import { type UploadMetadata } from '@protontech/drive-sdk';
-import { normalizePath, type Vault } from 'obsidian';
-
-import { getBaseName, toCanonicalPathKey } from '../path-utils';
-import { BehaviorSubject } from 'rxjs';
-import { canonicalizePath, getObsidianFileApi, VaultFolder } from './ObsidianFileApi';
 import { Data, Effect, Option } from 'effect';
+import { normalizePath, type Vault } from 'obsidian';
+import { BehaviorSubject } from 'rxjs';
+
+import { canonicalizePath, getObsidianFileApi } from './ObsidianFileApi';
 import { getObsidianSettingsStore } from './ObsidianSettingsStore';
-import {
+import { getLogger } from './ObsidianSyncLogger';
+import { ProtonFolderId, TreeEventScopeId } from './proton-drive-types';
+import { getProtonDriveApi } from './ProtonDriveApi';
+
+import type { VaultFolder } from './ObsidianFileApi';
+import type {
   GenericProtonDriveError,
   InvalidNameError,
   ItemAlreadyExistsError,
   NotAFolderError,
-  ProtonFileId,
-  ProtonFolderId,
-  TreeEventScopeId
+  ProtonFileId
 } from './proton-drive-types';
-import { getProtonDriveApi, ProtonFile, ProtonFolder } from './ProtonDriveApi';
-import { getLogger } from './ObsidianSyncLogger';
+import type { ProtonFile, ProtonFolder } from './ProtonDriveApi';
 
 const EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH = '/plugins/proton-drive-sync';
 
@@ -660,8 +661,8 @@ class SyncService {
     }
 
     const canonical = canonicalizePath(normalized);
-    const excluded = toCanonicalPathKey(this.vault.configDir + EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH);
-    return canonical.path === excluded || canonical.path.startsWith(`${excluded}/`);
+    const excluded = canonicalizePath(this.vault.configDir + EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH);
+    return canonical.path === excluded.path || canonical.path.startsWith(`${excluded.path}/`);
   }
 }
 
@@ -685,10 +686,20 @@ function pathDepth(path: string): number {
 }
 
 function inferMediaType(path: string): string {
-  const lower = getBaseName(path).toLowerCase();
+  const normalized = canonicalizePath(normalizePath(path));
 
-  if (lower.endsWith('.md')) return 'text/markdown';
-  if (lower.endsWith('.json')) return 'application/json';
+  const index = normalized.path.lastIndexOf('/');
+  if (index >= 0) {
+    const extension = normalized.path.slice(index + 1);
+
+    if (extension.endsWith('.md')) {
+      return 'text/markdown';
+    }
+
+    if (extension.endsWith('.json')) {
+      return 'application/json';
+    }
+  }
 
   return 'application/octet-stream';
 }

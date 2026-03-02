@@ -1,6 +1,7 @@
-import { normalizePath, TFile, TFolder, Vault } from 'obsidian';
 import { Effect, Option } from 'effect';
-import { UnknownException } from 'effect/Cause';
+import { normalizePath, TFile, TFolder } from 'obsidian';
+
+import type { Vault } from 'obsidian';
 
 export const { init: initObsidianFileApi, get: getObsidianFileApi } = (function () {
   let instance: ObsidianFileApi | null = null;

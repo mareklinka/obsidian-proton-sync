@@ -1,4 +1,4 @@
-import type { SyncState } from '../services/vNext/SyncService';
+import type { SyncState } from '../services/SyncService';
 
 export interface ConfigSyncProgressViewState {
   message: string;

@@ -1,5 +1,7 @@
-import { App, Modal, Setting } from 'obsidian';
+import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
+
+import type { App } from 'obsidian';
 
 export class ProtonDriveConfirmModal extends Modal {
   private readonly submittedSubject = new Subject<boolean>();

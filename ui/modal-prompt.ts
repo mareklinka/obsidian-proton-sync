@@ -1,6 +1,8 @@
 import { Effect, Option } from 'effect';
-import { App, Modal } from 'obsidian';
-import { Observable, firstValueFrom, map, merge, take } from 'rxjs';
+import { firstValueFrom, map, merge, take } from 'rxjs';
+
+import type { App, Modal } from 'obsidian';
+import type { Observable } from 'rxjs';
 
 type PromptableModal<T> = Modal & {
   submitted$: Observable<T>;

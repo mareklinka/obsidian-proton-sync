@@ -1,13 +1,10 @@
-import type { Plugin } from 'obsidian';
 import { combineLatest, map, type Observable } from 'rxjs';
 
-import type { SyncEngineState } from '../services/ObsidianSyncService';
-import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
-import { ReconcileState } from '../services/CloudReconciliationService';
-import { SyncState } from '../services/vNext/SyncService';
 
-type StatusBarSyncState = 'idle' | 'downloading' | 'uploading' | 'error';
+import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import type { SyncState } from '../services/SyncService';
+import type { Plugin } from 'obsidian';
 
 export interface SyncStatusBarController {
   dispose(): void;
@@ -17,24 +14,17 @@ export function createSyncStatusBar(
   plugin: Plugin,
   input: {
     loginState$: Observable<ProtonAuthStatus>;
-    syncState$: Observable<SyncEngineState>;
-    reconcileState$: Observable<ReconcileState>;
-    configSyncState$: Observable<SyncState>;
+    syncState$: Observable<SyncState>;
   }
 ): SyncStatusBarController {
   const itemEl = plugin.addStatusBarItem();
   itemEl.addClass('proton-sync-status');
 
-  const subscription = combineLatest([
-    input.loginState$,
-    input.syncState$,
-    input.reconcileState$,
-    input.configSyncState$
-  ])
+  const subscription = combineLatest([input.loginState$, input.syncState$])
     .pipe(
-      map(([loginState, syncState, reconcileState, configSyncState]) => ({
+      map(([loginState, syncState]) => ({
         loginState,
-        syncState: toEffectiveSyncState(syncState, reconcileState, configSyncState)
+        syncState: toEffectiveSyncState(syncState)
       }))
     )
     .subscribe(({ loginState, syncState }) => {
@@ -61,48 +51,28 @@ export function createSyncStatusBar(
   };
 }
 
-function toEffectiveSyncState(
-  syncState: SyncEngineState,
-  reconcileState: ReconcileState,
-  configSyncState: SyncState
-): StatusBarSyncState {
-  if (reconcileState === 'reconciling' || configSyncState.state === 'pulling') {
-    return 'downloading';
-  }
-
-  if (syncState === 'error') {
-    return 'error';
-  }
-
-  if (syncState === 'syncing' || configSyncState.state === 'pushing') {
-    return 'uploading';
-  }
-
-  return 'idle';
+function toEffectiveSyncState(syncState: SyncState): SyncState['state'] {
+  return syncState.state;
 }
 
-function toSyncLabel(state: StatusBarSyncState): string {
+function toSyncLabel(state: SyncState['state']): string {
   switch (state) {
-    case 'downloading':
+    case 'pulling':
       return 'Downloading';
-    case 'uploading':
+    case 'pushing':
       return 'Uploading';
-    case 'error':
-      return 'Error';
     case 'idle':
     default:
       return 'Idle';
   }
 }
 
-function toSyncIcon(state: StatusBarSyncState): string {
+function toSyncIcon(state: SyncState['state']): string {
   switch (state) {
-    case 'downloading':
+    case 'pulling':
       return '⬇️';
-    case 'uploading':
+    case 'pushing':
       return '⬆️';
-    case 'error':
-      return '⚠️';
     case 'idle':
     default:
       return '💤';

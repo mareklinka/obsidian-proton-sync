@@ -1,12 +1,14 @@
+import { Option } from 'effect';
+import { requestUrl } from 'obsidian';
+
+import { getProtonSessionService } from '../auth/ProtonSessionService';
+
+import type { ProtonSession } from '../auth/ProtonSession';
 import type {
   ProtonDriveHTTPClient,
   ProtonDriveHTTPClientJsonRequest,
   ProtonDriveHTTPClientBlobRequest
 } from '@protontech/drive-sdk';
-import { requestUrl } from 'obsidian';
-import type { ProtonSession } from '../auth/ProtonSession';
-import { Option } from 'effect';
-import { getProtonSessionService } from '../auth/vNext/ProtonSessionService';
 
 export const { init: initProtonHttpClient, get: getProtonHttpClient } = (function () {
   let instance: ObsidianHttpClient | null = null;

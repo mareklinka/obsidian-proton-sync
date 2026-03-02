@@ -1,4 +1,4 @@
-import { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 
 export function toLoginLabel(state: ProtonAuthStatus): string {
   switch (state) {

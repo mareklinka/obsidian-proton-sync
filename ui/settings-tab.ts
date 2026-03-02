@@ -1,11 +1,14 @@
 import { PluginSettingTab, Setting } from 'obsidian';
-import { combineLatest, Observable, Subject, Subscription, take } from 'rxjs';
+import { combineLatest, Subject, take } from 'rxjs';
 
 import { ProtonDriveLoginModal } from './modals/login-modal';
-import ProtonDriveSyncPlugin from '../main';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
-import { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
-import { getObsidianSettingsStore, LogLevel, PluginSettings } from '../services/vNext/ObsidianSettingsStore';
+import { getObsidianSettingsStore } from '../services/ObsidianSettingsStore';
+
+import type ProtonDriveSyncPlugin from '../main';
+import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import type { LogLevel, PluginSettings } from '../services/ObsidianSettingsStore';
+import type { Observable, Subscription } from 'rxjs';
 
 export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   private readonly disconnectSubject = new Subject<void>();

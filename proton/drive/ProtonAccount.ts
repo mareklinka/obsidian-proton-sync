@@ -1,10 +1,12 @@
+import { Option } from 'effect';
 import * as openpgp from 'openpgp';
+
+import { getProtonSessionService } from '../auth/ProtonSessionService';
+import { getJson } from '../ProtonApiClient';
+
+import type { ProtonSession } from '../auth/ProtonSession';
 import type { ProtonDriveAccount, ProtonDriveAccountAddress } from '@protontech/drive-sdk';
 import type { PrivateKey, PublicKey } from '@protontech/drive-sdk/dist/crypto';
-import { ProtonSession } from '../auth/ProtonSession';
-import { getJson } from '../ProtonApiClient';
-import { getProtonSessionService } from '../auth/vNext/ProtonSessionService';
-import { Option } from 'effect';
 
 type ProtonAddressKey = {
   ID: string;
@@ -274,7 +276,7 @@ async function decryptKey(
     });
 
     return decrypted;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

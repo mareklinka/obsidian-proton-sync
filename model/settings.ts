@@ -1,5 +1,5 @@
 import type { LogLevel } from '../logger';
-import { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 
 export interface ProtonDriveSyncSettings {
   accountEmail: string;

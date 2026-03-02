@@ -1,6 +1,7 @@
-import { App, Modal, Setting } from 'obsidian';
-
+import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
+
+import type { App } from 'obsidian';
 
 export class ProtonDriveLoginModal extends Modal {
   private readonly loginSubject = new Subject<{

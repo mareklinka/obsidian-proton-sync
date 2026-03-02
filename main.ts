@@ -1,28 +1,26 @@
-import { Notice, Plugin } from 'obsidian';
-import { BehaviorSubject, type Subscription } from 'rxjs';
-
-import { initProtonAccount } from './proton/drive/ProtonAccount';
-import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-bar';
-import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
-import { promptFromModal } from './ui/modal-prompt';
-import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
-import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
-import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
-import { ProtonDriveSyncActionModal, type ConfigSyncAction } from './ui/modals/sync-action-modal';
-import { initObsidianSecretStore } from './services/vNext/ObsidianSecretStore';
-import { initObsidianFileApi } from './services/vNext/ObsidianFileApi';
-import { getProtonDriveApi, initProtonDriveApi } from './services/vNext/ProtonDriveApi';
-import { getProtonCloudObserver, initProtonCloudObserver } from './services/vNext/ProtonCloudObserver';
-import { getObsidianSettingsStore, initObsidianSettingsStore } from './services/vNext/ObsidianSettingsStore';
-import { getProtonSessionService, initProtonSessionService } from './proton/auth/vNext/ProtonSessionService';
-import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
-import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
-import { getLogger } from './services/vNext/ObsidianSyncLogger';
 import { Effect, Option } from 'effect';
-import { getSyncService, initSyncService } from './services/vNext/SyncService';
-import type { SyncEngineState } from './services/ObsidianSyncService';
-import type { ReconcileState } from './services/CloudReconciliationService';
+import { Notice, Plugin } from 'obsidian';
+import { type Subscription } from 'rxjs';
+
 import { pullVault, pushVault } from './actions';
+import { getProtonSessionService, initProtonSessionService } from './proton/auth/ProtonSessionService';
+import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
+import { initProtonAccount } from './proton/drive/ProtonAccount';
+import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
+import { initObsidianFileApi } from './services/ObsidianFileApi';
+import { initObsidianSecretStore } from './services/ObsidianSecretStore';
+import { getObsidianSettingsStore, initObsidianSettingsStore } from './services/ObsidianSettingsStore';
+import { getLogger } from './services/ObsidianSyncLogger';
+import { getProtonCloudObserver, initProtonCloudObserver } from './services/ProtonCloudObserver';
+import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
+import { getSyncService, initSyncService } from './services/SyncService';
+import { promptFromModal } from './ui/modal-prompt';
+import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
+import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
+import { ProtonDriveSyncActionModal, type ConfigSyncAction } from './ui/modals/sync-action-modal';
+import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
+import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
+import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-bar';
 
 const PUSH_CONFIG_COMMAND_ID = 'push-vault-config';
 const PULL_CONFIG_COMMAND_ID = 'pull-vault-config';
@@ -117,9 +115,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     this.statusBarController = createSyncStatusBar(this, {
       loginState$: sessionService.authState$,
-      syncState$: new BehaviorSubject<SyncEngineState>('idle'), // Placeholder, will be set properly after orchestrator is created
-      reconcileState$: new BehaviorSubject<ReconcileState>('idle'), // Placeholder, will be set properly after orchestrator is created
-      configSyncState$: syncService.state$
+      syncState$: syncService.state$
     });
 
     this.addRibbonIcon('cloud-cog', 'Vault configuration sync', () => {

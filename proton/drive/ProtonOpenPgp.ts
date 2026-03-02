@@ -1,4 +1,4 @@
-import * as openpgp from 'openpgp';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { OpenPGPCryptoWithCryptoProxy, type OpenPGPCrypto, type OpenPGPCryptoProxy } from '@protontech/drive-sdk';
 import {
   VERIFICATION_STATUS,
@@ -6,6 +6,7 @@ import {
   type PublicKey,
   type SessionKey
 } from '@protontech/drive-sdk/dist/crypto';
+import * as openpgp from 'openpgp';
 
 export function createOpenPgpCrypto(): OpenPGPCrypto {
   return new OpenPGPCryptoWithCryptoProxy(new OpenPgpCryptoProxy());

@@ -1,10 +1,12 @@
 import js from '@eslint/js';
+import { defineConfig } from 'eslint/config';
 import prettierConfig from 'eslint-config-prettier';
-import globals from 'globals';
+import importPlugin from 'eslint-plugin-import';
 import noOnlyTests from 'eslint-plugin-no-only-tests';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-export default tseslint.config(
+export default defineConfig(
   {
     ignores: ['**/node_modules/**', '**/dist/**', '**/coverage/**', 'main.js', 'main.js.map', 'polyfills/**']
   },
@@ -18,18 +20,30 @@ export default tseslint.config(
       sourceType: 'module'
     },
     plugins: {
+      import: importPlugin,
       'no-only-tests': noOnlyTests
     },
     rules: {
-      'no-only-tests/no-only-tests': 'error'
+      'no-only-tests/no-only-tests': 'error',
+      'import/order': [
+        'error',
+        {
+          groups: ['builtin', 'external', 'internal', ['parent', 'sibling', 'index'], 'type'],
+          'newlines-between': 'always',
+          alphabetize: {
+            order: 'asc',
+            caseInsensitive: true
+          }
+        }
+      ]
     }
   },
   {
     files: ['**/*.ts'],
     rules: {
-      '@typescript-eslint/no-unused-vars': 'off',
-      '@typescript-eslint/no-explicit-any': 'off',
-      '@typescript-eslint/consistent-type-imports': 'off'
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/consistent-type-imports': 'error'
     }
   },
   {
@@ -41,7 +55,7 @@ export default tseslint.config(
   {
     files: ['**/*.{spec,test}.ts'],
     rules: {
-      '@typescript-eslint/no-explicit-any': 'off'
+      '@typescript-eslint/no-explicit-any': 'error'
     }
   }
 );

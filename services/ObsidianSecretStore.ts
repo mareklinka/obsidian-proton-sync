@@ -1,4 +1,4 @@
-import { SecretStorage } from 'obsidian';
+import type { SecretStorage } from 'obsidian';
 
 export const { init: initObsidianSecretStore, get: getObsidianSecretStore } = (function () {
   let instance: ObsidianSecretStore | null = null;

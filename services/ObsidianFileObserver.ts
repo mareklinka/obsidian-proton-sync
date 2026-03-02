@@ -1,7 +1,11 @@
-import { TFile, TFolder, Vault } from 'obsidian';
+import { TFile } from 'obsidian';
 import { Subject } from 'rxjs';
-import { canonicalizePath, CanonicalPath, toVaultFile, toVaultFolder, VaultFile, VaultFolder } from './ObsidianFileApi';
+
+import { canonicalizePath, toVaultFile, toVaultFolder } from './ObsidianFileApi';
 import { getLogger } from './ObsidianSyncLogger';
+
+import type { CanonicalPath, VaultFile, VaultFolder } from './ObsidianFileApi';
+import type { TFolder, Vault } from 'obsidian';
 
 export const { init: initObsidianFileObserver, get: getObsidianFileObserver } = (function () {
   let instance: ObsidianFileObserver | null = null;

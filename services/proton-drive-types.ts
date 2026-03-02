@@ -1,5 +1,7 @@
 import { DriveEventType } from '@protontech/drive-sdk';
-import { Data, Option } from 'effect';
+import { Data } from 'effect';
+
+import type { Option } from 'effect';
 
 export abstract class ProtonId {
   protected constructor(public readonly uid: string) {}

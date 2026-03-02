@@ -1,10 +1,13 @@
-import { App, Notice } from 'obsidian';
-import { getSyncService } from './services/vNext/SyncService';
 import { Effect, Option } from 'effect';
-import { ProtonDriveSyncProgressModal } from './ui/modals/sync-progress-modal';
+import { Notice } from 'obsidian';
+
+import { getLogger } from './services/ObsidianSyncLogger';
+import { getSyncService } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
-import { getLogger } from './services/vNext/ObsidianSyncLogger';
+import { ProtonDriveSyncProgressModal } from './ui/modals/sync-progress-modal';
+
+import type { App } from 'obsidian';
 
 export async function pushVault(app: App, confirm: boolean): Promise<void> {
   if (confirm && !(await confirmDestructiveAction(app, 'push'))) {

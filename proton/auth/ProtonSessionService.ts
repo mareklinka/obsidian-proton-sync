@@ -1,20 +1,15 @@
-import { Platform, requestUrl, RequestUrlResponse } from 'obsidian';
+import { Data, Effect, Option } from 'effect';
+import { Platform, requestUrl, type RequestUrlResponse } from 'obsidian';
+import { BehaviorSubject, distinctUntilChanged } from 'rxjs';
 
-import {
-  buildSrpProofs,
-  computeKeyPasswordFromSalt,
-  decodeBase64,
-  encodeBase64,
-  ProtonAuthInfo,
-  ProtonSrpProofs
-} from './ProtonSrp';
-import { BehaviorSubject, distinctUntilChanged, map, merge, of, shareReplay, Subject, switchMap, timer } from 'rxjs';
-import { ProtonSession } from './ProtonSession';
-import { deleteJson, getJson, postJson } from '../ProtonApiClient';
+import { getObsidianSecretStore } from '../../services/ObsidianSecretStore';
 import { PROTON_BASE_URL } from '../Constants';
-import { CaptchaVerification } from '../../ui/modals/captcha-modal';
-import { getObsidianSecretStore } from '../../services/vNext/ObsidianSecretStore';
+import { deleteJson, getJson, postJson } from '../ProtonApiClient';
+import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64 } from './ProtonSrp';
 
+import type { ProtonSession } from './ProtonSession';
+import type { ProtonAuthInfo, ProtonSrpProofs } from './ProtonSrp';
+import type { CaptchaVerification } from '../../ui/modals/captcha-modal';
 const AUTH_SCOPE = 'full locked';
 const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
 const SALTED_PASSPHRASES_SECRET_KEY = 'proton-drive-sync-salted-passphrases';
@@ -44,7 +39,6 @@ export type ProtonSessionState =
       state: 'ok';
       session: ProtonSession;
     }
-  | { state: 'stale'; session: ProtonSession }
   | { state: 'error'; message: string }
   | { state: 'disconnected' }
   | { state: 'logged-out' };
@@ -52,9 +46,9 @@ export type ProtonSessionState =
 export type ProtonAuthStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
 export type ProtonSignInDelegates = {
-  requestTwoFactorCode: () => Promise<string | undefined>;
-  requestMailboxPassword: () => Promise<string | undefined>;
-  requestCaptchaChallenge: (captchaUrl: string) => Promise<CaptchaVerification | undefined>;
+  requestTwoFactorCode: () => Effect.Effect<Option.Option<string>, never>;
+  requestMailboxPassword: () => Effect.Effect<Option.Option<string>, never>;
+  requestCaptchaChallenge: (captchaUrl: string) => Effect.Effect<Option.Option<CaptchaVerification>, never>;
 };
 
 interface ProtonApiError<T> {
@@ -63,7 +57,7 @@ interface ProtonApiError<T> {
   Details: T;
 }
 
-interface ProtonCaptchaApiError {
+interface ProtonCaptchaApiErrorResponse {
   HumanVerificationToken: string;
   HumanVerificationMethods: string[];
   Direct: number;
@@ -73,108 +67,78 @@ interface ProtonCaptchaApiError {
   ExpiresAt: number;
 }
 
-export class ProtonSessionService {
-  private readonly currentSessionSubject: Subject<ProtonSessionState> = new Subject();
-  private readonly authStatusSubject = new BehaviorSubject<ProtonAuthStatus>('disconnected');
+export const { init: initProtonSessionService, get: getProtonSessionService } = (function () {
+  let instance: ProtonSessionService | null = null;
 
-  private readonly saltedKeyPasswordsSubject: BehaviorSubject<Record<string, string>> = new BehaviorSubject({});
-  public readonly saltedKeyPasswords$ = this.saltedKeyPasswordsSubject.asObservable();
+  return {
+    init: function initProtonSessionService(appVersionHeader: string): ProtonSessionService {
+      return (instance ??= new ProtonSessionService(appVersionHeader));
+    },
+    get: function getProtonSessionService(): ProtonSessionService {
+      if (!instance) {
+        throw new Error('ProtonSessionService has not been initialized. Please call initProtonSessionService first.');
+      }
+      return instance;
+    }
+  };
+})();
+
+class ProtonSessionService {
+  private readonly authStatusSubject = new BehaviorSubject<ProtonAuthStatus>('disconnected');
+  public readonly authState$ = this.authStatusSubject.pipe(distinctUntilChanged());
 
   private refreshIntervalId: ReturnType<typeof globalThis.setInterval> | null = null;
-  private currentSession: ProtonSession | null = null;
-  public readonly authState$ = this.authStatusSubject.pipe(distinctUntilChanged());
-  public readonly currentSession$ = this.currentSessionSubject.pipe(
-    switchMap(sessionState => {
-      if (!sessionState) {
-        return of<ProtonSessionState>({ state: 'disconnected' });
-      }
 
-      if (sessionState.state !== 'ok') {
-        return of(sessionState);
-      }
-
-      const msUntilExpiry = sessionState.session.expiresAt.getTime() - new Date().getTime();
-
-      return merge(
-        of<ProtonSessionState>(sessionState),
-        timer(msUntilExpiry).pipe(
-          map(() => ({ state: 'stale', session: sessionState.session }) satisfies ProtonSessionState)
-        )
-      );
-    }),
-
-    shareReplay({ bufferSize: 1, refCount: true })
-  );
+  private session: ProtonSessionState = { state: 'disconnected' };
+  private saltedKeyPasswords: Record<string, string> = {};
 
   private secretStore: ReturnType<typeof getObsidianSecretStore>;
 
   constructor(public readonly appVersionHeader: string) {
     this.secretStore = getObsidianSecretStore();
+
     const saltedPasswordsJson = this.secretStore.get(SALTED_PASSPHRASES_SECRET_KEY);
-    this.saltedKeyPasswordsSubject.next(
-      JSON.parse(saltedPasswordsJson ? saltedPasswordsJson : '{}') as Record<string, string>
-    );
-
-    this.currentSession$.subscribe(sessionState => {
-      switch (sessionState.state) {
-        case 'ok':
-          this.currentSession = sessionState.session;
-          this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(this.currentSession));
-          this.authStatusSubject.next('connected');
-          break;
-        case 'stale':
-          this.authStatusSubject.next('connected');
-          break;
-        case 'error':
-          this.authStatusSubject.next('error');
-          break;
-        default:
-          this.authStatusSubject.next('disconnected');
-          break;
-      }
-    });
-
-    this.saltedKeyPasswords$.subscribe(_ => {
-      this.secretStore.set(SALTED_PASSPHRASES_SECRET_KEY, JSON.stringify(_));
-    });
+    this.saltedKeyPasswords = JSON.parse(saltedPasswordsJson ? saltedPasswordsJson : '{}') as Record<string, string>;
   }
 
-  async signIn(email: string, password: string, delegates: ProtonSignInDelegates): Promise<void> {
-    this.authStatusSubject.next('connecting');
+  public signIn(
+    email: string,
+    password: string,
+    delegates: ProtonSignInDelegates
+  ): Effect.Effect<void, ProtonSessionError> {
+    let authResponse: ProtonAuthResponse | null = null;
 
-    let authResponse: ProtonAuthResponse | undefined = undefined;
+    return Effect.gen(this, function* () {
+      this.authStatusSubject.next('connecting');
 
-    try {
-      const authInfo = await this.fetchAuthInfo(email);
-      const proofs = await buildSrpProofs(authInfo, email, password);
+      const authInfo = yield* this.fetchAuthInfo(email);
+      const proofs = yield* this.buildSrpProofs(authInfo, email, password);
+      authResponse = yield* this.authenticateWithCaptcha(authInfo, email, proofs, delegates);
 
-      authResponse = await this.authenticateWithCaptcha(authInfo, email, proofs, delegates);
-
-      if (!this.verifyServerProof(authResponse.ServerProof, proofs.expectedServerProof)) {
-        throw new Error('SRP server proof mismatch.');
-      }
+      yield* this.verifyServerProof(authResponse.ServerProof, proofs.expectedServerProof);
 
       if (this.requiresTwoFactorCode(authResponse)) {
-        const twoFactorCode = await this.resolveTwoFactorCode(delegates.requestTwoFactorCode);
-        await this.submitTwoFactor(twoFactorCode, { accessToken: authResponse.AccessToken, uid: authResponse.UID });
+        const twoFactorCode = yield* this.resolveTwoFactorCode(delegates.requestTwoFactorCode);
+        yield* this.submitTwoFactor(twoFactorCode, { accessToken: authResponse.AccessToken, uid: authResponse.UID });
       }
 
       let keyPassword = password;
 
       if (this.requiresMailboxPassword(authResponse)) {
-        keyPassword = await this.resolveMailboxPassword(delegates.requestMailboxPassword);
+        keyPassword = yield* this.resolveMailboxPassword(delegates.requestMailboxPassword);
       }
 
       const now = new Date();
 
-      const keyPasswords = await this.getKeyPasswords(keyPassword, {
+      const keyPasswords = yield* this.getKeyPasswords(keyPassword, {
         uid: authResponse.UID,
         accessToken: authResponse.AccessToken
       });
 
-      this.saltedKeyPasswordsSubject.next(keyPasswords);
+      this.saltedKeyPasswords = keyPasswords;
+      this.secretStore.set(SALTED_PASSPHRASES_SECRET_KEY, JSON.stringify(keyPasswords));
 
-      this.currentSessionSubject.next({
+      this.session = {
         state: 'ok',
         session: {
           uid: authResponse.UID,
@@ -187,168 +151,210 @@ export class ProtonSessionService {
           expiresAt: new Date(now.getTime() + authResponse.ExpiresIn * 1000),
           lastRefreshAt: now
         }
-      });
+      };
+
+      this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(this.session.session));
+
+      this.authStatusSubject.next('connected');
 
       this.startAutoRefresh();
-    } catch (error) {
-      if (authResponse) {
-        // destroy the session if it was successfully created
-        await this.destroySession({
-          uid: authResponse.UID,
-          accessToken: authResponse.AccessToken
-        });
-      }
-      this.authStatusSubject.next('error');
-      throw error;
-    }
+    }).pipe(
+      Effect.catchAll(e =>
+        Effect.gen(this, function* () {
+          if (authResponse) {
+            // destroy the session if it was successfully created
+            yield* this.destroySession({
+              uid: authResponse.UID,
+              accessToken: authResponse.AccessToken
+            });
+          }
+          this.authStatusSubject.next('error');
+          return yield* e;
+        })
+      )
+    );
   }
 
-  private async authenticateWithCaptcha(
+  public getCurrentSession(): Option.Option<ProtonSession> {
+    if (this.session.state === 'ok') {
+      return Option.some(this.session.session);
+    }
+
+    return Option.none();
+  }
+
+  public getSaltedKeyPasswords(): Record<string, string> {
+    return this.saltedKeyPasswords;
+  }
+
+  private authenticateWithCaptcha(
     authInfo: ProtonAuthInfo,
     email: string,
     proofs: ProtonSrpProofs,
     delegates: ProtonSignInDelegates
-  ) {
-    let appVersionHeader = this.appVersionHeader;
-    let authResponse: ProtonAuthResponse | undefined = undefined;
-    let captchaData: CaptchaVerification | undefined = undefined;
+  ): Effect.Effect<
+    ProtonAuthResponse,
+    ProtonApiCommunicationError | CaptchaRequiredError | CaptchaDataNotProvidedError
+  > {
+    return Effect.gen(this, function* () {
+      let appVersionHeader = this.appVersionHeader;
+      let authResponse: Option.Option<ProtonAuthResponse> = Option.none();
+      let captchaData: Option.Option<CaptchaVerification> = Option.none();
 
-    while (!authResponse) {
-      const authResponseRaw = await this.authenticate(authInfo, email, appVersionHeader, proofs, captchaData);
+      while (Option.isNone(authResponse)) {
+        const authResponseRaw = yield* this.authenticate(authInfo, email, appVersionHeader, proofs, captchaData);
 
-      if (this.requiresCaptcha(authResponseRaw)) {
-        if (Platform.isMobile) {
-          // on mobile, we can't display the captcha challenge properly, we try to bypass it by setting a fallback app version
-          appVersionHeader = CAPTCHA_FALLBACK_APPVERSION;
-          continue;
-        } else {
-          // on desktop, the captcha challenge can be handled normally
-          // we elicit the captcha token from the user in a modal
-          const captchaUrl = this.extractCaptchaUrl(authResponseRaw.json);
-          if (!captchaUrl) {
-            throw new Error('CAPTCHA verification is required, but no challenge URL was provided.');
+        if (this.requiresCaptcha(authResponseRaw)) {
+          if (Platform.isMobile) {
+            // on mobile, we can't display the captcha challenge properly, we try to bypass it by setting a fallback app version
+            appVersionHeader = CAPTCHA_FALLBACK_APPVERSION;
+            continue;
+          } else {
+            // on desktop, the captcha challenge can be handled normally
+            // we elicit the captcha token from the user in a modal
+            const captchaUrl = this.extractCaptchaUrl(authResponseRaw.json);
+            if (Option.isNone(captchaUrl)) {
+              return yield* new CaptchaDataNotProvidedError();
+            }
+
+            captchaData = yield* delegates.requestCaptchaChallenge(captchaUrl.value);
+
+            if (Option.isNone(captchaData)) {
+              return yield* new CaptchaRequiredError();
+            }
+
+            continue;
           }
-
-          captchaData = await delegates.requestCaptchaChallenge(captchaUrl);
-
-          if (!captchaData) {
-            throw new Error('CAPTCHA verification required to continue sign-in.');
-          }
-
-          continue;
         }
+
+        if (authResponseRaw.status >= 400) {
+          return yield* new ProtonApiCommunicationError();
+        }
+
+        authResponse = Option.some(authResponseRaw.json as ProtonAuthResponse);
       }
 
-      if (authResponseRaw.status >= 400) {
-        const message = extractApiError(authResponseRaw.json) ?? `Auth request failed (${authResponseRaw.status}).`;
-        throw new Error(message);
-      }
-
-      authResponse = authResponseRaw.json as ProtonAuthResponse;
-    }
-
-    return authResponse;
-  }
-
-  async signOut(): Promise<void> {
-    const session = this.currentSession;
-    if (!session) {
-      return;
-    }
-
-    await this.destroySession(session);
-
-    this.stopAutoRefresh();
-    this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(undefined));
-    this.saltedKeyPasswordsSubject.next({});
-
-    this.currentSessionSubject.next({ state: 'logged-out' });
-    this.authStatusSubject.next('disconnected');
-  }
-
-  dispose(): void {
-    const session = this.currentSession;
-    if (!session) {
-      return;
-    }
-
-    this.stopAutoRefresh();
-
-    this.currentSessionSubject.next({ state: 'disconnected' });
-    this.authStatusSubject.next('disconnected');
-  }
-
-  async loadSession() {
-    const stored = this.secretStore.get(SESSION_STORAGE_KEY);
-    if (!stored) {
-      return;
-    }
-
-    try {
-      await this.refreshSession(JSON.parse(stored) as ProtonSession);
-    } catch {
-      // session restore failed - the user will need to re-authenticate
-    }
-  }
-
-  private async destroySession(session: { uid: string; accessToken: string }): Promise<void> {
-    await deleteJson<ProtonKeySaltsResponse>('/auth/v4', session, this.appVersionHeader);
-  }
-
-  private async refreshSession(session: ProtonSession): Promise<void> {
-    const state = encodeBase64(randomToken(32));
-    const body = {
-      UID: session.uid,
-      RefreshToken: session.refreshToken,
-      ResponseType: 'token',
-      GrantType: 'refresh_token',
-      RedirectURI: 'https://protonmail.ch',
-      State: state,
-      AccessToken: session.accessToken,
-      Scope: session.scope
-    };
-
-    const response = await this.request<ProtonAuthResponse>('/auth/v4/refresh', body, {
-      'x-pm-uid': session.uid,
-      authorization: `Bearer ${session.accessToken}`
+      return authResponse.value;
     });
+  }
 
-    const refreshedAt = new Date();
+  public signOut(): Effect.Effect<void> {
+    return Effect.gen(this, function* () {
+      const session = this.session;
+      if (!session || session.state !== 'ok') {
+        return;
+      }
 
-    this.currentSessionSubject.next({
-      state: 'ok',
-      session: {
-        ...session,
-        uid: response.UID || session.uid,
-        accessToken: response.AccessToken,
-        refreshToken: response.RefreshToken,
-        scope: response.Scope || session.scope,
-        updatedAt: refreshedAt,
-        expiresAt: new Date(refreshedAt.getTime() + response.ExpiresIn * 1000),
-        lastRefreshAt: refreshedAt
+      this.stopAutoRefresh();
+      this.secretStore.clear(SESSION_STORAGE_KEY);
+      this.saltedKeyPasswords = {};
+
+      this.session = { state: 'logged-out' };
+      this.authStatusSubject.next('disconnected');
+
+      yield* this.destroySession(session.session);
+    });
+  }
+
+  public dispose(): Effect.Effect<void> {
+    return Effect.gen(this, function* () {
+      const session = this.session;
+      if (!session || session.state !== 'ok') {
+        return;
+      }
+
+      this.stopAutoRefresh();
+
+      this.session = { state: 'disconnected' };
+      this.authStatusSubject.next('disconnected');
+
+      yield* this.destroySession(session.session);
+    });
+  }
+
+  public loadSession(): Effect.Effect<void, ProtonApiCommunicationError> {
+    return Effect.gen(this, function* () {
+      const stored = this.secretStore.get(SESSION_STORAGE_KEY);
+      if (!stored) {
+        return;
+      }
+
+      yield* this.refreshSession(JSON.parse(stored) as ProtonSession);
+    });
+  }
+
+  private destroySession(session: { uid: string; accessToken: string }): Effect.Effect<void, never> {
+    return Effect.promise(async () => {
+      this.secretStore.clear(SESSION_STORAGE_KEY);
+
+      try {
+        await deleteJson<ProtonKeySaltsResponse>('/auth/v4', session, this.appVersionHeader);
+      } catch {
+        // session deletion is best-effort, we ignore any errors here
       }
     });
   }
 
-  private async fetchAuthInfo(username: string): Promise<ProtonAuthInfo> {
-    const response = await this.request<{ AuthInfo?: ProtonAuthInfo } | ProtonAuthInfo>('/auth/v4/info', {
-      Username: username
+  private refreshSession(session: ProtonSession): Effect.Effect<void, ProtonApiCommunicationError> {
+    return Effect.gen(this, function* () {
+      const state = encodeBase64(this.randomToken(32));
+      const body = {
+        UID: session.uid,
+        RefreshToken: session.refreshToken,
+        ResponseType: 'token',
+        GrantType: 'refresh_token',
+        RedirectURI: 'https://protonmail.ch',
+        State: state,
+        AccessToken: session.accessToken,
+        Scope: session.scope
+      };
+
+      const response = yield* this.request<ProtonAuthResponse>('/auth/v4/refresh', body, {
+        'x-pm-uid': session.uid,
+        authorization: `Bearer ${session.accessToken}`
+      });
+
+      const refreshedAt = new Date();
+
+      this.session = {
+        state: 'ok',
+        session: {
+          ...session,
+          uid: response.UID || session.uid,
+          accessToken: response.AccessToken,
+          refreshToken: response.RefreshToken,
+          scope: response.Scope || session.scope,
+          updatedAt: refreshedAt,
+          expiresAt: new Date(refreshedAt.getTime() + response.ExpiresIn * 1000),
+          lastRefreshAt: refreshedAt
+        }
+      };
+      this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(this.session.session));
+      this.authStatusSubject.next('connected');
     });
-
-    if ('AuthInfo' in response && response.AuthInfo) {
-      return response.AuthInfo;
-    }
-
-    return response as ProtonAuthInfo;
   }
 
-  private async authenticate(
+  private fetchAuthInfo(username: string): Effect.Effect<ProtonAuthInfo, ProtonApiCommunicationError> {
+    return Effect.gen(this, function* () {
+      const response = yield* this.request<{ AuthInfo?: ProtonAuthInfo } | ProtonAuthInfo>('/auth/v4/info', {
+        Username: username
+      });
+
+      if ('AuthInfo' in response && response.AuthInfo) {
+        return response.AuthInfo;
+      }
+
+      return response as ProtonAuthInfo;
+    });
+  }
+
+  private authenticate(
     authInfo: ProtonAuthInfo,
     username: string,
     appVersionHeader: string,
     proofs: { clientProof: Uint8Array; clientEphemeral: Uint8Array },
-    captchaData?: CaptchaVerification
-  ): Promise<RequestUrlResponse> {
+    captchaData: Option.Option<CaptchaVerification>
+  ): Effect.Effect<RequestUrlResponse, ProtonApiCommunicationError> {
     return this.requestRaw(
       '/auth/v4',
       {
@@ -359,18 +365,28 @@ export class ProtonSessionService {
         Scope: AUTH_SCOPE
       },
       appVersionHeader,
-      captchaData
+      Option.isSome(captchaData)
         ? {
-            'x-pm-human-verification-token': captchaData.token,
-            'x-pm-human-verification-token-type': captchaData.verificationMethod
+            'x-pm-human-verification-token': captchaData.value.token,
+            'x-pm-human-verification-token-type': captchaData.value.verificationMethod
           }
         : undefined
     );
   }
 
-  private async submitTwoFactor(twoFactorCode: string, session: { uid: string; accessToken: string }): Promise<void> {
-    await postJson('/auth/v4/2fa', session, this.appVersionHeader, {
-      TwoFactorCode: twoFactorCode
+  private submitTwoFactor(
+    twoFactorCode: string,
+    session: { uid: string; accessToken: string }
+  ): Effect.Effect<void, ProtonApiCommunicationError> {
+    return Effect.tryPromise({
+      try: async () => {
+        await postJson('/auth/v4/2fa', session, this.appVersionHeader, {
+          TwoFactorCode: twoFactorCode
+        });
+      },
+      catch: () => {
+        throw new ProtonApiCommunicationError();
+      }
     });
   }
 
@@ -382,19 +398,19 @@ export class ProtonSessionService {
     return true;
   }
 
-  private extractCaptchaUrl(payload: unknown): string | null {
+  private extractCaptchaUrl(payload: unknown): Option.Option<string> {
     if (!payload || typeof payload !== 'object') {
-      return null;
+      return Option.none();
     }
 
-    const captchaError = payload as ProtonApiError<ProtonCaptchaApiError>;
+    const captchaError = payload as ProtonApiError<ProtonCaptchaApiErrorResponse>;
     const url = captchaError.Details?.WebUrl;
 
     if (typeof url !== 'string' || !url.trim()) {
-      return null;
+      return Option.none();
     }
 
-    return url;
+    return Option.some(url);
   }
 
   private requiresTwoFactorCode(authResponse: ProtonAuthResponse): boolean {
@@ -405,93 +421,130 @@ export class ProtonSessionService {
     return authResponse.PasswordMode === 2;
   }
 
-  private async resolveTwoFactorCode(
+  private resolveTwoFactorCode(
     requestTwoFactorCode: ProtonSignInDelegates['requestTwoFactorCode']
-  ): Promise<string> {
-    const code = (await requestTwoFactorCode())?.trim();
-    if (!code) {
-      throw new Error('Two-factor authentication code required.');
-    }
+  ): Effect.Effect<string, TwoFactorCodeRequiredError> {
+    return Effect.gen(this, function* () {
+      const code = yield* requestTwoFactorCode();
 
-    return code;
-  }
-
-  private async resolveMailboxPassword(
-    requestMailboxPassword: ProtonSignInDelegates['requestMailboxPassword']
-  ): Promise<string> {
-    const mailboxPassword = await requestMailboxPassword();
-    if (!mailboxPassword) {
-      throw new Error('Mailbox password required.');
-    }
-
-    return mailboxPassword;
-  }
-
-  private verifyServerProof(serverProof: string, expected: Uint8Array): boolean {
-    const decoded = decodeBase64(serverProof);
-    if (decoded.length !== expected.length) {
-      return false;
-    }
-
-    for (let index = 0; index < decoded.length; index += 1) {
-      if (decoded[index] !== expected[index]) {
-        return false;
+      if (Option.isNone(code) || !code.value.trim()) {
+        return yield* new TwoFactorCodeRequiredError();
+      } else {
+        return code.value;
       }
-    }
-
-    return true;
+    });
   }
 
-  private async request<T>(path: string, body: unknown, headers?: Record<string, string>): Promise<T> {
-    const response = await this.requestRaw(path, body, this.appVersionHeader, headers);
+  private resolveMailboxPassword(
+    requestMailboxPassword: ProtonSignInDelegates['requestMailboxPassword']
+  ): Effect.Effect<string, EncryptionPasswordRequiredError> {
+    return Effect.gen(this, function* () {
+      const mailboxPassword = yield* requestMailboxPassword();
+      if (Option.isNone(mailboxPassword) || !mailboxPassword.value.trim()) {
+        return yield* Effect.fail(new EncryptionPasswordRequiredError());
+      }
 
-    if (response.status >= 400) {
-      const message = extractApiError(response.json) ?? `Auth request failed (${response.status}).`;
-      throw new Error(message);
-    }
-
-    return response.json as T;
+      return mailboxPassword.value;
+    });
   }
 
-  private async requestRaw(
+  private buildSrpProofs(
+    authInfo: ProtonAuthInfo,
+    email: string,
+    password: string
+  ): Effect.Effect<ProtonSrpProofs, CryptographyError> {
+    return Effect.tryPromise({
+      try: () => buildSrpProofs(authInfo, email, password),
+      catch: () => {
+        throw new CryptographyError();
+      }
+    });
+  }
+
+  private verifyServerProof(serverProof: string, expected: Uint8Array): Effect.Effect<void, CryptographyError> {
+    return Effect.try({
+      try: () => {
+        const decoded = decodeBase64(serverProof);
+        if (decoded.length !== expected.length) {
+          throw new CryptographyError();
+        }
+
+        for (let index = 0; index < decoded.length; index += 1) {
+          if (decoded[index] !== expected[index]) {
+            throw new CryptographyError();
+          }
+        }
+      },
+      catch: error => {
+        if (error instanceof CryptographyError) {
+          throw error;
+        }
+
+        return new CryptographyError();
+      }
+    });
+  }
+
+  private request<T>(
+    path: string,
+    body: unknown,
+    headers?: Record<string, string>
+  ): Effect.Effect<T, ProtonApiCommunicationError> {
+    return Effect.gen(this, function* () {
+      const response = yield* this.requestRaw(path, body, this.appVersionHeader, headers);
+
+      if (response.status >= 400) {
+        return yield* Effect.fail(new ProtonApiCommunicationError());
+      }
+
+      return response.json as T;
+    });
+  }
+
+  private requestRaw(
     path: string,
     body: unknown,
     appVersionHeader: string,
     headers?: Record<string, string>
-  ): Promise<RequestUrlResponse> {
-    const response = await requestUrl({
-      url: `${PROTON_BASE_URL}${path}`,
-      method: 'POST',
-      contentType: 'application/json',
-      headers: {
-        'x-pm-appversion': appVersionHeader,
-        ...(headers ?? {})
-      },
-      body: JSON.stringify(body),
-      throw: false
+  ): Effect.Effect<RequestUrlResponse, ProtonApiCommunicationError> {
+    return Effect.promise(() => {
+      return requestUrl({
+        url: `${PROTON_BASE_URL}${path}`,
+        method: 'POST',
+        contentType: 'application/json',
+        headers: {
+          'x-pm-appversion': appVersionHeader,
+          ...(headers ?? {})
+        },
+        body: JSON.stringify(body),
+        throw: false
+      });
     });
-
-    return response;
   }
 
-  private async getKeyPasswords(
+  private getKeyPasswords(
     password: string,
     session: { uid: string; accessToken: string }
-  ): Promise<Record<string, string>> {
-    const response = await getJson<ProtonKeySaltsResponse>('/core/v4/keys/salts', session, this.appVersionHeader);
+  ): Effect.Effect<Record<string, string>, ProtonApiCommunicationError> {
+    return Effect.tryPromise({
+      try: async () => {
+        const response = await getJson<ProtonKeySaltsResponse>('/core/v4/keys/salts', session, this.appVersionHeader);
 
-    const entries = response.KeySalts ?? [];
-    const map: Record<string, string> = {};
+        const entries = response.KeySalts ?? [];
+        const map: Record<string, string> = {};
 
-    for (const entry of entries) {
-      if (!entry.ID || !entry.KeySalt) {
-        continue;
-      }
+        for (const entry of entries) {
+          if (!entry.ID || !entry.KeySalt) {
+            continue;
+          }
 
-      map[entry.ID] = computeKeyPasswordFromSalt(password, entry.KeySalt);
-    }
+          map[entry.ID] = computeKeyPasswordFromSalt(password, entry.KeySalt);
+        }
 
-    return map;
+        return map;
+      },
+      catch: () => new ProtonApiCommunicationError()
+    });
   }
 
   private startAutoRefresh(): void {
@@ -499,8 +552,8 @@ export class ProtonSessionService {
       return;
     }
 
-    this.refreshIntervalId = globalThis.setInterval(() => {
-      this.refreshSessionIfNeeded();
+    this.refreshIntervalId = globalThis.setInterval(async () => {
+      await Effect.runPromise(this.refreshSessionIfNeeded());
     }, SESSION_REFRESH_INTERVAL_MS);
   }
 
@@ -513,20 +566,28 @@ export class ProtonSessionService {
     this.refreshIntervalId = null;
   }
 
-  private async refreshSessionIfNeeded() {
-    const currentSession = this.currentSession;
-    if (!currentSession) {
-      return;
-    }
+  private refreshSessionIfNeeded(): Effect.Effect<void, ProtonApiCommunicationError> {
+    return Effect.gen(this, function* () {
+      const session = this.session;
+      if (!session || session.state !== 'ok') {
+        return;
+      }
 
-    const expiresAt = new Date(currentSession.expiresAt).getTime();
-    const timeToExpiry = expiresAt - new Date().getTime();
+      const expiresAt = new Date(session.session.expiresAt).getTime();
+      const timeToExpiry = expiresAt - new Date().getTime();
 
-    if (timeToExpiry > SESSION_REFRESH_INTERVAL_MS) {
-      return;
-    }
+      if (timeToExpiry > SESSION_REFRESH_INTERVAL_MS) {
+        return;
+      }
 
-    await this.refreshSession(currentSession);
+      yield* this.refreshSession(session.session);
+    });
+  }
+
+  private randomToken(byteLength: number): Uint8Array {
+    const bytes = new Uint8Array(byteLength);
+    globalThis.crypto.getRandomValues(bytes);
+    return bytes;
   }
 }
 
@@ -539,17 +600,17 @@ type ProtonKeySaltsResponse = {
   KeySalts?: ProtonKeySaltEntry[];
 };
 
-function extractApiError(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object') {
-    return null;
-  }
+export type ProtonSessionError =
+  | ProtonApiCommunicationError
+  | CryptographyError
+  | TwoFactorCodeRequiredError
+  | EncryptionPasswordRequiredError
+  | CaptchaRequiredError
+  | CaptchaDataNotProvidedError;
 
-  const record = payload as { Error?: string; Message?: string };
-  return record.Error ?? record.Message ?? null;
-}
-
-function randomToken(byteLength: number): Uint8Array {
-  const bytes = new Uint8Array(byteLength);
-  globalThis.crypto.getRandomValues(bytes);
-  return bytes;
-}
+export class ProtonApiCommunicationError extends Data.TaggedError('ProtonApiCommunicationError') {}
+export class CryptographyError extends Data.TaggedError('CryptographyError') {}
+export class TwoFactorCodeRequiredError extends Data.TaggedError('TwoFactorCodeRequiredError') {}
+export class EncryptionPasswordRequiredError extends Data.TaggedError('EncryptionPasswordRequiredError') {}
+export class CaptchaRequiredError extends Data.TaggedError('CaptchaRequiredError') {}
+export class CaptchaDataNotProvidedError extends Data.TaggedError('CaptchaDataNotProvidedError') {}

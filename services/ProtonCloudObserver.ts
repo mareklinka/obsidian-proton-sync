@@ -1,10 +1,13 @@
-import { Subject } from 'rxjs';
-import { getLogger } from './ObsidianSyncLogger';
-import { ProtonDriveClient } from '@protontech/drive-sdk';
-import { TreeEventScopeId, TreeEventSubscriptionFailed } from './proton-drive-types';
 import { Effect } from 'effect';
-import { getProtonDriveClient } from '../../proton/drive/ProtonDriveClient';
-import { EventSubscription } from '@protontech/drive-sdk/dist/internal/events';
+import { Subject } from 'rxjs';
+
+import { getLogger } from './ObsidianSyncLogger';
+import { TreeEventSubscriptionFailed } from './proton-drive-types';
+import { getProtonDriveClient } from '../proton/drive/ProtonDriveClient';
+
+import type { TreeEventScopeId } from './proton-drive-types';
+import type { ProtonDriveClient } from '@protontech/drive-sdk';
+import type { EventSubscription } from '@protontech/drive-sdk/dist/internal/events';
 
 export const { init: initProtonCloudObserver, get: getProtonCloudObserver } = (function () {
   let instance: ProtonCloudObserver | null = null;

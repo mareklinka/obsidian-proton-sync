@@ -1,5 +1,6 @@
 import { requestUrl } from 'obsidian';
-import { APP_ID, PROTON_BASE_URL as PROTON_BASE_URL } from './Constants';
+
+import { PROTON_BASE_URL } from './Constants';
 
 type ProtonApiRequestOptions = {
   method?: 'GET' | 'POST' | 'DELETE';

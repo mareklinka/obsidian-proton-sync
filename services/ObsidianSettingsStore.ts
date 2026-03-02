@@ -1,8 +1,10 @@
 import { Option } from 'effect';
-import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
 import { BehaviorSubject } from 'rxjs';
-import { ProtonAuthStatus } from '../../proton/auth/vNext/ProtonSessionService';
-import { ProtonSession } from '../../proton/auth/ProtonSession';
+
+import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
+
+import type { ProtonSession } from '../../proton/auth/ProtonSession';
+import type { ProtonAuthStatus } from '../../proton/auth/vNext/ProtonSessionService';
 
 export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } = (function () {
   let instance: ObsidianSettingsStore | null = null;
