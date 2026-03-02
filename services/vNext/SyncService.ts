@@ -26,7 +26,7 @@ type ProtonRecursiveFolder = ProtonFolder & {
 
 export type SyncSubstate = 'localTreeBuild' | 'remoteTreeBuild' | 'diffComputation' | 'applyingChanges';
 
-export type ConfigSyncState =
+export type SyncState =
   | { state: 'idle' }
   | {
       state: 'pushing';
@@ -41,16 +41,16 @@ export type ConfigSyncState =
       processedItems: number;
     };
 
-export const { init: initConfigSyncService, get: getConfigSyncService } = (function () {
-  let instance: ConfigSyncService | null = null;
+export const { init: initSyncService, get: getSyncService } = (function () {
+  let instance: SyncService | null = null;
 
   return {
-    init: function initConfigSyncService(vault: Vault): ConfigSyncService {
-      return (instance ??= new ConfigSyncService(vault));
+    init: function initSyncService(vault: Vault): SyncService {
+      return (instance ??= new SyncService(vault));
     },
-    get: function getConfigSyncService(): ConfigSyncService {
+    get: function getSyncService(): SyncService {
       if (!instance) {
-        throw new Error('ConfigSyncService has not been initialized. Please call initConfigSyncService first.');
+        throw new Error('SyncService has not been initialized. Please call initSyncService first.');
       }
       return instance;
     }
@@ -115,19 +115,19 @@ type PullSyncOperation =
   | { type: 'deleteLocalFile'; details: LocalFileDelete }
   | { type: 'deleteLocalFolder'; details: LocalFolderDelete };
 
-class ConfigSyncService {
-  private readonly stateSubject = new BehaviorSubject<ConfigSyncState>({ state: 'idle' });
+class SyncService {
+  private readonly stateSubject = new BehaviorSubject<SyncState>({ state: 'idle' });
   public readonly state$ = this.stateSubject.asObservable();
 
   constructor(private readonly vault: Vault) {}
 
-  public pushConfig() {
+  public push() {
     return Effect.gen(this, function* () {
       if (this.stateSubject.value.state !== 'idle') {
         yield* new SyncAlreadyInProgressError();
       }
 
-      yield* this.pushConfigImpl().pipe(
+      yield* this.pushImpl().pipe(
         Effect.catchAll(error =>
           Effect.gen(this, function* () {
             this.stateSubject.next({ state: 'idle' });
@@ -138,12 +138,11 @@ class ConfigSyncService {
     });
   }
 
-  private pushConfigImpl() {
+  private pushImpl() {
     return Effect.gen(this, function* () {
-      const logger = getLogger('ConfigSyncService');
+      const logger = getLogger('SyncService');
       logger.info('Starting config push');
 
-      const configDir = yield* this.validateConfigDir();
       const vaultRootNodeId = getObsidianSettingsStore().getVaultRootNodeUid();
 
       if (Option.isNone(vaultRootNodeId)) {
@@ -153,13 +152,13 @@ class ConfigSyncService {
       this.stateSubject.next({ state: 'pushing', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });
 
       const fileApi = getObsidianFileApi();
-      const localRoot = yield* fileApi.getConfigFileTree();
+      const localRoot = yield* fileApi.getFileTree();
 
       this.stateSubject.next({ state: 'pushing', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
 
       const driveApi = getProtonDriveApi();
 
-      const remoteConfigRootFolder = yield* this.getOrCreateRemoteConfigRoot(configDir, vaultRootNodeId.value);
+      const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value);
       const remoteRoot = yield* this.scanRemoteConfig(remoteConfigRootFolder);
 
       this.stateSubject.next({ state: 'pushing', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
@@ -339,13 +338,13 @@ class ConfigSyncService {
     });
   }
 
-  public pullConfig(deleteLocalOrphans = false) {
+  public pull(deleteLocalOrphans = false) {
     return Effect.gen(this, function* () {
       if (this.stateSubject.value.state !== 'idle') {
         yield* new SyncAlreadyInProgressError();
       }
 
-      yield* this.pullConfigImpl(deleteLocalOrphans).pipe(
+      yield* this.pullImpl(deleteLocalOrphans).pipe(
         Effect.catchAll(error =>
           Effect.gen(this, function* () {
             this.stateSubject.next({ state: 'idle' });
@@ -356,25 +355,24 @@ class ConfigSyncService {
     });
   }
 
-  private pullConfigImpl(deleteLocalOrphans: boolean) {
+  private pullImpl(deleteLocalOrphans: boolean) {
     return Effect.gen(this, function* () {
       const logger = getLogger('ConfigSyncService');
       logger.info('Starting config pull', { deleteLocalOrphans });
 
-      const configDir = yield* this.validateConfigDir();
       const vaultRootNodeId = getObsidianSettingsStore().getVaultRootNodeUid();
 
       if (Option.isNone(vaultRootNodeId)) {
-        throw new VaultRootIdNotAvailableError();
+        return yield* new VaultRootIdNotAvailableError();
       }
 
       this.stateSubject.next({ state: 'pulling', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });
       const fileApi = getObsidianFileApi();
-      const localRoot = yield* fileApi.getConfigFileTree();
+      const localRoot = yield* fileApi.getFileTree();
 
       this.stateSubject.next({ state: 'pulling', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
       const driveApi = getProtonDriveApi();
-      const remoteConfigRootFolder = yield* this.getOrCreateRemoteConfigRoot(configDir, vaultRootNodeId.value);
+      const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value);
       const remoteRoot = yield* this.scanRemoteConfig(remoteConfigRootFolder);
 
       this.stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
@@ -407,14 +405,12 @@ class ConfigSyncService {
         }
 
         for (const remoteChild of item.remote.children) {
-          const relativePath = normalizePath(
+          const localPath = normalizePath(
             item.relativePath ? `${item.relativePath}/${remoteChild.name}` : remoteChild.name
           );
-          if (!relativePath) {
+          if (!localPath) {
             continue;
           }
-
-          const localPath = toConfigPath(configDir, relativePath);
 
           if (remoteChild._tag === 'folder') {
             const localFolder = localFoldersByName.get(remoteChild.name);
@@ -435,10 +431,10 @@ class ConfigSyncService {
                   children: []
                 },
                 remote: remoteChild,
-                relativePath
+                relativePath: localPath
               });
             } else {
-              q.push({ local: localFolder, remote: remoteChild, relativePath });
+              q.push({ local: localFolder, remote: remoteChild, relativePath: localPath });
             }
           } else {
             const localFolder = localFoldersByName.get(remoteChild.name);
@@ -535,28 +531,28 @@ class ConfigSyncService {
         switch (op.type) {
           case 'createLocalFolder':
             {
-              yield* fileApi.ensureConfigFolder(op.details.rawPath);
+              yield* fileApi.ensureFolder(op.details.rawPath);
             }
             break;
           case 'writeLocalFile':
             {
               const parentPath = getParentPath(op.details.rawPath);
               if (parentPath) {
-                yield* fileApi.ensureConfigFolder(parentPath);
+                yield* fileApi.ensureFolder(parentPath);
               }
 
               const data = yield* driveApi.downloadFile(op.details.remoteId);
-              yield* fileApi.writeConfigFileContent(op.details.rawPath, data);
+              yield* fileApi.writeFileContent(op.details.rawPath, data);
             }
             break;
           case 'deleteLocalFile':
             {
-              yield* fileApi.deleteConfigFile(op.details.rawPath);
+              yield* fileApi.deleteFile(op.details.rawPath);
             }
             break;
           case 'deleteLocalFolder':
             {
-              yield* fileApi.deleteConfigFolder(op.details.rawPath);
+              yield* fileApi.deleteFolder(op.details.rawPath);
             }
             break;
         }
@@ -565,22 +561,6 @@ class ConfigSyncService {
       }
 
       this.stateSubject.next({ state: 'idle' });
-    });
-  }
-
-  private validateConfigDir(): Effect.Effect<string, InvalidConfigPathError> {
-    return Effect.sync(() => {
-      const configDir = normalizePath(this.vault.configDir ?? '');
-      if (!configDir || isAbsolutePath(configDir)) {
-        throw new InvalidConfigPathError();
-      }
-
-      const segments = configDir.split('/');
-      if (segments.some(segment => segment === '..')) {
-        throw new InvalidConfigPathError();
-      }
-
-      return configDir;
     });
   }
 
@@ -620,7 +600,7 @@ class ConfigSyncService {
     });
   }
 
-  private getOrCreateRemoteConfigRoot(
+  private getOrCreateRemoteRoot(
     configDir: string,
     vaultRootId: ProtonFolderId
   ): Effect.Effect<ProtonFolder, GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError> {
@@ -667,14 +647,6 @@ class ConfigSyncService {
     const excluded = toCanonicalPathKey(this.vault.configDir + EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH);
     return canonical.path === excluded || canonical.path.startsWith(`${excluded}/`);
   }
-}
-
-function isAbsolutePath(path: string): boolean {
-  return /^(?:[a-z]:\/|[a-z]:\\|\\\\|\/)/i.test(path);
-}
-
-function toConfigPath(configDir: string, relativePath: string): string {
-  return normalizePath(relativePath ? `${configDir}/${relativePath}` : configDir);
 }
 
 function getParentPath(path: string): string {

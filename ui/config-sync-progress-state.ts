@@ -1,4 +1,4 @@
-import type { ConfigSyncState } from '../services/vNext/ConfigSyncService';
+import type { SyncState } from '../services/vNext/SyncService';
 
 export interface ConfigSyncProgressViewState {
   message: string;
@@ -6,7 +6,7 @@ export interface ConfigSyncProgressViewState {
   progressPercent: number | null;
 }
 
-export function toConfigSyncProgressViewState(state: ConfigSyncState): ConfigSyncProgressViewState {
+export function toConfigSyncProgressViewState(state: SyncState): ConfigSyncProgressViewState {
   if (state.state === 'idle') {
     return {
       message: 'Preparing configuration push…',
@@ -18,27 +18,26 @@ export function toConfigSyncProgressViewState(state: ConfigSyncState): ConfigSyn
   switch (state.subState) {
     case 'localTreeBuild':
       return {
-        message: 'Scanning local configuration files…',
+        message: 'Scanning local files…',
         details: 'Building local file tree.',
         progressPercent: null
       };
     case 'remoteTreeBuild':
       return {
-        message: 'Scanning remote configuration files…',
+        message: 'Scanning remote files…',
         details: 'Building remote file tree from Proton Drive.',
         progressPercent: null
       };
     case 'diffComputation':
       return {
-        message: 'Computing configuration differences…',
+        message: 'Computing differences…',
         details: 'Preparing the operation plan.',
         progressPercent: null
       };
     case 'applyingChanges': {
       const progressPercent =
         state.totalItems <= 0 ? 0 : clampProgressPercent((state.processedItems / state.totalItems) * 100);
-      const directionText =
-        state.state === 'pulling' ? 'Applying changes to local configuration…' : 'Applying changes to Proton Drive…';
+      const directionText = state.state === 'pulling' ? 'Downloading notes...' : 'Uploading notes...';
 
       return {
         message: directionText,

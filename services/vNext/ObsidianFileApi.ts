@@ -48,9 +48,9 @@ class ObsidianFileApi {
     });
   }
 
-  public getConfigFileTree(): Effect.Effect<VaultFolder> {
+  public getFileTree(): Effect.Effect<VaultFolder> {
     return Effect.promise(async () => {
-      const configDir = normalizePath(this.vault.configDir);
+      const rootDir = '/';
 
       const walk = async (path: string): Promise<VaultFolder> => {
         const children: VaultNode[] = [];
@@ -87,7 +87,7 @@ class ObsidianFileApi {
         };
       };
 
-      return await walk(configDir);
+      return await walk(rootDir);
     });
   }
 
@@ -109,7 +109,7 @@ class ObsidianFileApi {
     return Effect.promise(async () => await this.vault.adapter.readBinary(path));
   }
 
-  public ensureConfigFolder(path: string): Effect.Effect<void> {
+  public ensureFolder(path: string): Effect.Effect<void> {
     return Effect.promise(async () => {
       const normalized = normalizePath(path);
       if (!normalized) {
@@ -129,13 +129,13 @@ class ObsidianFileApi {
     });
   }
 
-  public writeConfigFileContent(path: string, data: ArrayBuffer): Effect.Effect<void> {
+  public writeFileContent(path: string, data: ArrayBuffer): Effect.Effect<void> {
     return Effect.promise(async () => {
       await this.vault.adapter.writeBinary(path, data);
     });
   }
 
-  public deleteConfigFile(path: string): Effect.Effect<void> {
+  public deleteFile(path: string): Effect.Effect<void> {
     return Effect.promise(async () => {
       const exists = await this.vault.adapter.exists(path);
       if (!exists) {
@@ -146,7 +146,7 @@ class ObsidianFileApi {
     });
   }
 
-  public deleteConfigFolder(path: string): Effect.Effect<void> {
+  public deleteFolder(path: string): Effect.Effect<void> {
     return Effect.promise(async () => {
       const exists = await this.vault.adapter.exists(path);
       if (!exists) {

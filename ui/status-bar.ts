@@ -5,7 +5,7 @@ import type { SyncEngineState } from '../services/ObsidianSyncService';
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 import { ReconcileState } from '../services/CloudReconciliationService';
-import { ConfigSyncState } from '../services/vNext/ConfigSyncService';
+import { SyncState } from '../services/vNext/SyncService';
 
 type StatusBarSyncState = 'idle' | 'downloading' | 'uploading' | 'error';
 
@@ -19,7 +19,7 @@ export function createSyncStatusBar(
     loginState$: Observable<ProtonAuthStatus>;
     syncState$: Observable<SyncEngineState>;
     reconcileState$: Observable<ReconcileState>;
-    configSyncState$: Observable<ConfigSyncState>;
+    configSyncState$: Observable<SyncState>;
   }
 ): SyncStatusBarController {
   const itemEl = plugin.addStatusBarItem();
@@ -64,7 +64,7 @@ export function createSyncStatusBar(
 function toEffectiveSyncState(
   syncState: SyncEngineState,
   reconcileState: ReconcileState,
-  configSyncState: ConfigSyncState
+  configSyncState: SyncState
 ): StatusBarSyncState {
   if (reconcileState === 'reconciling' || configSyncState.state === 'pulling') {
     return 'downloading';

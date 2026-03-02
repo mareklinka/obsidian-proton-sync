@@ -3,7 +3,7 @@ import { Subject } from 'rxjs';
 
 export type ConfigSyncAction = 'push' | 'pull';
 
-export class ProtonDriveConfigSyncActionModal extends Modal {
+export class ProtonDriveSyncActionModal extends Modal {
   private readonly submittedSubject = new Subject<ConfigSyncAction>();
   public readonly submitted$ = this.submittedSubject.asObservable();
 
@@ -20,9 +20,18 @@ export class ProtonDriveConfigSyncActionModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
 
-    contentEl.createEl('h2', { text: 'Vault configuration sync' });
+    contentEl.createEl('h2', { text: 'Proton Drive Sync' });
     contentEl.createEl('p', {
-      text: 'Choose whether to push your local vault configuration to Proton Drive, or pull remote configuration to local.'
+      text: 'Choose whether to push your local vault data to Proton Drive, or pull remote data to local. This operation synchronizes both notes and vault configuration.'
+    });
+
+    const warningEl = contentEl.createDiv({ cls: 'proton-sync-disclosure' });
+    warningEl.createEl('p', {
+      cls: 'proton-sync-disclosure__title',
+      text: '⚠️ Potentially destructive operation'
+    });
+    warningEl.createEl('p', {
+      text: 'Sync may overwrite existing content when conflicts are detected. Please ensure your vault is backed up before proceeding.'
     });
 
     new Setting(contentEl)
@@ -40,7 +49,6 @@ export class ProtonDriveConfigSyncActionModal extends Modal {
         button
           .setIcon('cloud-download')
           .setClass('proton-sync-config-pull-button')
-          .setWarning()
           .onClick(() => {
             this.didResolve = true;
             this.submittedSubject.next('pull');

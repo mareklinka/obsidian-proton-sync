@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { toConfigSyncProgressViewState } from '../../ui/config-sync-progress-state';
-import type { ConfigSyncState } from '../../services/vNext/ConfigSyncService';
+import type { SyncState } from '../../services/vNext/SyncService';
 
 describe('toConfigSyncProgressViewState', () => {
   it('returns indeterminate progress for local tree build', () => {
-    const state: ConfigSyncState = {
+    const state: SyncState = {
       state: 'pushing',
       subState: 'localTreeBuild',
       totalItems: 0,
@@ -19,7 +19,7 @@ describe('toConfigSyncProgressViewState', () => {
   });
 
   it('maps applying changes to percentage and count details', () => {
-    const state: ConfigSyncState = {
+    const state: SyncState = {
       state: 'pushing',
       subState: 'applyingChanges',
       totalItems: 10,
@@ -33,7 +33,7 @@ describe('toConfigSyncProgressViewState', () => {
   });
 
   it('maps applying changes with zero total to zero percent', () => {
-    const state: ConfigSyncState = {
+    const state: SyncState = {
       state: 'pushing',
       subState: 'applyingChanges',
       totalItems: 0,
@@ -46,7 +46,7 @@ describe('toConfigSyncProgressViewState', () => {
   });
 
   it('clamps applying changes percent above 100', () => {
-    const state: ConfigSyncState = {
+    const state: SyncState = {
       state: 'pushing',
       subState: 'applyingChanges',
       totalItems: 3,
