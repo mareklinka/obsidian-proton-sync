@@ -33,7 +33,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="v$(node -p "require('./manifest.json').version")"
+          tag="$(node -p "require('./manifest.json').version")"
           beta_tag="${tag}-pre"
 
           git fetch --tags origin
@@ -64,7 +64,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="v$(node -p "require('./manifest.json').version")"
+          tag="$(node -p "require('./manifest.json').version")"
 
           git fetch --tags origin
 
