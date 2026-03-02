@@ -11,6 +11,7 @@ import {
   InvalidNameError,
   ItemAlreadyExistsError,
   NotAFolderError,
+  ProtonFileId,
   ProtonFolderId,
   TreeEventScopeId
 } from './proton-drive-types';
@@ -23,7 +24,22 @@ type ProtonRecursiveFolder = ProtonFolder & {
   children: (ProtonRecursiveFolder | ProtonFile)[];
 };
 
-export type ConfigSyncState = 'idle' | 'pushing' | 'pulling';
+export type SyncSubstate = 'localTreeBuild' | 'remoteTreeBuild' | 'diffComputation' | 'applyingChanges';
+
+export type ConfigSyncState =
+  | { state: 'idle' }
+  | {
+      state: 'pushing';
+      subState: SyncSubstate;
+      totalItems: number;
+      processedItems: number;
+    }
+  | {
+      state: 'pulling';
+      subState: SyncSubstate;
+      totalItems: number;
+      processedItems: number;
+    };
 
 export const { init: initConfigSyncService, get: getConfigSyncService } = (function () {
   let instance: ConfigSyncService | null = null;
@@ -41,21 +57,60 @@ export const { init: initConfigSyncService, get: getConfigSyncService } = (funct
   };
 })();
 
+interface FolderCreate {
+  id: ProtonFolderId;
+  name: string;
+  parentId: ProtonFolderId;
+}
+
+interface FileUpload {
+  name: string;
+  parentId: ProtonFolderId;
+  rawPath: string;
+  modifiedAt: Date;
+}
+
+interface FileUpdate {
+  id: ProtonFileId;
+  rawPath: string;
+  modifiedAt: Date;
+}
+
+interface FileDelete {
+  id: ProtonFileId;
+}
+
+interface FolderDelete {
+  id: ProtonFolderId;
+}
+
+type SyncOperation =
+  | { type: 'createFolder'; details: FolderCreate }
+  | { type: 'uploadFile'; details: FileUpload }
+  | { type: 'updateFile'; details: FileUpdate }
+  | { type: 'deleteFile'; details: FileDelete }
+  | { type: 'deleteFolder'; details: FolderDelete };
+
 class ConfigSyncService {
-  private readonly stateSubject = new BehaviorSubject<ConfigSyncState>('idle');
+  private readonly stateSubject = new BehaviorSubject<ConfigSyncState>({ state: 'idle' });
   public readonly state$ = this.stateSubject.asObservable();
 
   constructor(private readonly vault: Vault) {}
 
-  pushConfig() {
+  public pushConfig() {
     return Effect.gen(this, function* () {
-      this.stateSubject.next('pushing');
-
-      try {
-        yield* this.pushConfigImpl();
-      } finally {
-        this.stateSubject.next('idle');
+      if (this.stateSubject.value.state !== 'idle') {
+        yield* new SyncAlreadyInProgressError();
       }
+
+      yield* this.pushConfigImpl().pipe(
+        Effect.catchAll(error =>
+          Effect.gen(this, function* () {
+            this.stateSubject.next({ state: 'idle' });
+            yield* error;
+          })
+        )
+      );
     });
   }
 
@@ -64,21 +119,28 @@ class ConfigSyncService {
       const logger = getLogger('ConfigSyncService');
       logger.info('Starting config push');
 
-      const driveApi = getProtonDriveApi();
-      const fileApi = getObsidianFileApi();
-
       const configDir = yield* this.validateConfigDir();
-      const localRoot = yield* getObsidianFileApi().getConfigFileTree();
       const vaultRootNodeId = getObsidianSettingsStore().getVaultRootNodeUid();
 
       if (Option.isNone(vaultRootNodeId)) {
         throw new VaultRootIdNotAvailableError();
       }
 
+      this.stateSubject.next({ state: 'pushing', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });
+
+      const fileApi = getObsidianFileApi();
+      const localRoot = yield* fileApi.getConfigFileTree();
+
+      this.stateSubject.next({ state: 'pushing', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
+
+      const driveApi = getProtonDriveApi();
+
       const remoteConfigRootFolder = yield* this.getOrCreateRemoteConfigRoot(configDir, vaultRootNodeId.value);
       const remoteRoot = yield* this.scanRemoteConfig(remoteConfigRootFolder);
 
-      // push local nodes to remote
+      this.stateSubject.next({ state: 'pushing', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
+      const syncOps: SyncOperation[] = [];
+
       const q: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [{ local: localRoot, remote: remoteRoot }];
       while (q.length > 0) {
         const item = q.shift();
@@ -98,9 +160,14 @@ class ConfigSyncService {
               | undefined;
 
             if (!remoteFolder) {
-              const newRemoteFolder = yield* driveApi.createFolder(child.name, item.remote.id);
+              const id = new ProtonFolderId('temp-id-' + Math.random().toString(16).slice(2));
+              syncOps.push({ type: 'createFolder', details: { id, name: child.name, parentId: item.remote.id } });
+
               remoteFolder = {
-                ...newRemoteFolder,
+                id,
+                name: child.name,
+                parentId: Option.some(item.remote.id),
+                treeEventScopeId: new TreeEventScopeId('temp-scope-' + Math.random().toString(16).slice(2)),
                 _tag: 'folder',
                 children: []
               };
@@ -113,22 +180,138 @@ class ConfigSyncService {
             const remoteFile = item.remote.children.find(c => c._tag === 'file' && c.name === child.name) as
               | ProtonFile
               | undefined;
+
             if (child.modifiedAt.getTime() - (remoteFile?.modifiedAt.getTime() ?? 0) < 5000) {
               logger.debug('Skipping upload for file with same modified time', { path: child.rawPath });
               continue;
             }
 
-            const data = yield* fileApi.readConfigFileContent(child.rawPath);
-            const metadata = this.buildUploadMetadata(child.rawPath, child.modifiedAt.getTime(), data.byteLength);
-
             if (remoteFile) {
-              yield* driveApi.uploadRevision(remoteFile.id, data, metadata);
+              syncOps.push({
+                type: 'updateFile',
+                details: { id: remoteFile.id, rawPath: child.rawPath, modifiedAt: child.modifiedAt }
+              });
             } else {
-              yield* driveApi.uploadFile(child.name, data, metadata, item.remote.id);
+              syncOps.push({
+                type: 'uploadFile',
+                details: {
+                  name: child.name,
+                  rawPath: child.rawPath,
+                  parentId: item.remote.id,
+                  modifiedAt: child.modifiedAt
+                }
+              });
             }
           }
         }
       }
+
+      const pruneQ: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [
+        { local: localRoot, remote: remoteRoot }
+      ];
+      while (pruneQ.length > 0) {
+        const item = pruneQ.shift();
+        if (!item) {
+          continue;
+        }
+
+        for (const remoteChild of item.remote.children) {
+          if (remoteChild._tag === 'folder') {
+            const localFolder = item.local.children.find(
+              child => child._type === 'folder' && child.name === remoteChild.name
+            ) as VaultFolder | undefined;
+
+            if (!localFolder) {
+              syncOps.push({ type: 'deleteFolder', details: { id: remoteChild.id } });
+              continue;
+            }
+
+            pruneQ.push({ local: localFolder, remote: remoteChild });
+            continue;
+          }
+
+          const localFile = item.local.children.find(
+            child => child._type === 'file' && child.name === remoteChild.name
+          );
+
+          if (!localFile) {
+            syncOps.push({ type: 'deleteFile', details: { id: remoteChild.id } });
+          }
+        }
+      }
+
+      const totalOps = syncOps.length;
+      let processedOps = 0;
+      const deleteNodeIds: Array<ProtonFileId | ProtonFolderId> = [];
+
+      while (syncOps.length > 0) {
+        const op = syncOps.shift();
+        if (!op) {
+          continue;
+        }
+
+        if (op.type === 'deleteFile' || op.type === 'deleteFolder') {
+          deleteNodeIds.push(op.details.id);
+          continue;
+        }
+
+        this.stateSubject.next({
+          state: 'pushing',
+          subState: 'applyingChanges',
+          totalItems: totalOps,
+          processedItems: processedOps++
+        });
+
+        switch (op.type) {
+          case 'createFolder':
+            {
+              const newRemoteFolder = yield* driveApi.createFolder(op.details.name, op.details.parentId);
+              for (const item of syncOps) {
+                if ('parentId' in item.details && item.details.parentId.equals(op.details.id)) {
+                  item.details.parentId = newRemoteFolder.id;
+                }
+              }
+            }
+            break;
+          case 'uploadFile':
+            {
+              const data = yield* fileApi.readConfigFileContent(op.details.rawPath);
+              const metadata = this.buildUploadMetadata(
+                op.details.rawPath,
+                op.details.modifiedAt.getTime(),
+                data.byteLength
+              );
+
+              yield* driveApi.uploadFile(op.details.name, data, metadata, op.details.parentId);
+            }
+            break;
+          case 'updateFile':
+            {
+              const data = yield* fileApi.readConfigFileContent(op.details.rawPath);
+              const metadata = this.buildUploadMetadata(
+                op.details.rawPath,
+                op.details.modifiedAt.getTime(),
+                data.byteLength
+              );
+              yield* driveApi.uploadRevision(op.details.id, data, metadata);
+            }
+            break;
+        }
+      }
+
+      if (deleteNodeIds.length > 0) {
+        this.stateSubject.next({
+          state: 'pushing',
+          subState: 'applyingChanges',
+          totalItems: totalOps,
+          processedItems: processedOps
+        });
+
+        yield* driveApi.trashNodes(deleteNodeIds);
+        processedOps += deleteNodeIds.length;
+      }
+
+      this.stateSubject.next({ state: 'idle' });
     });
   }
 
@@ -338,7 +521,8 @@ function inferMediaType(path: string): string {
   return 'application/octet-stream';
 }
 
-export type ConfigSyncError = InvalidConfigPathError | VaultRootIdNotAvailableError;
+export type ConfigSyncError = InvalidConfigPathError | VaultRootIdNotAvailableError | SyncAlreadyInProgressError;
 
 export class InvalidConfigPathError extends Data.TaggedError('InvalidConfigPathError') {}
 export class VaultRootIdNotAvailableError extends Data.TaggedError('VaultRootIdNotAvailableError') {}
+export class SyncAlreadyInProgressError extends Data.TaggedError('SyncAlreadyInProgressError') {}

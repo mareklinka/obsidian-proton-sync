@@ -1,5 +1,5 @@
 import { App, Notice, Plugin } from 'obsidian';
-import { Subject, type Subscription } from 'rxjs';
+import { BehaviorSubject, type Subscription } from 'rxjs';
 
 import { initProtonAccount } from './proton/drive/ProtonAccount';
 import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-bar';
@@ -21,6 +21,9 @@ import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { getLogger } from './services/vNext/ObsidianSyncLogger';
 import { Effect, Option } from 'effect';
 import { getConfigSyncService, initConfigSyncService } from './services/vNext/ConfigSyncService';
+import { ProtonDriveConfigSyncProgressModal } from './ui/modals/config-sync-progress-modal';
+import type { SyncEngineState } from './services/ObsidianSyncService';
+import type { ReconcileState } from './services/CloudReconciliationService';
 
 const PUSH_CONFIG_COMMAND_ID = 'push-vault-config';
 const PULL_CONFIG_COMMAND_ID = 'pull-vault-config';
@@ -62,6 +65,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     initProtonDriveApi();
     initProtonCloudObserver();
     initConfigSyncService(this.app.vault);
+    const configSyncService = getConfigSyncService();
 
     sessionService.authState$.subscribe(async authState => {
       const effect = Effect.gen(this, function* () {
@@ -114,9 +118,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     this.statusBarController = createSyncStatusBar(this, {
       loginState$: sessionService.authState$,
-      syncState$: new Subject(), // Placeholder, will be set properly after orchestrator is created
-      reconcileState$: new Subject(), // Placeholder, will be set properly after orchestrator is created
-      configSyncState$: new Subject() // Placeholder, will be set properly after configSyncService is created
+      syncState$: new BehaviorSubject<SyncEngineState>('idle'), // Placeholder, will be set properly after orchestrator is created
+      reconcileState$: new BehaviorSubject<ReconcileState>('idle'), // Placeholder, will be set properly after orchestrator is created
+      configSyncState$: configSyncService.state$
     });
 
     this.addRibbonIcon('cloud-cog', 'Vault configuration sync', () => {
@@ -225,14 +229,31 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   private async pushVaultConfig(): Promise<void> {
     const configSyncService = getConfigSyncService();
+    const progressModal = new ProtonDriveConfigSyncProgressModal(this.app, configSyncService.state$);
+    progressModal.open();
 
     new Notice('Pushing vault configuration to Proton Drive...');
 
     await Effect.runPromise(
       configSyncService.pushConfig().pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            progressModal.markCompleted();
+            new Notice('Configuration push completed.');
+          })
+        ),
+        Effect.catchTag('SyncAlreadyInProgressError', () =>
+          Effect.sync(() => {
+            progressModal.close();
+            new Notice('A configuration sync is already in progress. Please wait for it to complete.');
+          })
+        ),
         Effect.catchAll(e => {
           this.logger.error('Configuration push failed', e);
-          return Effect.succeed(new Notice('Configuration push failed. Please try again.'));
+          return Effect.sync(() => {
+            progressModal.markFailed('Configuration push failed. Please try again.');
+            new Notice('Configuration push failed. Please try again.');
+          });
         })
       )
     );

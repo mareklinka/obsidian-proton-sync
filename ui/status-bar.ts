@@ -66,7 +66,7 @@ function toEffectiveSyncState(
   reconcileState: ReconcileState,
   configSyncState: ConfigSyncState
 ): StatusBarSyncState {
-  if (reconcileState === 'reconciling' || configSyncState === 'pulling') {
+  if (reconcileState === 'reconciling' || configSyncState.state === 'pulling') {
     return 'downloading';
   }
 
@@ -74,7 +74,7 @@ function toEffectiveSyncState(
     return 'error';
   }
 
-  if (syncState === 'syncing' || configSyncState === 'pushing') {
+  if (syncState === 'syncing' || configSyncState.state === 'pushing') {
     return 'uploading';
   }
 

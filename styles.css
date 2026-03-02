@@ -89,3 +89,30 @@
   margin-top: auto;
   margin-bottom: auto;
 }
+
+.proton-sync-config-progress {
+  min-width: min(480px, 90vw);
+}
+
+.proton-sync-config-progress__message {
+  margin: 0;
+  font-weight: 600;
+}
+
+.proton-sync-config-progress__details {
+  margin: 6px 0 12px;
+  color: var(--text-muted);
+}
+
+.proton-sync-config-progress__bar {
+  width: 100%;
+  height: 14px;
+}
+
+.proton-sync-config-progress--completed .proton-sync-config-progress__message {
+  color: var(--text-success);
+}
+
+.proton-sync-config-progress--failed .proton-sync-config-progress__message {
+  color: var(--text-error);
+}

@@ -216,6 +216,57 @@ class ProtonDriveApi {
     });
   }
 
+  public deleteFile(id: ProtonFileId): Effect.Effect<void, GenericProtonDriveError> {
+    return this.trashNodes([id]);
+  }
+
+  public deleteFolder(id: ProtonFolderId): Effect.Effect<void, GenericProtonDriveError> {
+    return this.trashNodes([id]);
+  }
+
+  public trashNodes(
+    nodeIds: ReadonlyArray<ProtonFileId | ProtonFolderId>
+  ): Effect.Effect<void, GenericProtonDriveError> {
+    return Effect.tryPromise({
+      try: async () => {
+        if (nodeIds.length === 0) {
+          return;
+        }
+
+        const uids = nodeIds.map(nodeId => nodeId.uid);
+        const results = await this.consumeAllResults(this.client.trashNodes(uids));
+
+        const failed = results.find(result => !result.ok);
+        if (failed) {
+          throw new Error(`Failed to trash node ${failed.uid}: ${failed.error ?? 'unknown error'}`);
+        }
+      },
+      catch: () => {
+        return new GenericProtonDriveError();
+      }
+    });
+  }
+
+  private async consumeAllResults(
+    generator: AsyncGenerator<{ uid: string; ok: boolean; error?: string }>
+  ): Promise<Array<{ uid: string; ok: boolean; error?: string }>> {
+    const results: Array<{ uid: string; ok: boolean; error?: string }> = [];
+
+    while (true) {
+      const next = await generator.next();
+      if (next.done) {
+        break;
+      }
+
+      if (next.value) {
+        results.push(next.value);
+      }
+    }
+
+    await generator.return(undefined);
+    return results;
+  }
+
   private static createFolderFromNode(node: {
     name: string;
     uid: string;
