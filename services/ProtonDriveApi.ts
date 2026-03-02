@@ -192,7 +192,8 @@ class ProtonDriveApi {
           }
         });
 
-        result.uploadFromStream(stream, []);
+        const controller = await result.uploadFromStream(stream, []);
+        await controller.completion();
       },
       catch: () => {
         return new FileUploadError();
@@ -211,7 +212,8 @@ class ProtonDriveApi {
           }
         });
 
-        result.uploadFromStream(stream, []);
+        const controller = await result.uploadFromStream(stream, []);
+        await controller.completion();
       },
       catch: () => {
         return new FileUploadError();
