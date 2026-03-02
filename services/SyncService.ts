@@ -294,6 +294,7 @@ class SyncService {
         switch (op.type) {
           case 'createFolder':
             {
+              logger.debug('Creating folder', { name: op.details.name, parentId: op.details.parentId.uid });
               const newRemoteFolder = yield* driveApi.createFolder(op.details.name, op.details.parentId);
               for (const item of syncOps) {
                 if ('parentId' in item.details && item.details.parentId.equals(op.details.id)) {
@@ -304,6 +305,7 @@ class SyncService {
             break;
           case 'uploadFile':
             {
+              logger.debug('Uploading file', { path: op.details.rawPath, modifiedAt: op.details.modifiedAt });
               const data = yield* fileApi.readConfigFileContent(op.details.rawPath);
               const metadata = this.buildUploadMetadata(
                 op.details.rawPath,
@@ -316,6 +318,7 @@ class SyncService {
             break;
           case 'updateFile':
             {
+              logger.debug('Updating file', { path: op.details.rawPath, modifiedAt: op.details.modifiedAt });
               const data = yield* fileApi.readConfigFileContent(op.details.rawPath);
               const metadata = this.buildUploadMetadata(
                 op.details.rawPath,
@@ -548,11 +551,16 @@ class SyncService {
         switch (op.type) {
           case 'createLocalFolder':
             {
+              logger.debug('Creating local folder', { path: op.details.rawPath });
               yield* fileApi.ensureFolder(op.details.rawPath);
             }
             break;
           case 'writeLocalFile':
             {
+              logger.debug('Writing local file', {
+                path: op.details.rawPath,
+                remoteModifiedAt: op.details.remoteModifiedAt
+              });
               const parentPath = getParentPath(op.details.rawPath);
               if (parentPath) {
                 yield* fileApi.ensureFolder(parentPath);
@@ -564,11 +572,13 @@ class SyncService {
             break;
           case 'deleteLocalFile':
             {
+              logger.debug('Deleting local file', { path: op.details.rawPath });
               yield* fileApi.deleteFile(op.details.rawPath);
             }
             break;
           case 'deleteLocalFolder':
             {
+              logger.debug('Deleting local folder', { path: op.details.rawPath });
               yield* fileApi.deleteFolder(op.details.rawPath);
             }
             break;
