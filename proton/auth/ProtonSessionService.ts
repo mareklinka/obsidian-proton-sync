@@ -385,7 +385,7 @@ class ProtonSessionService {
         });
       },
       catch: () => {
-        throw new ProtonApiCommunicationError();
+        return new ProtonApiCommunicationError();
       }
     });
   }
@@ -456,7 +456,7 @@ class ProtonSessionService {
     return Effect.tryPromise({
       try: () => buildSrpProofs(authInfo, email, password),
       catch: () => {
-        throw new CryptographyError();
+        return new CryptographyError();
       }
     });
   }
@@ -466,18 +466,18 @@ class ProtonSessionService {
       try: () => {
         const decoded = decodeBase64(serverProof);
         if (decoded.length !== expected.length) {
-          throw new CryptographyError();
+          return new CryptographyError();
         }
 
         for (let index = 0; index < decoded.length; index += 1) {
           if (decoded[index] !== expected[index]) {
-            throw new CryptographyError();
+            return new CryptographyError();
           }
         }
       },
       catch: error => {
         if (error instanceof CryptographyError) {
-          throw error;
+          return error;
         }
 
         return new CryptographyError();
@@ -494,7 +494,7 @@ class ProtonSessionService {
       const response = yield* this.requestRaw(path, body, this.appVersionHeader, headers);
 
       if (response.status >= 400) {
-        return yield* Effect.fail(new ProtonApiCommunicationError());
+        return yield* new ProtonApiCommunicationError();
       }
 
       return response.json as T;
