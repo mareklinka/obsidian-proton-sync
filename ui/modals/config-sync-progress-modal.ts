@@ -67,7 +67,13 @@ export class ProtonDriveConfigSyncProgressModal extends Modal {
     this.contentEl.removeClass('proton-sync-config-progress--failed');
     this.contentEl.addClass('proton-sync-config-progress--completed');
 
-    this.render('Configuration push complete.', 'All detected changes have been pushed to Proton Drive.', 100);
+    this.render(
+      'Configuration push complete.',
+      'All detected changes have been pushed to Proton Drive. This dialog will close in 5 seconds',
+      100
+    );
+
+    setTimeout(() => this.close(), 5000);
   }
 
   markFailed(message: string): void {
