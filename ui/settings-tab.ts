@@ -84,55 +84,6 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         );
       }
     });
-
-    // containerEl.createEl('h3', { text: 'Debug logging' });
-
-    // new Setting(containerEl)
-    //   .setName('Enable file logging')
-    //   .setDesc('Write debug logs to a file inside the vault for troubleshooting.')
-    //   .addToggle(toggle =>
-    //     toggle.setValue(settingsStore.enableFileLogging).onChange(async value => {
-    //       await this.settingsService.setLogging({ enableFileLogging: value });
-    //       settingsStore = this.settingsService.snapshot();
-    //       this.emitLogSettingsChange(settingsStore);
-    //     })
-    //   );
-
-    // new Setting(containerEl)
-    //   .setName('Log level')
-    //   .setDesc('Minimum severity to write to the log file.')
-    //   .addDropdown(dropdown =>
-    //     dropdown
-    //       .addOptions({
-    //         debug: 'Debug',
-    //         info: 'Info',
-    //         warn: 'Warn',
-    //         error: 'Error'
-    //       })
-    //       .setValue(settingsStore.logLevel)
-    //       .onChange(async value => {
-    //         await this.settingsService.setLogging({ logLevel: value as LogLevel });
-    //         settingsStore = this.settingsService.snapshot();
-    //         this.emitLogSettingsChange(settingsStore);
-    //       })
-    //   );
-
-    // new Setting(containerEl)
-    //   .setName('Max log size (KB)')
-    //   .setDesc('When the log grows beyond this size it will be trimmed.')
-    //   .addText(text =>
-    //     text
-    //       .setPlaceholder('1024')
-    //       .setValue(String(settingsStore.logMaxSizeKb))
-    //       .onChange(async value => {
-    //         const parsed = Number(value);
-    //         await this.settingsService.setLogging({
-    //           logMaxSizeKb: Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SETTINGS.logMaxSizeKb
-    //         });
-    //         settingsStore = this.settingsService.snapshot();
-    //         this.emitLogSettingsChange(settingsStore);
-    //       })
-    //   );
   }
 
   public hide() {
@@ -174,12 +125,4 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
     return fragment;
   }
-
-  // private emitLogSettingsChange(settings: PluginSettings): void {
-  //   this.loggingChangedSubject.next({
-  //     isEnabled: settings.enableFileLogging,
-  //     maxSize: settings.logMaxSizeKb,
-  //     minLevel: settings.logLevel
-  //   });
-  // }
 }

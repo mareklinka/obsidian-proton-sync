@@ -98,9 +98,6 @@ class ProtonSessionService {
   private session: ProtonSessionState = { state: 'disconnected' };
   private saltedKeyPasswords: Record<string, string> = {};
 
-  private readonly sessionChangeSubject = new Subject<void>();
-  public readonly sessionChange$ = this.sessionChangeSubject.asObservable();
-
   private secretStore: ReturnType<typeof getObsidianSecretStore>;
 
   constructor(public readonly appVersionHeader: string) {
@@ -164,7 +161,6 @@ class ProtonSessionService {
 
       this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(this.session.session));
 
-      this.sessionChangeSubject.next();
       this.authStatusSubject.next('connected');
 
       this.startAutoRefresh();
@@ -260,7 +256,6 @@ class ProtonSessionService {
       this.saltedKeyPasswords = {};
 
       this.session = { state: 'logged-out' };
-      this.sessionChangeSubject.next();
       this.authStatusSubject.next('disconnected');
 
       yield* this.destroySession(session.session);
@@ -277,7 +272,6 @@ class ProtonSessionService {
       this.stopAutoRefresh();
 
       this.session = { state: 'disconnected' };
-      this.sessionChangeSubject.next();
       this.authStatusSubject.next('disconnected');
 
       yield* this.destroySession(session.session);
@@ -342,7 +336,6 @@ class ProtonSessionService {
         }
       };
       this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(this.session.session));
-      this.sessionChangeSubject.next();
       this.authStatusSubject.next('connected');
     });
   }

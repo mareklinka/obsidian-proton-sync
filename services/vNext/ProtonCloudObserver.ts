@@ -1,9 +1,10 @@
 import { Subject } from 'rxjs';
 import { getLogger } from './ObsidianSyncLogger';
 import { ProtonDriveClient } from '@protontech/drive-sdk';
-import { ProtonDriveError, ProtonId, TreeEventScopeId, TreeEventSubscriptionFailed } from './proton-drive-types';
+import { TreeEventScopeId, TreeEventSubscriptionFailed } from './proton-drive-types';
 import { Effect } from 'effect';
 import { getProtonDriveClient } from '../../proton/drive/ProtonDriveClient';
+import { EventSubscription } from '@protontech/drive-sdk/dist/internal/events';
 
 export const { init: initProtonCloudObserver, get: getProtonCloudObserver } = (function () {
   let instance: ProtonCloudObserver | null = null;
@@ -27,12 +28,14 @@ class ProtonCloudObserver {
   private readonly cloudEventSubject = new Subject<void>();
   public readonly cloudEvents = this.cloudEventSubject.asObservable();
 
+  private subscription: EventSubscription | null = null;
+
   public constructor(private readonly client: ProtonDriveClient) {}
 
   public subscribeToTreeChanges(nodeId: TreeEventScopeId): Effect.Effect<void, TreeEventSubscriptionFailed> {
     return Effect.tryPromise({
       try: async () => {
-        this.client.subscribeToTreeEvents(nodeId.treeEventScopeId, async cloudEvent => {
+        this.subscription = await this.client.subscribeToTreeEvents(nodeId.treeEventScopeId, async cloudEvent => {
           this.logger.info(`Received cloud event for node ${nodeId.treeEventScopeId}`, cloudEvent);
           this.cloudEventSubject.next();
         });
@@ -41,5 +44,12 @@ class ProtonCloudObserver {
         return new TreeEventSubscriptionFailed();
       }
     });
+  }
+
+  public unsubscribeFromTreeChanges(): void {
+    if (this.subscription) {
+      this.subscription.dispose();
+      this.subscription = null;
+    }
   }
 }

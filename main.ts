@@ -37,7 +37,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   async onload(): Promise<void> {
     this.logger.info('Loading Proton Drive Sync plugin', this.manifest.version);
 
-    initObsidianSettingsStore({ save: this.loadData.bind(this), load: this.loadData.bind(this) });
+    const settings = initObsidianSettingsStore({ save: this.saveData.bind(this), load: this.loadData.bind(this) });
+    await settings.load();
     initObsidianSecretStore(this.app.secretStorage);
     initObsidianFileApi(this.app.vault);
 
@@ -64,6 +65,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       const effect = Effect.gen(this, function* () {
         this.logger.info('Authentication state changed', authState);
 
+        const session = sessionService.getCurrentSession();
+        settings.setAuthenticationResult(session);
+
         if (authState === 'connected') {
           const protonApi = getProtonDriveApi();
           const myFilesRoot = yield* protonApi.getRootFolder();
@@ -82,6 +86,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
           getObsidianSettingsStore().setVaultRootNodeUid(vaultRoot.id);
           yield* getProtonCloudObserver().subscribeToTreeChanges(vaultRoot.treeEventScopeId);
+        } else if (authState === 'disconnected') {
+          getProtonCloudObserver().unsubscribeFromTreeChanges();
         }
       }).pipe(
         Effect.catchAll(error => {

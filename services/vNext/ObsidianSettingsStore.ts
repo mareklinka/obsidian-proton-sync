@@ -1,14 +1,15 @@
 import { Option } from 'effect';
-import { ProtonAuthStatus, ProtonSessionState } from '../../proton/auth/ProtonSessionService';
 import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
 import { BehaviorSubject } from 'rxjs';
+import { ProtonAuthStatus } from '../../proton/auth/vNext/ProtonSessionService';
+import { ProtonSession } from '../../proton/auth/ProtonSession';
 
 export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } = (function () {
   let instance: ObsidianSettingsStore | null = null;
 
   return {
     init: function initObsidianSettingsStore(callbacks: {
-      load: () => Promise<PluginSettingsStorageModel>;
+      load: () => Promise<PluginSettingsStorageModel | null>;
       save: (data: PluginSettingsStorageModel) => Promise<void>;
     }): ObsidianSettingsStore {
       return (instance ??= new ObsidianSettingsStore(callbacks));
@@ -39,25 +40,10 @@ class ObsidianSettingsStore {
 
   public constructor(
     private readonly callbacks: {
-      load: () => Promise<PluginSettingsStorageModel>;
+      load: () => Promise<PluginSettingsStorageModel | null>;
       save: (data: PluginSettingsStorageModel) => Promise<void>;
     }
   ) {
-    callbacks.load().then(model => {
-      this.settingsSubject.next({
-        accountEmail: model.accountEmail,
-        connectionStatus: model.connectionStatus,
-        lastLoginAt: model.lastLoginAt ? new Date(model.lastLoginAt) : null,
-        lastRefreshAt: model.lastRefreshAt ? new Date(model.lastRefreshAt) : null,
-        sessionExpiresAt: model.sessionExpiresAt ? new Date(model.sessionExpiresAt) : null,
-        lastLoginError: model.lastLoginError,
-        latestEventId: model.latestEventId ? new ProtonEventId(model.latestEventId) : null,
-        vaultRootNodeUid: model.vaultRootNodeUid ? new ProtonFolderId(model.vaultRootNodeUid) : null,
-        enableFileLogging: model.enableFileLogging,
-        logLevel: model.logLevel
-      });
-    });
-
     this.settings$.subscribe(settings => {
       callbacks.save({
         accountEmail: settings.accountEmail,
@@ -71,6 +57,26 @@ class ObsidianSettingsStore {
         enableFileLogging: settings.enableFileLogging,
         logLevel: settings.logLevel
       });
+    });
+  }
+
+  public async load(): Promise<void> {
+    const loaded = await this.callbacks.load();
+    if (!loaded) {
+      return;
+    }
+
+    this.settingsSubject.next({
+      accountEmail: loaded.accountEmail,
+      connectionStatus: loaded.connectionStatus,
+      lastLoginAt: loaded.lastLoginAt ? new Date(loaded.lastLoginAt) : null,
+      lastRefreshAt: loaded.lastRefreshAt ? new Date(loaded.lastRefreshAt) : null,
+      sessionExpiresAt: loaded.sessionExpiresAt ? new Date(loaded.sessionExpiresAt) : null,
+      lastLoginError: loaded.lastLoginError,
+      latestEventId: loaded.latestEventId ? new ProtonEventId(loaded.latestEventId) : null,
+      vaultRootNodeUid: loaded.vaultRootNodeUid ? new ProtonFolderId(loaded.vaultRootNodeUid) : null,
+      enableFileLogging: loaded.enableFileLogging,
+      logLevel: loaded.logLevel
     });
   }
 
@@ -102,35 +108,29 @@ class ObsidianSettingsStore {
     return settings.latestEventId?.eventId || null;
   }
 
-  public setLatestProtonEventId(eventId: ProtonEventId): void {
+  public setLatestProtonEventId(eventId: ProtonEventId | null): void {
     this.settingsSubject.next({
       ...this.settingsSubject.getValue(),
       latestEventId: eventId
     });
   }
 
-  public setLogging(enabled: boolean, logLevel: LogLevel): void {
+  public setAuthenticationResult(session: Option.Option<ProtonSession>): void {
     this.settingsSubject.next({
       ...this.settingsSubject.getValue(),
-      enableFileLogging: enabled,
-      logLevel: logLevel
-    });
-  }
-
-  public setAuthenticationResult(session: ProtonSessionState): void {
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
-      ...(session.state === 'ok'
+      ...(Option.isSome(session)
         ? {
             connectionStatus: 'connected',
             lastLoginError: null,
-            lastLoginAt: session.session.updatedAt,
-            lastRefreshAt: session.session.lastRefreshAt,
-            sessionExpiresAt: session.session.expiresAt
+            lastLoginAt: session.value.updatedAt,
+            lastRefreshAt: session.value.lastRefreshAt,
+            sessionExpiresAt: session.value.expiresAt
           }
         : {
             connectionStatus: 'disconnected',
-            sessionExpiresAt: null
+            sessionExpiresAt: null,
+            lastLoginAt: null,
+            lastRefreshAt: null
           })
     });
   }
