@@ -12,6 +12,7 @@ export interface ProtonDriveSyncSettings {
   vaultRootNodeUid: string | null;
   latestEventIds: Record<string, string>;
   logLevel: LogLevel;
+  ignoredPaths: string[];
 }
 
 export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
@@ -24,5 +25,6 @@ export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
   containerNodeUid: null,
   vaultRootNodeUid: null,
   latestEventIds: {},
-  logLevel: 'info'
+  logLevel: 'info',
+  ignoredPaths: []
 };

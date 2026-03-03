@@ -4,6 +4,7 @@ import { combineLatest, Subject, take } from 'rxjs';
 import { ProtonDriveLoginModal } from './modals/login-modal';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 import { getObsidianSettingsStore, LogLevel } from '../services/ObsidianSettingsStore';
+import { getLogger } from '../services/ObsidianSyncLogger';
 
 import type ProtonDriveSyncPlugin from '../main';
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
@@ -104,6 +105,31 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
               this.loggingChangedSubject.next({ isEnabled: true, minLevel: logLevel });
             });
         });
+
+      new Setting(containerEl)
+        .setName('Ignored paths')
+        .setDesc('One glob pattern per line. Paths are relative to vault root and ignored by both push and pull.')
+        .addTextArea(text => {
+          const commit = (value: string) => {
+            const nextPatterns = parseIgnoredPathsInput(value);
+            if (isSameStringArray(nextPatterns, settingsStore.getIgnoredPaths())) {
+              return;
+            }
+
+            settingsStore.setIgnoredPaths(nextPatterns);
+          };
+
+          text
+            .setPlaceholder('.obsidian/workspace*\ntemplates/**\n**/*.tmp')
+            .setValue(settings.ignoredPaths.join('\n'));
+
+          text.inputEl.rows = 5;
+          text.inputEl.cols = 50;
+          text.inputEl.addEventListener('blur', () => {
+            getLogger('SettingsTab').debug('Ignored paths input blurred, committing changes');
+            commit(text.inputEl.value);
+          });
+        });
     });
   }
 
@@ -146,4 +172,35 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
     return fragment;
   }
+}
+
+function parseIgnoredPathsInput(value: string): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const line of value.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+
+  return result;
+}
+
+function isSameStringArray(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+
+  return true;
 }

@@ -1,6 +1,7 @@
 import { type UploadMetadata } from '@protontech/drive-sdk';
 import { Data, Effect, Option } from 'effect';
 import { normalizePath, type Vault } from 'obsidian';
+import picomatch from 'picomatch';
 import { BehaviorSubject } from 'rxjs';
 
 import { canonicalizePath, getObsidianFileApi } from './ObsidianFileApi';
@@ -701,8 +702,34 @@ class SyncService {
 
     const canonical = canonicalizePath(normalized);
     const excluded = canonicalizePath(this.vault.configDir + EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH);
-    return canonical.path === excluded.path || canonical.path.startsWith(`${excluded.path}/`);
+    if (canonical.path === excluded.path || canonical.path.startsWith(`${excluded.path}/`)) {
+      return true;
+    }
+
+    const ignoredPaths = getObsidianSettingsStore().getIgnoredPaths();
+    for (const pattern of ignoredPaths) {
+      const normalizedPattern = normalizePath(pattern?.trim() ?? '');
+      if (!normalizedPattern) {
+        continue;
+      }
+
+      const canonicalPattern = canonicalizePath(normalizedPattern).path;
+
+      if (picomatch.isMatch(canonical.path, canonicalPattern, { nocase: true, dot: true })) {
+        return true;
+      }
+
+      if (!hasGlobMeta(canonicalPattern) && canonical.path.startsWith(`${canonicalPattern}/`)) {
+        return true;
+      }
+    }
+
+    return false;
   }
+}
+
+function hasGlobMeta(pattern: string): boolean {
+  return /[*?[\]]/.test(pattern);
 }
 
 function getParentPath(path: string): string {

@@ -36,7 +36,8 @@ class ObsidianSettingsStore {
     latestEventId: null,
     vaultRootNodeUid: null,
     enableFileLogging: false,
-    logLevel: LogLevel.info
+    logLevel: LogLevel.info,
+    ignoredPaths: []
   });
   public readonly settings$ = this.settingsSubject.asObservable();
 
@@ -45,22 +46,7 @@ class ObsidianSettingsStore {
       load: () => Promise<PluginSettingsStorageModel | null>;
       save: (data: PluginSettingsStorageModel) => Promise<void>;
     }
-  ) {
-    this.settings$.subscribe(settings => {
-      callbacks.save({
-        accountEmail: settings.accountEmail,
-        connectionStatus: settings.connectionStatus,
-        lastLoginAt: settings.lastLoginAt ? settings.lastLoginAt.getTime() : null,
-        lastRefreshAt: settings.lastRefreshAt ? settings.lastRefreshAt.getTime() : null,
-        sessionExpiresAt: settings.sessionExpiresAt ? settings.sessionExpiresAt.getTime() : null,
-        lastLoginError: settings.lastLoginError,
-        latestEventId: settings.latestEventId?.eventId || null,
-        vaultRootNodeUid: settings.vaultRootNodeUid?.uid || null,
-        enableFileLogging: settings.enableFileLogging,
-        logLevel: settings.logLevel
-      });
-    });
-  }
+  ) {}
 
   public async load(): Promise<void> {
     const loaded = await this.callbacks.load();
@@ -78,7 +64,24 @@ class ObsidianSettingsStore {
       latestEventId: loaded.latestEventId ? new ProtonEventId(loaded.latestEventId) : null,
       vaultRootNodeUid: loaded.vaultRootNodeUid ? new ProtonFolderId(loaded.vaultRootNodeUid) : null,
       enableFileLogging: loaded.enableFileLogging,
-      logLevel: loaded.logLevel ?? LogLevel.info
+      logLevel: loaded.logLevel ?? LogLevel.info,
+      ignoredPaths: loaded.ignoredPaths ?? []
+    });
+
+    this.settings$.subscribe(settings => {
+      this.callbacks.save({
+        accountEmail: settings.accountEmail,
+        connectionStatus: settings.connectionStatus,
+        lastLoginAt: settings.lastLoginAt ? settings.lastLoginAt.getTime() : null,
+        lastRefreshAt: settings.lastRefreshAt ? settings.lastRefreshAt.getTime() : null,
+        sessionExpiresAt: settings.sessionExpiresAt ? settings.sessionExpiresAt.getTime() : null,
+        lastLoginError: settings.lastLoginError,
+        latestEventId: settings.latestEventId?.eventId || null,
+        vaultRootNodeUid: settings.vaultRootNodeUid?.uid || null,
+        enableFileLogging: settings.enableFileLogging,
+        logLevel: settings.logLevel,
+        ignoredPaths: settings.ignoredPaths
+      });
     });
   }
 
@@ -90,6 +93,17 @@ class ObsidianSettingsStore {
     this.settingsSubject.next({
       ...this.settingsSubject.getValue(),
       logLevel: level
+    });
+  }
+
+  public getIgnoredPaths(): string[] {
+    return this.settingsSubject.getValue().ignoredPaths;
+  }
+
+  public setIgnoredPaths(patterns: string[]): void {
+    this.settingsSubject.next({
+      ...this.settingsSubject.getValue(),
+      ignoredPaths: sanitizeIgnoredPaths(patterns)
     });
   }
 
@@ -173,6 +187,7 @@ interface PluginSettingsStorageModel {
   vaultRootNodeUid: string | null;
   enableFileLogging: boolean;
   logLevel: LogLevel;
+  ignoredPaths?: string[];
 }
 
 export interface PluginSettings {
@@ -186,6 +201,7 @@ export interface PluginSettings {
   vaultRootNodeUid: ProtonFolderId | null;
   enableFileLogging: boolean;
   logLevel: LogLevel;
+  ignoredPaths: string[];
 }
 
 export enum LogLevel {
@@ -193,4 +209,25 @@ export enum LogLevel {
   info = 'info',
   warn = 'warn',
   error = 'error'
+}
+
+function sanitizeIgnoredPaths(patterns: string[]): string[] {
+  const sanitized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const pattern of patterns) {
+    const trimmed = pattern.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    if (seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    sanitized.push(trimmed);
+  }
+
+  return sanitized;
 }
