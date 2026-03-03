@@ -70,12 +70,14 @@ interface FileUpload {
   parentId: ProtonFolderId;
   rawPath: string;
   modifiedAt: Date;
+  sha1: string;
 }
 
 interface FileUpdate {
   id: ProtonFileId;
   rawPath: string;
   modifiedAt: Date;
+  sha1: string;
 }
 
 interface FileDelete {
@@ -219,7 +221,7 @@ class SyncService {
             if (remoteFile) {
               syncOps.push({
                 type: 'updateFile',
-                details: { id: remoteFile.id, rawPath: child.rawPath, modifiedAt: child.modifiedAt }
+                details: { id: remoteFile.id, rawPath: child.rawPath, modifiedAt: child.modifiedAt, sha1: child.sha1 }
               });
             } else {
               syncOps.push({
@@ -228,7 +230,8 @@ class SyncService {
                   name: child.name,
                   rawPath: child.rawPath,
                   parentId: item.remote.id,
-                  modifiedAt: child.modifiedAt
+                  modifiedAt: child.modifiedAt,
+                  sha1: child.sha1
                 }
               });
             }
@@ -311,7 +314,8 @@ class SyncService {
               const metadata = this.buildUploadMetadata(
                 op.details.rawPath,
                 op.details.modifiedAt.getTime(),
-                data.byteLength
+                data.byteLength,
+                op.details.sha1
               );
 
               yield* driveApi.uploadFile(op.details.name, data, metadata, op.details.parentId);
@@ -324,7 +328,8 @@ class SyncService {
               const metadata = this.buildUploadMetadata(
                 op.details.rawPath,
                 op.details.modifiedAt.getTime(),
-                data.byteLength
+                data.byteLength,
+                op.details.sha1
               );
               yield* driveApi.uploadRevision(op.details.id, data, metadata);
             }
@@ -657,11 +662,17 @@ class SyncService {
     });
   }
 
-  private buildUploadMetadata(relativePath: string, modifiedAt: number, expectedSize: number): UploadMetadata {
+  private buildUploadMetadata(
+    relativePath: string,
+    modifiedAt: number,
+    expectedSize: number,
+    expectedSha1: string
+  ): UploadMetadata {
     return {
       mediaType: inferMediaType(relativePath),
       expectedSize,
-      modificationTime: new Date(modifiedAt)
+      modificationTime: new Date(modifiedAt),
+      expectedSha1
     };
   }
 
