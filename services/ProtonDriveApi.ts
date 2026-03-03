@@ -8,7 +8,6 @@ import {
   InvalidNameError,
   ItemAlreadyExistsError,
   MyFilesRootFilesNotFound,
-  NotAFolderError,
   ProtonApiError,
   ProtonFileId,
   ProtonFolderId,
@@ -16,6 +15,7 @@ import {
 } from './proton-drive-types';
 import { getProtonDriveClient } from '../proton/drive/ProtonDriveClient';
 
+import type { NotAFolderError } from './proton-drive-types';
 import type { MaybeNode, ProtonDriveClient, UploadMetadata } from '@protontech/drive-sdk';
 
 export interface ProtonFolder {
@@ -70,33 +70,6 @@ class ProtonDriveApi {
       }
 
       return ProtonDriveApi.createFolderFromNode(node.value);
-    });
-  }
-
-  public getFolder(
-    folderUid: ProtonFolderId
-  ): Effect.Effect<Option.Option<ProtonFolder>, NotAFolderError | GenericProtonDriveError> {
-    return Effect.tryPromise({
-      try: async () => {
-        const node = await this.client.getNode(folderUid.uid);
-
-        if (!node.ok) {
-          return Option.none();
-        }
-
-        if (node.value.type !== 'folder') {
-          throw new NotAFolderError();
-        }
-
-        return Option.some(ProtonDriveApi.createFolderFromNode(node.value));
-      },
-      catch: error => {
-        if (error instanceof NotAFolderError) {
-          return error;
-        }
-
-        return new GenericProtonDriveError();
-      }
     });
   }
 

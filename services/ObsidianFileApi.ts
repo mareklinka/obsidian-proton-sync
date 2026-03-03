@@ -1,6 +1,6 @@
 import { sha1 } from '@noble/hashes/legacy.js';
-import { Effect, Option } from 'effect';
-import { normalizePath, TFile, TFolder } from 'obsidian';
+import { Effect } from 'effect';
+import { normalizePath } from 'obsidian';
 
 import { getLogger } from './ObsidianSyncLogger';
 
@@ -24,33 +24,6 @@ export const { init: initObsidianFileApi, get: getObsidianFileApi } = (function 
 
 class ObsidianFileApi {
   public constructor(private readonly vault: Vault) {}
-
-  public getVaultFileTree(): Effect.Effect<VaultFolder> {
-    return Effect.promise(async () => {
-      const vaultRoot = this.vault.getRoot();
-
-      const buildFolderNode = async (folder: TFolder): Promise<VaultFolder> => {
-        const children: VaultNode[] = [];
-        for (const child of folder.children) {
-          if (child instanceof TFile) {
-            children.push(await toVaultFile(this.vault.adapter, child));
-          } else if (child instanceof TFolder) {
-            children.push(await buildFolderNode(child));
-          }
-        }
-
-        return {
-          _type: 'folder',
-          name: folder.name,
-          rawPath: folder.path,
-          path: canonicalizePath(folder.path),
-          children
-        };
-      };
-
-      return await buildFolderNode(vaultRoot);
-    });
-  }
 
   public getFileTree(): Effect.Effect<VaultFolder> {
     return Effect.promise(async () => {
@@ -108,21 +81,7 @@ class ObsidianFileApi {
     });
   }
 
-  public readFileContent(path: CanonicalPath): Effect.Effect<Option.Option<ArrayBuffer>> {
-    return Effect.promise(async () => {
-      const file = this.vault.getFileByPath(path.path);
-
-      if (!file) {
-        return Option.none();
-      }
-
-      const content = await this.vault.readBinary(file);
-
-      return Option.some(content);
-    });
-  }
-
-  public readConfigFileContent(path: string): Effect.Effect<ArrayBuffer> {
+  public readFileContent(path: string): Effect.Effect<ArrayBuffer> {
     return Effect.promise(async () => await this.vault.adapter.readBinary(path));
   }
 
@@ -184,28 +143,6 @@ export function canonicalizePath(path: string): CanonicalPath {
     .toLocaleLowerCase();
 
   return new CanonicalPath(cleaned);
-}
-
-export async function toVaultFile(adapter: Vault['adapter'], file: TFile): Promise<VaultFile> {
-  return {
-    _type: 'file',
-    name: file.name,
-    rawPath: file.path,
-    path: canonicalizePath(file.path),
-    createdAt: new Date(file.stat.ctime),
-    modifiedAt: new Date(file.stat.mtime),
-    sha1: await hashFileContent(adapter, file.path)
-  };
-}
-
-export function toVaultFolder(folder: TFolder): VaultFolder {
-  return {
-    _type: 'folder',
-    name: folder.name,
-    rawPath: folder.path,
-    path: canonicalizePath(folder.path),
-    children: []
-  };
 }
 
 export type VaultNode = VaultFile | VaultFolder;

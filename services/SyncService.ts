@@ -320,7 +320,7 @@ class SyncService {
           case 'uploadFile':
             {
               logger.debug('Uploading file', { path: op.details.rawPath, modifiedAt: op.details.modifiedAt });
-              const data = yield* fileApi.readConfigFileContent(op.details.rawPath);
+              const data = yield* fileApi.readFileContent(op.details.rawPath);
               const metadata = this.buildUploadMetadata(
                 op.details.rawPath,
                 op.details.modifiedAt.getTime(),
@@ -334,7 +334,7 @@ class SyncService {
           case 'updateFile':
             {
               logger.debug('Updating file', { path: op.details.rawPath, modifiedAt: op.details.modifiedAt });
-              const data = yield* fileApi.readConfigFileContent(op.details.rawPath);
+              const data = yield* fileApi.readFileContent(op.details.rawPath);
               const metadata = this.buildUploadMetadata(
                 op.details.rawPath,
                 op.details.modifiedAt.getTime(),
