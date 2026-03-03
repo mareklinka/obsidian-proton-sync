@@ -215,10 +215,20 @@ class SyncService {
                 localModifiedAt: child.modifiedAt,
                 remoteModifiedAt: remoteFile?.modifiedAt
               });
+
               continue;
             }
 
             if (remoteFile) {
+              if (remoteFile.modifiedAt.getTime() > child.modifiedAt.getTime()) {
+                logger.debug('Remote file is newer than local, skipping update', {
+                  path: child.rawPath,
+                  localModifiedAt: child.modifiedAt,
+                  remoteModifiedAt: remoteFile.modifiedAt
+                });
+
+                continue;
+              }
               syncOps.push({
                 type: 'updateFile',
                 details: { id: remoteFile.id, rawPath: child.rawPath, modifiedAt: child.modifiedAt, sha1: child.sha1 }
