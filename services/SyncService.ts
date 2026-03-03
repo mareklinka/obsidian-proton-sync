@@ -162,7 +162,7 @@ class SyncService {
       const driveApi = getProtonDriveApi();
 
       const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value);
-      const remoteRoot = yield* this.scanRemoteConfig(remoteConfigRootFolder);
+      const remoteRoot = yield* this.buildRemoteTree(remoteConfigRootFolder);
 
       this.stateSubject.next({ state: 'pushing', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
       const syncOps: SyncOperation[] = [];
@@ -207,8 +207,8 @@ class SyncService {
               | ProtonFile
               | undefined;
 
-            if (child.modifiedAt.getTime() <= (remoteFile?.modifiedAt.getTime() ?? 0)) {
-              logger.debug('Skipping upload for older file', {
+            if (remoteFile && Option.isSome(remoteFile.sha1) && remoteFile.sha1.value === child.sha1) {
+              logger.debug('Skipping upload for same file', {
                 path: child.rawPath,
                 localModifiedAt: child.modifiedAt,
                 remoteModifiedAt: remoteFile?.modifiedAt
@@ -383,7 +383,7 @@ class SyncService {
       this.stateSubject.next({ state: 'pulling', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
       const driveApi = getProtonDriveApi();
       const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value);
-      const remoteRoot = yield* this.scanRemoteConfig(remoteConfigRootFolder);
+      const remoteRoot = yield* this.buildRemoteTree(remoteConfigRootFolder);
 
       this.stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
 
@@ -463,24 +463,24 @@ class SyncService {
               continue;
             }
 
-            if (localFile.modifiedAt.getTime() < remoteChild.modifiedAt.getTime()) {
-              logger.debug('Local file is older than remote, scheduling for overwrite', {
-                path: localFile.rawPath,
-                localModifiedAt: localFile.modifiedAt,
-                remoteModifiedAt: remoteChild.modifiedAt
-              });
-              localFileWrites.set(localPath, {
-                rawPath: localPath,
-                remoteId: remoteChild.id,
-                remoteModifiedAt: remoteChild.modifiedAt
-              });
-            } else {
-              logger.debug('Skipping local file overwrite since it is newer than remote', {
+            if (Option.isSome(remoteChild.sha1) && remoteChild.sha1.value === localFile.sha1) {
+              logger.debug('Local file is identical by SHA1, skipping download', { path: localFile.rawPath });
+              continue;
+            }
+
+            if (localFile.modifiedAt.getTime() >= remoteChild.modifiedAt.getTime()) {
+              logger.debug('Local file is newer than remote, skipping download', {
                 path: localFile.rawPath,
                 localModifiedAt: localFile.modifiedAt,
                 remoteModifiedAt: remoteChild.modifiedAt
               });
             }
+
+            localFileWrites.set(localPath, {
+              rawPath: localPath,
+              remoteId: remoteChild.id,
+              remoteModifiedAt: remoteChild.modifiedAt
+            });
           }
         }
 
@@ -592,7 +592,7 @@ class SyncService {
     });
   }
 
-  private scanRemoteConfig(remoteConfigRoot: ProtonFolder) {
+  private buildRemoteTree(remoteConfigRoot: ProtonFolder) {
     return Effect.gen(this, function* () {
       const driveApi = getProtonDriveApi();
 

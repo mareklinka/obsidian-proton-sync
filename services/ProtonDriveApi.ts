@@ -32,6 +32,7 @@ export interface ProtonFile {
   parentId: Option.Option<ProtonFolderId>;
   modifiedAt: Date;
   name: string;
+  sha1: Option.Option<string>;
 }
 
 export const { init: initProtonDriveApi, get: getProtonDriveApi } = (function () {
@@ -331,13 +332,19 @@ class ProtonDriveApi {
     treeEventScopeId: string;
     modificationTime: Date;
     parentUid?: string;
+    activeRevision?: {
+      claimedDigests?: {
+        sha1?: string;
+      };
+    };
   }): ProtonFile {
     return {
       _tag: 'file',
       name: node.name,
       id: new ProtonFileId(node.uid),
       modifiedAt: node.modificationTime,
-      parentId: node.parentUid ? Option.some(new ProtonFolderId(node.parentUid)) : Option.none()
+      parentId: node.parentUid ? Option.some(new ProtonFolderId(node.parentUid)) : Option.none(),
+      sha1: Option.fromNullable(node.activeRevision?.claimedDigests?.sha1)
     };
   }
 }

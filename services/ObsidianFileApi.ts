@@ -1,5 +1,8 @@
+import { sha1 } from '@noble/hashes/legacy.js';
 import { Effect, Option } from 'effect';
 import { normalizePath, TFile, TFolder } from 'obsidian';
+
+import { getLogger } from './ObsidianSyncLogger';
 
 import type { Vault } from 'obsidian';
 
@@ -23,16 +26,16 @@ class ObsidianFileApi {
   public constructor(private readonly vault: Vault) {}
 
   public getVaultFileTree(): Effect.Effect<VaultFolder> {
-    return Effect.sync(() => {
+    return Effect.promise(async () => {
       const vaultRoot = this.vault.getRoot();
 
-      const buildFolderNode = (folder: TFolder): VaultFolder => {
+      const buildFolderNode = async (folder: TFolder): Promise<VaultFolder> => {
         const children: VaultNode[] = [];
         for (const child of folder.children) {
           if (child instanceof TFile) {
-            children.push(toVaultFile(child));
+            children.push(await toVaultFile(this.vault.adapter, child));
           } else if (child instanceof TFolder) {
-            children.push(buildFolderNode(child));
+            children.push(await buildFolderNode(child));
           }
         }
 
@@ -45,7 +48,7 @@ class ObsidianFileApi {
         };
       };
 
-      return buildFolderNode(vaultRoot);
+      return await buildFolderNode(vaultRoot);
     });
   }
 
@@ -69,7 +72,8 @@ class ObsidianFileApi {
             rawPath: filePath,
             path: canonical,
             createdAt: stats ? new Date(stats.ctime) : new Date(),
-            modifiedAt: stats ? new Date(stats.mtime) : new Date()
+            modifiedAt: stats ? new Date(stats.mtime) : new Date(),
+            sha1: await hashFileContent(this.vault.adapter, filePath)
           });
         }
 
@@ -170,14 +174,15 @@ export function canonicalizePath(path: string): CanonicalPath {
   return new CanonicalPath(cleaned);
 }
 
-export function toVaultFile(file: TFile): VaultFile {
+export async function toVaultFile(adapter: Vault['adapter'], file: TFile): Promise<VaultFile> {
   return {
     _type: 'file',
     name: file.name,
     rawPath: file.path,
     path: canonicalizePath(file.path),
     createdAt: new Date(file.stat.ctime),
-    modifiedAt: new Date(file.stat.mtime)
+    modifiedAt: new Date(file.stat.mtime),
+    sha1: await hashFileContent(adapter, file.path)
   };
 }
 
@@ -200,6 +205,7 @@ export interface VaultFile {
   path: CanonicalPath;
   createdAt: Date;
   modifiedAt: Date;
+  sha1: string;
 }
 
 export interface VaultFolder {
@@ -216,4 +222,24 @@ export class CanonicalPath {
   public equals(other: CanonicalPath): boolean {
     return this.path === other.path;
   }
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  let hex = '';
+  for (const byte of bytes) {
+    hex += byte.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+async function hashFileContent(adapter: Vault['adapter'], path: string): Promise<string> {
+  const logger = getLogger('ObsidianFileApi');
+  const now = Date.now();
+
+  const fileBytes = new Uint8Array(await adapter.readBinary(path));
+  const hash = bytesToHex(sha1(fileBytes));
+
+  logger.debug('Hashed file content', { path, hash, durationMs: Date.now() - now });
+
+  return hash;
 }
