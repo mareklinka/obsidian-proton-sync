@@ -47,6 +47,7 @@ export type ProtonDriveError = MyFilesRootFilesNotFound | NotAFolderError | Gene
 export class MyFilesRootFilesNotFound extends Data.TaggedError('MyFilesRootFilesNotFound') {}
 export class NotAFolderError extends Data.TaggedError('NotAFolder') {}
 export class GenericProtonDriveError extends Data.TaggedError('GenericProtonDriveError') {}
+export class ProtonApiError extends Data.TaggedError('ProtonApiError')<{ code: number; message: string }> {}
 export class InvalidNameError extends Data.TaggedError('InvalidName') {}
 export class ItemAlreadyExistsError extends Data.TaggedError('ItemAlreadyExists') {}
 export class TreeEventSubscriptionFailed extends Data.TaggedError('TreeEventSubscriptionFailed') {}

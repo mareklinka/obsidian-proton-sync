@@ -40,6 +40,12 @@ export async function pushVault(app: App, confirm: boolean): Promise<void> {
           new Notice('Vault root ID is not available. Please ensure your Proton account is connected correctly.');
         })
       ),
+      Effect.catchTag('ProtonApiError', e =>
+        Effect.sync(() => {
+          getLogger('SyncActions').error(`Push failed due to Proton API error ${e.code}: ${e.message}`);
+          progressModal.markFailed('Push failed. Please try again.');
+        })
+      ),
       Effect.catchAll(e => {
         getLogger('SyncActions').error('Push failed', e);
         return Effect.sync(() => {

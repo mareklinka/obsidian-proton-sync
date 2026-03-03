@@ -15,6 +15,7 @@ import type {
   InvalidNameError,
   ItemAlreadyExistsError,
   NotAFolderError,
+  ProtonApiError,
   ProtonFileId
 } from './proton-drive-types';
 import type { ProtonFile, ProtonFolder } from './ProtonDriveApi';
@@ -630,7 +631,7 @@ class SyncService {
   private getOrCreateRemoteRoot(
     configDir: string,
     vaultRootId: ProtonFolderId
-  ): Effect.Effect<ProtonFolder, GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError> {
+  ): Effect.Effect<ProtonFolder, GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError | ProtonApiError> {
     return Effect.gen(this, function* () {
       let currentFolder: ProtonFolder = {
         id: vaultRootId,

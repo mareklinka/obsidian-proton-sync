@@ -1,4 +1,5 @@
 import { NodeType, ValidationError } from '@protontech/drive-sdk';
+import { APICodeError } from '@protontech/drive-sdk/dist/internal/apiService';
 import { Effect, Option } from 'effect';
 
 import {
@@ -8,6 +9,7 @@ import {
   ItemAlreadyExistsError,
   MyFilesRootFilesNotFound,
   NotAFolderError,
+  ProtonApiError,
   ProtonFileId,
   ProtonFolderId,
   TreeEventScopeId
@@ -152,10 +154,10 @@ class ProtonDriveApi {
   public createFolder(
     name: string,
     parentId: ProtonFolderId
-  ): Effect.Effect<ProtonFolder, GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError> {
+  ): Effect.Effect<ProtonFolder, GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError | ProtonApiError> {
     return Effect.tryPromise({
       try: async () => {
-        const result = await this.client.createFolder(parentId.uid, name);
+        const result = await this.client.createFolder(parentId.uid, name, new Date());
 
         if (!result.ok) {
           throw new GenericProtonDriveError();
@@ -164,6 +166,10 @@ class ProtonDriveApi {
         return ProtonDriveApi.createFolderFromNode(result.value);
       },
       catch: error => {
+        if (error instanceof APICodeError) {
+          return new ProtonApiError({ code: error.code, message: error.message });
+        }
+
         if (error instanceof GenericProtonDriveError) {
           return error;
         }
