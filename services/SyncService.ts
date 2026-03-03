@@ -14,7 +14,6 @@ import type {
   GenericProtonDriveError,
   InvalidNameError,
   ItemAlreadyExistsError,
-  NotAFolderError,
   ProtonApiError,
   ProtonFileId
 } from './proton-drive-types';
@@ -611,35 +610,43 @@ class SyncService {
     return Effect.gen(this, function* () {
       const driveApi = getProtonDriveApi();
 
-      const walk = (
-        parent: ProtonFolder,
-        parentRelativePath: string
-      ): Effect.Effect<ProtonRecursiveFolder, GenericProtonDriveError | NotAFolderError> => {
-        return Effect.gen(this, function* () {
-          const result: ProtonRecursiveFolder = {
-            ...parent,
-            children: []
-          };
-          for (const child of yield* driveApi.getChildren(parent.id)) {
-            const relativePath = normalizePath(parentRelativePath ? `${parentRelativePath}/${child.name}` : child.name);
-            if (!relativePath || this.isExcluded(relativePath)) {
-              continue;
-            }
-
-            if (child._tag === 'folder') {
-              result.children.push(yield* walk(child, relativePath));
-            } else {
-              if (child._tag === 'file') {
-                result.children.push(child);
-              }
-            }
-          }
-
-          return result;
-        });
+      const root: ProtonRecursiveFolder = {
+        ...remoteConfigRoot,
+        children: []
       };
 
-      return yield* walk(remoteConfigRoot, '');
+      const queue: Array<{ folder: ProtonRecursiveFolder; relativePath: string }> = [
+        { folder: root, relativePath: '' }
+      ];
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) {
+          continue;
+        }
+
+        for (const child of yield* driveApi.getChildren(current.folder.id)) {
+          const relativePath = normalizePath(
+            current.relativePath ? `${current.relativePath}/${child.name}` : child.name
+          );
+          if (!relativePath || this.isExcluded(relativePath)) {
+            continue;
+          }
+
+          if (child._tag === 'folder') {
+            const folderNode: ProtonRecursiveFolder = {
+              ...child,
+              children: []
+            };
+            current.folder.children.push(folderNode);
+            queue.push({ folder: folderNode, relativePath });
+          } else if (child._tag === 'file') {
+            current.folder.children.push(child);
+          }
+        }
+      }
+
+      return root;
     });
   }
 

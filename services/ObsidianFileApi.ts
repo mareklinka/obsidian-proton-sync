@@ -55,18 +55,30 @@ class ObsidianFileApi {
   public getFileTree(): Effect.Effect<VaultFolder> {
     return Effect.promise(async () => {
       const rootDir = '/';
+      const root: VaultFolder = {
+        _type: 'folder',
+        name: rootDir.split('/').pop() ?? rootDir,
+        rawPath: rootDir,
+        path: canonicalizePath(rootDir),
+        children: []
+      };
 
-      const walk = async (path: string): Promise<VaultFolder> => {
-        const children: VaultNode[] = [];
+      const queue: Array<{ path: string; folder: VaultFolder }> = [{ path: rootDir, folder: root }];
 
-        const listed = await this.vault.adapter.list(path);
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) {
+          continue;
+        }
 
-        for (const filePath of listed.files) {
+        const children = await this.vault.adapter.list(current.path);
+
+        for (const filePath of children.files) {
           const normalized = normalizePath(filePath);
           const canonical = canonicalizePath(normalized);
           const stats = await this.vault.adapter.stat(filePath);
 
-          children.push({
+          current.folder.children.push({
             _type: 'file',
             name: filePath.split('/').pop() ?? filePath,
             rawPath: filePath,
@@ -77,22 +89,22 @@ class ObsidianFileApi {
           });
         }
 
-        for (const folderPath of listed.folders) {
+        for (const folderPath of children.folders) {
           const normalized = normalizePath(folderPath);
+          const folderNode: VaultFolder = {
+            _type: 'folder',
+            name: normalized.split('/').pop() ?? normalized,
+            rawPath: normalized,
+            path: canonicalizePath(normalized),
+            children: []
+          };
 
-          children.push(await walk(normalized));
+          current.folder.children.push(folderNode);
+          queue.push({ path: normalized, folder: folderNode });
         }
+      }
 
-        return {
-          _type: 'folder',
-          name: path.split('/').pop() ?? path,
-          rawPath: path,
-          path: canonicalizePath(path),
-          children: children
-        };
-      };
-
-      return await walk(rootDir);
+      return root;
     });
   }
 
