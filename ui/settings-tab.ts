@@ -3,11 +3,11 @@ import { combineLatest, Subject, take } from 'rxjs';
 
 import { ProtonDriveLoginModal } from './modals/login-modal';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
-import { getObsidianSettingsStore } from '../services/ObsidianSettingsStore';
+import { getObsidianSettingsStore, LogLevel } from '../services/ObsidianSettingsStore';
 
 import type ProtonDriveSyncPlugin from '../main';
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
-import type { LogLevel, PluginSettings } from '../services/ObsidianSettingsStore';
+import type { PluginSettings } from '../services/ObsidianSettingsStore';
 import type { Observable, Subscription } from 'rxjs';
 
 export class ProtonDriveSyncSettingTab extends PluginSettingTab {
@@ -36,7 +36,8 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     const settingsStore = getObsidianSettingsStore();
     const { containerEl } = this;
 
-    combineLatest([this.authState, settingsStore.settings$]).subscribe(([authStatus, settings]) => {
+    this.stateSub?.unsubscribe();
+    this.stateSub = combineLatest([this.authState, settingsStore.settings$]).subscribe(([authStatus, settings]) => {
       containerEl.empty();
 
       containerEl.createEl('h2', { text: 'Proton Drive Sync' });
@@ -86,6 +87,23 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             })
         );
       }
+
+      new Setting(containerEl)
+        .setName('Log level')
+        .setDesc('Minimum log severity to write to the developer console.')
+        .addDropdown(dropdown => {
+          dropdown
+            .addOption(LogLevel.debug, 'Debug')
+            .addOption(LogLevel.info, 'Info')
+            .addOption(LogLevel.warn, 'Warn')
+            .addOption(LogLevel.error, 'Error')
+            .setValue(settings.logLevel)
+            .onChange(value => {
+              const logLevel = value as LogLevel;
+              settingsStore.setLogLevel(logLevel);
+              this.loggingChangedSubject.next({ isEnabled: true, minLevel: logLevel });
+            });
+        });
     });
   }
 

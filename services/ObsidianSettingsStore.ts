@@ -3,8 +3,8 @@ import { BehaviorSubject } from 'rxjs';
 
 import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
 
-import type { ProtonSession } from '../../proton/auth/ProtonSession';
-import type { ProtonAuthStatus } from '../../proton/auth/vNext/ProtonSessionService';
+import type { ProtonSession } from '../proton/auth/ProtonSession';
+import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 
 export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } = (function () {
   let instance: ObsidianSettingsStore | null = null;
@@ -78,7 +78,18 @@ class ObsidianSettingsStore {
       latestEventId: loaded.latestEventId ? new ProtonEventId(loaded.latestEventId) : null,
       vaultRootNodeUid: loaded.vaultRootNodeUid ? new ProtonFolderId(loaded.vaultRootNodeUid) : null,
       enableFileLogging: loaded.enableFileLogging,
-      logLevel: loaded.logLevel
+      logLevel: loaded.logLevel ?? LogLevel.info
+    });
+  }
+
+  public getLogLevel(): LogLevel {
+    return this.settingsSubject.getValue().logLevel;
+  }
+
+  public setLogLevel(level: LogLevel): void {
+    this.settingsSubject.next({
+      ...this.settingsSubject.getValue(),
+      logLevel: level
     });
   }
 

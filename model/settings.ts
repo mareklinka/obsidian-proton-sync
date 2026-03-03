@@ -1,5 +1,5 @@
-import type { LogLevel } from '../logger';
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import type { LogLevel } from '../services/ObsidianSyncLogger';
 
 export interface ProtonDriveSyncSettings {
   accountEmail: string;
@@ -10,26 +10,8 @@ export interface ProtonDriveSyncSettings {
   lastLoginError: string | null;
   containerNodeUid: string | null;
   vaultRootNodeUid: string | null;
-  pathMap: Record<string, SyncMapEntry>;
-  folderMap: Record<string, SyncMapEntry>;
   latestEventIds: Record<string, string>;
-  reconciliationTombstones: ReconciliationTombstone[];
-  enableFileLogging: boolean;
   logLevel: LogLevel;
-  logMaxSizeKb: number;
-}
-
-export interface SyncMapEntry {
-  nodeUid: string;
-  updatedAt: number;
-}
-
-export interface ReconciliationTombstone {
-  entityType: 'file' | 'folder';
-  path: string;
-  cloudId?: string;
-  deletedAt: number;
-  origin: 'local' | 'remote';
 }
 
 export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
@@ -41,11 +23,6 @@ export const DEFAULT_SETTINGS: ProtonDriveSyncSettings = {
   sessionExpiresAt: null,
   containerNodeUid: null,
   vaultRootNodeUid: null,
-  pathMap: {},
-  folderMap: {},
   latestEventIds: {},
-  reconciliationTombstones: [],
-  enableFileLogging: false,
-  logLevel: 'info',
-  logMaxSizeKb: 1024
+  logLevel: 'info'
 };
