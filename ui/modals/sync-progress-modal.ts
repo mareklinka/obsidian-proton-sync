@@ -3,7 +3,7 @@ import { type Observable, type Subscription } from 'rxjs';
 
 import { toConfigSyncProgressViewState } from '../config-sync-progress-state';
 
-import type { SyncState } from '../../services/vNext/SyncService';
+import type { SyncState } from '../../services/SyncService';
 import type { App } from 'obsidian';
 
 export class ProtonDriveSyncProgressModal extends Modal {
