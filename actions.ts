@@ -2,7 +2,7 @@ import { Effect, Option } from 'effect';
 import { Notice } from 'obsidian';
 
 import { getLogger } from './services/ObsidianSyncLogger';
-import { getSyncService } from './services/SyncService';
+import { getSyncService, SyncAlreadyInProgressError } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
 import { getSyncProgressModal } from './ui/modals/sync-progress-modal';
@@ -21,13 +21,26 @@ export async function pushVault(app: App, confirm: boolean): Promise<void> {
   new Notice('Pushing vault to Proton Drive...');
 
   await Effect.runPromise(
-    syncService.push().pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          progressModal.markCompleted();
-          new Notice('Push completed.');
-        })
-      ),
+    Effect.gen(function* () {
+      const state = syncService.getState().state;
+      if (state === 'pulling') {
+        return yield* new SyncAlreadyInProgressError();
+      }
+
+      if (state === 'pushing') {
+        getSyncProgressModal().open();
+        return;
+      }
+
+      yield* syncService.push().pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            progressModal.markCompleted();
+            new Notice('Push completed.');
+          })
+        )
+      );
+    }).pipe(
       Effect.catchTag('SyncAlreadyInProgressError', () =>
         Effect.sync(() => {
           progressModal.close();
@@ -69,13 +82,26 @@ export async function pullVault(app: App, confirm: boolean): Promise<void> {
   new Notice('Pulling vault data from Proton Drive...');
 
   await Effect.runPromise(
-    syncService.pull(false).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          progressModal.markCompleted();
-          new Notice('Pull completed.');
-        })
-      ),
+    Effect.gen(function* () {
+      const state = syncService.getState().state;
+      if (state === 'pushing') {
+        return yield* new SyncAlreadyInProgressError();
+      }
+
+      if (state === 'pulling') {
+        getSyncProgressModal().open();
+        return;
+      }
+
+      yield* syncService.pull(false).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            progressModal.markCompleted();
+            new Notice('Pull completed.');
+          })
+        )
+      );
+    }).pipe(
       Effect.catchTag('SyncAlreadyInProgressError', () =>
         Effect.sync(() => {
           progressModal.close();

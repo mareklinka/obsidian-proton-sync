@@ -126,6 +126,10 @@ class SyncService {
 
   constructor(private readonly vault: Vault) {}
 
+  public getState(): SyncState {
+    return this.stateSubject.value;
+  }
+
   public push() {
     return Effect.gen(this, function* () {
       if (this.stateSubject.value.state !== 'idle') {
