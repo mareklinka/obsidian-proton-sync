@@ -144,28 +144,32 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     const list = document.createElement('ul');
     list.className = 'proton-sync-status-list';
 
-    const appendLine = (text: string): void => {
+    const appendItem = (label: string, text: string): void => {
       const item = document.createElement('li');
-      item.textContent = text;
+      item.innerHTML = `<span class="proton-sync-status-label">${label}</span>: ${text}`;
       list.appendChild(item);
     };
 
-    appendLine(`Status: ${toLoginIcon(settings.connectionStatus)} ${toLoginLabel(settings.connectionStatus)}`);
+    appendItem('Status', `${toLoginIcon(settings.connectionStatus)} ${toLoginLabel(settings.connectionStatus)}`);
+
+    if (settings.accountEmail) {
+      appendItem('Account', settings.accountEmail);
+    }
 
     if (settings.lastLoginAt) {
-      appendLine(`Last login: ${new Date(settings.lastLoginAt).toLocaleString()}`);
+      appendItem('Last login', new Date(settings.lastLoginAt).toLocaleString());
     }
 
     if (settings.lastRefreshAt) {
-      appendLine(`Last refresh: ${new Date(settings.lastRefreshAt).toLocaleString()}`);
+      appendItem('Last refresh', new Date(settings.lastRefreshAt).toLocaleString());
     }
 
     if (settings.sessionExpiresAt) {
-      appendLine(`Expires: ${new Date(settings.sessionExpiresAt).toLocaleString()}`);
+      appendItem('Expires', new Date(settings.sessionExpiresAt).toLocaleString());
     }
 
     if (settings.lastLoginError) {
-      appendLine(`Error: ${settings.lastLoginError}`);
+      appendItem('Error', settings.lastLoginError);
     }
 
     fragment.appendChild(list);

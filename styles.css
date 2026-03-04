@@ -147,3 +147,7 @@
 .proton-sync-progress--failed .proton-sync-progress__message {
   color: var(--text-error);
 }
+
+.proton-sync-status-label {
+  font-weight: 500;
+}
