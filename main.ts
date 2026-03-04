@@ -40,11 +40,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     initObsidianSecretStore(this.app.secretStorage);
     initObsidianFileApi(this.app.vault);
 
-    const versionWithoutSuffix = this.manifest.version.includes('-')
-      ? this.manifest.version.substring(0, this.manifest.version.lastIndexOf('-'))
-      : this.manifest.version;
-
-    const sessionService = initProtonSessionService(`external-drive-obsidiansync@${versionWithoutSuffix}`);
+    const sessionService = initProtonSessionService(`external-drive-obsidiansync@${this.manifest.version}`);
     await Effect.runPromise(
       sessionService
         .loadSession()
