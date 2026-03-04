@@ -105,8 +105,39 @@
 }
 
 .proton-sync-progress__bar {
+  position: relative;
+  overflow: hidden;
   width: 100%;
-  height: 14px;
+  height: 10px;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-border);
+}
+
+.proton-sync-progress__bar-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--interactive-accent);
+  transform-origin: left center;
+  transform: scaleX(var(--proton-sync-progress-scale, 0));
+  transition: transform 120ms linear;
+  will-change: transform;
+}
+
+.proton-sync-progress__bar--indeterminate .proton-sync-progress__bar-fill {
+  transform: none;
+  width: 35%;
+  min-width: 48px;
+  animation: proton-sync-progress-indeterminate 1.5s linear infinite;
+}
+
+@keyframes proton-sync-progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(340%);
+  }
 }
 
 .proton-sync-progress--completed .proton-sync-progress__message {

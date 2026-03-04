@@ -10,9 +10,11 @@ export class ProtonDriveSyncProgressModal extends Modal {
   private stateSubscription: Subscription | null = null;
   private messageEl: HTMLElement | null = null;
   private detailsEl: HTMLElement | null = null;
-  private progressEl: HTMLProgressElement | null = null;
+  private progressBarEl: HTMLElement | null = null;
+  private progressFillEl: HTMLElement | null = null;
   private autoCloseIntervalId: number | null = null;
   private autoCloseTimeoutId: number | null = null;
+  private lastProgressPercent = 0;
 
   private terminalState: 'running' | 'completed' | 'failed' = 'running';
 
@@ -40,11 +42,18 @@ export class ProtonDriveSyncProgressModal extends Modal {
       text: 'Waiting for progress updates.'
     });
 
-    this.progressEl = contentEl.createEl('progress', {
-      cls: 'proton-sync-progress__bar'
+    this.progressBarEl = contentEl.createDiv({
+      cls: 'proton-sync-progress__bar proton-sync-progress__bar--determinate'
     });
-    this.progressEl.max = 100;
-    this.progressEl.value = 0;
+    this.progressBarEl.setAttr('role', 'progressbar');
+    this.progressBarEl.setAttr('aria-valuemin', '0');
+    this.progressBarEl.setAttr('aria-valuemax', '100');
+    this.progressBarEl.setAttr('aria-valuenow', '0');
+    this.progressBarEl.style.setProperty('--proton-sync-progress-scale', '0');
+
+    this.progressFillEl = this.progressBarEl.createDiv({
+      cls: 'proton-sync-progress__bar-fill'
+    });
 
     new Setting(contentEl).setDesc('You can close this dialog at any time. The sync will continue in the background.');
 
@@ -64,7 +73,8 @@ export class ProtonDriveSyncProgressModal extends Modal {
     this.clearAutoCloseTimers();
     this.messageEl = null;
     this.detailsEl = null;
-    this.progressEl = null;
+    this.progressBarEl = null;
+    this.progressFillEl = null;
   }
 
   markCompleted(): void {
@@ -94,11 +104,12 @@ export class ProtonDriveSyncProgressModal extends Modal {
     this.contentEl.removeClass('proton-sync-progress--completed');
     this.contentEl.addClass('proton-sync-progress--failed');
 
-    this.render('Operation failed.', message, this.progressEl?.value ?? 0);
+    this.progressBarEl?.hide();
+    this.render('Operation failed.', message, null);
   }
 
   private render(message: string, details: string, progressPercent: number | null): void {
-    if (!this.messageEl || !this.detailsEl || !this.progressEl) {
+    if (!this.messageEl || !this.detailsEl || !this.progressBarEl || !this.progressFillEl) {
       return;
     }
 
@@ -106,11 +117,18 @@ export class ProtonDriveSyncProgressModal extends Modal {
     this.detailsEl.setText(details);
 
     if (progressPercent === null) {
-      this.progressEl.removeAttribute('value');
-      return;
-    }
+      this.progressBarEl.removeClass('proton-sync-progress__bar--determinate');
+      this.progressBarEl.addClass('proton-sync-progress__bar--indeterminate');
+      this.progressBarEl.removeAttribute('aria-valuenow');
+    } else {
+      const clampedProgress = Math.max(0, Math.min(100, progressPercent));
+      this.lastProgressPercent = clampedProgress;
 
-    this.progressEl.value = progressPercent;
+      this.progressBarEl.removeClass('proton-sync-progress__bar--indeterminate');
+      this.progressBarEl.addClass('proton-sync-progress__bar--determinate');
+      this.progressBarEl.setAttr('aria-valuenow', String(clampedProgress));
+      this.progressBarEl.style.setProperty('--proton-sync-progress-scale', String(clampedProgress / 100));
+    }
   }
 
   private toAutoCloseMessage(secondsRemaining: number): string {
