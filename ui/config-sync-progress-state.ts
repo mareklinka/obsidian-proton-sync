@@ -9,8 +9,8 @@ export interface ConfigSyncProgressViewState {
 export function toConfigSyncProgressViewState(state: SyncState): ConfigSyncProgressViewState {
   if (state.state === 'idle') {
     return {
-      message: 'Preparing configuration push…',
-      details: 'Waiting for progress updates.',
+      message: 'No sync operations are currently running.',
+      details: '',
       progressPercent: 0
     };
   }

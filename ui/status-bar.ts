@@ -1,9 +1,10 @@
 import { combineLatest, map, type Observable } from 'rxjs';
 
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
+import { type SyncState } from '../services/SyncService';
+import { getSyncProgressModal } from './modals/sync-progress-modal';
 
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
-import type { SyncState } from '../services/SyncService';
 import type { Plugin } from 'obsidian';
 
 export interface SyncStatusBarController {
@@ -19,6 +20,13 @@ export function createSyncStatusBar(
 ): SyncStatusBarController {
   const itemEl = plugin.addStatusBarItem();
   itemEl.addClass('proton-sync-status');
+  itemEl.onClickEvent((e: MouseEvent) => {
+    if (e.button !== 0) {
+      return;
+    }
+
+    getSyncProgressModal().open();
+  });
 
   const subscription = combineLatest([input.loginState$, input.syncState$])
     .pipe(

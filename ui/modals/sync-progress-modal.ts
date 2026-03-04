@@ -1,12 +1,28 @@
 import { Modal, Setting } from 'obsidian';
-import { type Observable, type Subscription } from 'rxjs';
+import { type Subscription } from 'rxjs';
 
+import { getSyncService } from '../../services/SyncService';
 import { toConfigSyncProgressViewState } from '../config-sync-progress-state';
 
-import type { SyncState } from '../../services/SyncService';
 import type { App } from 'obsidian';
 
-export class ProtonDriveSyncProgressModal extends Modal {
+export const { init: initSyncProgressModal, get: getSyncProgressModal } = (function () {
+  let instance: SyncProgressModal | null = null;
+
+  return {
+    init: function initSyncProgressModal(app: App): SyncProgressModal {
+      return (instance ??= new SyncProgressModal(app));
+    },
+    get: function getSyncProgressModal(): SyncProgressModal {
+      if (!instance) {
+        throw new Error('SyncProgressModal has not been initialized. Please call initSyncProgressModalApi first.');
+      }
+      return instance;
+    }
+  };
+})();
+
+class SyncProgressModal extends Modal {
   private stateSubscription: Subscription | null = null;
   private messageEl: HTMLElement | null = null;
   private detailsEl: HTMLElement | null = null;
@@ -14,14 +30,10 @@ export class ProtonDriveSyncProgressModal extends Modal {
   private progressFillEl: HTMLElement | null = null;
   private autoCloseIntervalId: number | null = null;
   private autoCloseTimeoutId: number | null = null;
-  private lastProgressPercent = 0;
 
   private terminalState: 'running' | 'completed' | 'failed' = 'running';
 
-  constructor(
-    app: App,
-    private readonly configSyncState$: Observable<SyncState>
-  ) {
+  constructor(app: App) {
     super(app);
   }
 
@@ -29,17 +41,19 @@ export class ProtonDriveSyncProgressModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass('proton-sync-config-progress');
+    contentEl.removeClass('proton-sync-progress--failed');
+    contentEl.removeClass('proton-sync-progress--completed');
 
     contentEl.createEl('h2', { text: 'Proton Drive Sync' });
 
     this.messageEl = contentEl.createEl('p', {
       cls: 'proton-sync-progress__message',
-      text: 'Preparing configuration push…'
+      text: 'No sync operations are currently running.'
     });
 
     this.detailsEl = contentEl.createEl('p', {
       cls: 'proton-sync-progress__details',
-      text: 'Waiting for progress updates.'
+      text: ''
     });
 
     this.progressBarEl = contentEl.createDiv({
@@ -55,9 +69,19 @@ export class ProtonDriveSyncProgressModal extends Modal {
       cls: 'proton-sync-progress__bar-fill'
     });
 
-    new Setting(contentEl).setDesc('You can close this dialog at any time. The sync will continue in the background.');
+    const setting = new Setting(contentEl).setDesc(
+      'You can close this dialog at any time. The sync will continue in the background.'
+    );
 
-    this.stateSubscription = this.configSyncState$.subscribe(state => {
+    this.stateSubscription = getSyncService().state$.subscribe(state => {
+      if (state.state === 'idle') {
+        setting.descEl.hide();
+        this.progressBarEl?.hide();
+      } else {
+        setting.descEl.show();
+        this.progressBarEl?.show();
+      }
+
       if (this.terminalState !== 'running') {
         return;
       }
@@ -75,6 +99,7 @@ export class ProtonDriveSyncProgressModal extends Modal {
     this.detailsEl = null;
     this.progressBarEl = null;
     this.progressFillEl = null;
+    this.terminalState = 'running';
   }
 
   markCompleted(): void {
@@ -122,8 +147,6 @@ export class ProtonDriveSyncProgressModal extends Modal {
       this.progressBarEl.removeAttribute('aria-valuenow');
     } else {
       const clampedProgress = Math.max(0, Math.min(100, progressPercent));
-      this.lastProgressPercent = clampedProgress;
-
       this.progressBarEl.removeClass('proton-sync-progress__bar--indeterminate');
       this.progressBarEl.addClass('proton-sync-progress__bar--determinate');
       this.progressBarEl.setAttr('aria-valuenow', String(clampedProgress));

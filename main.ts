@@ -18,6 +18,7 @@ import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
 import { ProtonDriveSyncActionModal, type ConfigSyncAction } from './ui/modals/sync-action-modal';
+import { initSyncProgressModal } from './ui/modals/sync-progress-modal';
 import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
 import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
 import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-bar';
@@ -57,6 +58,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     initProtonDriveApi();
     initProtonCloudObserver();
     initSyncService(this.app.vault);
+    initSyncProgressModal(this.app);
     const syncService = getSyncService();
 
     sessionService.authState$.subscribe(async authState => {

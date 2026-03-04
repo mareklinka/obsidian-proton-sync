@@ -5,7 +5,7 @@ import { getLogger } from './services/ObsidianSyncLogger';
 import { getSyncService } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
-import { ProtonDriveSyncProgressModal } from './ui/modals/sync-progress-modal';
+import { getSyncProgressModal } from './ui/modals/sync-progress-modal';
 
 import type { App } from 'obsidian';
 
@@ -15,7 +15,7 @@ export async function pushVault(app: App, confirm: boolean): Promise<void> {
   }
 
   const syncService = getSyncService();
-  const progressModal = new ProtonDriveSyncProgressModal(app, syncService.state$);
+  const progressModal = getSyncProgressModal();
   progressModal.open();
 
   new Notice('Pushing vault to Proton Drive...');
@@ -63,7 +63,7 @@ export async function pullVault(app: App, confirm: boolean): Promise<void> {
   }
 
   const syncService = getSyncService();
-  const progressModal = new ProtonDriveSyncProgressModal(app, syncService.state$);
+  const progressModal = getSyncProgressModal();
   progressModal.open();
 
   new Notice('Pulling vault data from Proton Drive...');
