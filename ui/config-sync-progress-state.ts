@@ -1,3 +1,5 @@
+import { getI18n } from '../i18n';
+
 import type { SyncState } from '../services/SyncService';
 
 export interface ConfigSyncProgressViewState {
@@ -7,10 +9,12 @@ export interface ConfigSyncProgressViewState {
 }
 
 export function toConfigSyncProgressViewState(state: SyncState): ConfigSyncProgressViewState {
+  const { t } = getI18n();
+
   if (state.state === 'idle') {
     return {
-      message: 'No sync operations are currently running.',
-      details: '',
+      message: t.syncProgressState.idle.message,
+      details: t.syncProgressState.idle.details,
       progressPercent: 0
     };
   }
@@ -18,36 +22,39 @@ export function toConfigSyncProgressViewState(state: SyncState): ConfigSyncProgr
   switch (state.subState) {
     case 'localTreeBuild':
       return {
-        message: 'Scanning local files…',
-        details: 'Building local file tree.',
+        message: t.syncProgressState.localTreeBuild.message,
+        details: t.syncProgressState.localTreeBuild.details,
         progressPercent: null
       };
     case 'remoteTreeBuild':
       return {
-        message: 'Scanning remote files…',
-        details: 'Building remote file tree.',
+        message: t.syncProgressState.remoteTreeBuild.message,
+        details: t.syncProgressState.remoteTreeBuild.details,
         progressPercent: null
       };
     case 'diffComputation':
       return {
-        message: 'Comparing files…',
-        details: 'Determining files to synchronize.',
+        message: t.syncProgressState.diffComputation.message,
+        details: t.syncProgressState.diffComputation.details,
         progressPercent: null
       };
     case 'applyingChanges': {
       const progressPercent =
         state.totalItems <= 0 ? 0 : clampProgressPercent((state.processedItems / state.totalItems) * 100);
-      const directionText = state.state === 'pulling' ? 'Downloading notes...' : 'Uploading notes...';
+      const directionText =
+        state.state === 'pulling'
+          ? t.syncProgressState.applyingChanges.downloading
+          : t.syncProgressState.applyingChanges.uploading;
 
       return {
         message: directionText,
-        details: `Processed ${state.processedItems} of ${state.totalItems} items.`,
+        details: t.syncProgressState.applyingChanges.details(state.processedItems, state.totalItems),
         progressPercent
       };
     }
     default:
       return {
-        message: 'Synchronizing...',
+        message: t.syncProgressState.fallback.message,
         details: '',
         progressPercent: null
       };

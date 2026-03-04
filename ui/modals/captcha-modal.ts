@@ -1,6 +1,8 @@
 import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
+import { getI18n } from '../../i18n';
+
 import type { App } from 'obsidian';
 
 export interface CaptchaVerification {
@@ -36,15 +38,16 @@ export class ProtonDriveCaptchaModal extends Modal {
   }
 
   onOpen(): void {
+    const { t } = getI18n();
     const { contentEl } = this;
 
     contentEl.empty();
 
-    contentEl.createEl('h2', { text: 'CAPTCHA verification required' });
+    contentEl.createEl('h2', { text: t.modals.captcha.title });
 
     contentEl.createEl('p', {
       cls: 'proton-sync-captcha-help',
-      text: 'Solve the CAPTCHA challenge. The dialog will close automatically once the challenge is successfully completed.'
+      text: t.modals.captcha.help
     });
 
     const frameWrapper = contentEl.createEl('div', { cls: 'proton-sync-captcha-frame-wrapper' });
@@ -52,7 +55,7 @@ export class ProtonDriveCaptchaModal extends Modal {
       cls: 'proton-sync-captcha-frame',
       attr: {
         src: this.captchaUrl,
-        title: 'Proton CAPTCHA challenge',
+        title: t.modals.captcha.iframeTitle,
         sandbox: 'allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox',
         referrerpolicy: 'no-referrer'
       }
@@ -62,14 +65,14 @@ export class ProtonDriveCaptchaModal extends Modal {
 
     new Setting(contentEl)
       .addButton(button =>
-        button.setButtonText('Reload CAPTCHA').onClick(() => {
+        button.setButtonText(t.modals.captcha.reload).onClick(() => {
           this.reloadIframe();
         })
       )
       .addExtraButton(button =>
         button
           .setIcon('cross')
-          .setTooltip('Cancel')
+          .setTooltip(t.common.cancel)
           .onClick(() => {
             this.didResolve = true;
             this.canceledSubject.next();

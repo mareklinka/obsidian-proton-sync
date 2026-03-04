@@ -1,6 +1,8 @@
 import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
+import { getI18n } from '../../i18n';
+
 import type { App } from 'obsidian';
 
 export class ProtonDriveTwoFactorModal extends Modal {
@@ -18,28 +20,29 @@ export class ProtonDriveTwoFactorModal extends Modal {
   }
 
   onOpen(): void {
+    const { t } = getI18n();
     const { contentEl } = this;
 
     contentEl.empty();
 
-    contentEl.createEl('h2', { text: 'Two-factor authentication required' });
+    contentEl.createEl('h2', { text: t.modals.twoFactor.title });
     const disclosure = contentEl.createEl('div', { cls: 'proton-sync-disclosure' });
     disclosure.createEl('p', {
-      text: '⚠️ Your credentials are never stored or logged.'
+      text: t.modals.shared.credentialsDisclosure
     });
 
     new Setting(contentEl)
-      .setName('2FA code')
-      .setDesc('Enter the current code from your authenticator app.')
+      .setName(t.modals.twoFactor.codeName)
+      .setDesc(t.modals.twoFactor.codeDescription)
       .addText(text =>
-        text.setPlaceholder('123456').onChange(value => {
+        text.setPlaceholder(t.modals.twoFactor.codePlaceholder).onChange(value => {
           this.twoFactorCode = value.trim();
         })
       );
 
     new Setting(contentEl).addButton(button =>
       button
-        .setButtonText('Submit')
+        .setButtonText(t.modals.twoFactor.submit)
         .setCta()
         .onClick(() => {
           this.didResolve = true;

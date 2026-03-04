@@ -1,5 +1,6 @@
 import { combineLatest, map, type Observable } from 'rxjs';
 
+import { getI18n } from '../i18n';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 import { type SyncState } from '../services/SyncService';
 import { getSyncProgressModal } from './modals/sync-progress-modal';
@@ -36,14 +37,15 @@ export function createSyncStatusBar(
       }))
     )
     .subscribe(({ loginState, syncState }) => {
+      const { t } = getI18n();
       const loginText = toLoginLabel(loginState);
       const loginIcon = toLoginIcon(loginState);
       const syncText = toSyncLabel(syncState);
       const syncIcon = toSyncIcon(syncState);
 
-      itemEl.setAttribute('aria-label', `Proton Sync status: ${loginText} / ${syncText}`);
+      itemEl.setAttribute('aria-label', t.statusBar.ariaLabel(loginText, syncText));
       itemEl.innerHTML =
-        `Proton Sync: ` +
+        `${t.statusBar.prefix}: ` +
         `<span class="proton-sync-status__label proton-sync-status__label--${loginState}">` +
         `${loginIcon}</span>` +
         '<span class="proton-sync-status__separator">•</span>' +
@@ -64,14 +66,16 @@ function toEffectiveSyncState(syncState: SyncState): SyncState['state'] {
 }
 
 function toSyncLabel(state: SyncState['state']): string {
+  const { t } = getI18n();
+
   switch (state) {
     case 'pulling':
-      return 'Downloading';
+      return t.statusBar.syncLabels.pulling;
     case 'pushing':
-      return 'Uploading';
+      return t.statusBar.syncLabels.pushing;
     case 'idle':
     default:
-      return 'Idle';
+      return t.statusBar.syncLabels.idle;
   }
 }
 

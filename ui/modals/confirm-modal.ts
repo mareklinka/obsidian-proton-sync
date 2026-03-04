@@ -1,6 +1,8 @@
 import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
+import { getI18n } from '../../i18n';
+
 import type { App, ButtonComponent } from 'obsidian';
 
 export class ProtonDriveConfirmModal extends Modal {
@@ -55,6 +57,7 @@ export class ProtonDriveConfirmModal extends Modal {
   }
 
   private createButtons(setting: Setting, warn: boolean) {
+    const { t } = getI18n();
     const buttonFormat = warn ? (b: ButtonComponent) => b.setWarning() : (b: ButtonComponent) => b.setCta();
 
     setting
@@ -69,7 +72,7 @@ export class ProtonDriveConfirmModal extends Modal {
       .addExtraButton(button =>
         button
           .setIcon('cross')
-          .setTooltip('Cancel')
+          .setTooltip(t.modals.confirm.cancelTooltip)
           .onClick(() => {
             this.didResolve = true;
             this.canceledSubject.next();

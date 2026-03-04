@@ -1,16 +1,20 @@
+import { getI18n } from '../i18n';
+
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 
 export function toLoginLabel(state: ProtonAuthStatus): string {
+  const { t } = getI18n();
+
   switch (state) {
     case 'connected':
-      return 'Connected';
+      return t.auth.labels.connected;
     case 'connecting':
-      return 'Connecting';
+      return t.auth.labels.connecting;
     case 'error':
-      return 'Error';
+      return t.auth.labels.error;
     case 'disconnected':
     default:
-      return 'Disconnected';
+      return t.auth.labels.disconnected;
   }
 }
 

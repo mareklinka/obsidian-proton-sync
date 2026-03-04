@@ -1,6 +1,7 @@
 import { PluginSettingTab, Setting } from 'obsidian';
 import { combineLatest, Subject, take } from 'rxjs';
 
+import { getI18n } from '../i18n';
 import { ProtonDriveLoginModal } from './modals/login-modal';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 import { getLogger } from '../services/ConsoleLogger';
@@ -40,30 +41,34 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
     this.stateSub?.unsubscribe();
     this.stateSub = combineLatest([this.authState, settingsStore.settings$]).subscribe(([authStatus, settings]) => {
+      const { t } = getI18n();
+
       containerEl.empty();
 
-      containerEl.createEl('h2', { text: 'Proton Drive Sync' });
+      containerEl.createEl('h2', { text: t.settings.title });
 
       const disclosure = containerEl.createEl('div', { cls: 'proton-sync-disclosure' });
       disclosure.createEl('p', {
         cls: 'proton-sync-disclosure__title',
-        text: '⚠️ Disclaimer'
+        text: t.settings.disclaimerTitle
       });
       disclosure.createEl('p', {
-        text: 'This plugin is an unofficial, third-party integration with Proton Drive.'
+        text: t.settings.disclaimerBody
       });
       disclosure.createEl('p', {
-        text: 'You will be asked to enter your credentials into this plugin. Passwords or other sensitive information are never stored or logged.'
+        text: t.settings.disclosureCredentials
       });
 
       const statusDescription = this.buildStatusDescription(settings);
-      const connectionSetting = new Setting(containerEl).setName('Connection status').setDesc(statusDescription);
+      const connectionSetting = new Setting(containerEl)
+        .setName(t.settings.connectionStatus.name)
+        .setDesc(statusDescription);
       connectionSetting.clear();
 
       if (authStatus === 'connected') {
         connectionSetting.addButton(button =>
           button
-            .setButtonText('Disconnect')
+            .setButtonText(t.settings.connectionStatus.disconnectButton)
             .setCta()
             .onClick(() => {
               this.disconnectSubject.next();
@@ -72,7 +77,11 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
       } else {
         connectionSetting.addButton(button =>
           button
-            .setButtonText(authStatus === 'connecting' ? 'Connecting...' : 'Connect')
+            .setButtonText(
+              authStatus === 'connecting'
+                ? t.settings.connectionStatus.connectingButton
+                : t.settings.connectionStatus.connectButton
+            )
             .setCta()
             .setDisabled(authStatus === 'connecting')
             .onClick(() => {
@@ -91,10 +100,10 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
       }
 
       new Setting(containerEl)
-        .setName('Remote vault root')
-        .setDesc('The root folder in Proton Drive where your vault will be synced.')
+        .setName(t.settings.remoteVaultRoot.name)
+        .setDesc(t.settings.remoteVaultRoot.description)
         .addText(text => {
-          text.setPlaceholder('e.g. obsidian-notes/my-vault');
+          text.setPlaceholder(t.settings.remoteVaultRoot.placeholder);
           text.setValue(settings.remoteVaultRootPath ?? '');
           text.onChange(value => {
             this.remoteVaultRootPath = value;
@@ -102,8 +111,8 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
-        .setName('Ignored paths')
-        .setDesc('One glob pattern per line. Paths are relative to vault root and ignored by both push and pull.')
+        .setName(t.settings.ignoredPaths.name)
+        .setDesc(t.settings.ignoredPaths.description)
         .addTextArea(text => {
           const commit = (value: string) => {
             const newPatterns = parseIgnoredPathsInput(value);
@@ -114,9 +123,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             settingsStore.set('ignoredPaths', sanitizeIgnoredPaths(newPatterns));
           };
 
-          text
-            .setPlaceholder('.obsidian/workspace*\ntemplates/**\n**/*.tmp')
-            .setValue(settings.ignoredPaths.join('\n'));
+          text.setPlaceholder(t.settings.ignoredPaths.placeholder).setValue(settings.ignoredPaths.join('\n'));
 
           text.inputEl.rows = 5;
           text.inputEl.cols = 50;
@@ -127,14 +134,14 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
-        .setName('Log level')
-        .setDesc('Minimum log severity to write to the developer console.')
+        .setName(t.settings.logLevel.name)
+        .setDesc(t.settings.logLevel.description)
         .addDropdown(dropdown => {
           dropdown
-            .addOption(LogLevel.debug, 'Debug')
-            .addOption(LogLevel.info, 'Info')
-            .addOption(LogLevel.warn, 'Warn')
-            .addOption(LogLevel.error, 'Error')
+            .addOption(LogLevel.debug, t.settings.logLevel.options.debug)
+            .addOption(LogLevel.info, t.settings.logLevel.options.info)
+            .addOption(LogLevel.warn, t.settings.logLevel.options.warn)
+            .addOption(LogLevel.error, t.settings.logLevel.options.error)
             .setValue(settings.logLevel)
             .onChange(value => {
               const logLevel = value as LogLevel;
@@ -154,6 +161,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   }
 
   private buildStatusDescription(settings: PluginSettings): DocumentFragment {
+    const { t } = getI18n();
     const fragment = document.createDocumentFragment();
     const list = document.createElement('ul');
     list.className = 'proton-sync-status-list';
@@ -164,26 +172,29 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
       list.appendChild(item);
     };
 
-    appendItem('Status', `${toLoginIcon(settings.connectionStatus)} ${toLoginLabel(settings.connectionStatus)}`);
+    appendItem(
+      t.settings.statusLabels.status,
+      `${toLoginIcon(settings.connectionStatus)} ${toLoginLabel(settings.connectionStatus)}`
+    );
 
     if (settings.accountEmail) {
-      appendItem('Account', settings.accountEmail);
+      appendItem(t.settings.statusLabels.account, settings.accountEmail);
     }
 
     if (settings.lastLoginAt) {
-      appendItem('Last login', new Date(settings.lastLoginAt).toLocaleString());
+      appendItem(t.settings.statusLabels.lastLogin, new Date(settings.lastLoginAt).toLocaleString());
     }
 
     if (settings.lastRefreshAt) {
-      appendItem('Last refresh', new Date(settings.lastRefreshAt).toLocaleString());
+      appendItem(t.settings.statusLabels.lastRefresh, new Date(settings.lastRefreshAt).toLocaleString());
     }
 
     if (settings.sessionExpiresAt) {
-      appendItem('Expires', new Date(settings.sessionExpiresAt).toLocaleString());
+      appendItem(t.settings.statusLabels.expires, new Date(settings.sessionExpiresAt).toLocaleString());
     }
 
     if (settings.lastLoginError) {
-      appendItem('Error', settings.lastLoginError);
+      appendItem(t.settings.statusLabels.error, settings.lastLoginError);
     }
 
     fragment.appendChild(list);

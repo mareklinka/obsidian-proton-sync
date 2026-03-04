@@ -1,6 +1,7 @@
 import { Option } from 'effect';
 import { requestUrl } from 'obsidian';
 
+import { getLogger } from '../../services/ConsoleLogger';
 import { getProtonSessionService } from '../auth/ProtonSessionService';
 
 import type { ProtonSession } from '../auth/ProtonSession';
@@ -9,6 +10,7 @@ import type {
   ProtonDriveHTTPClientJsonRequest,
   ProtonDriveHTTPClientBlobRequest
 } from '@protontech/drive-sdk';
+import type { RequestUrlParam } from 'obsidian';
 
 export const { init: initProtonHttpClient, get: getProtonHttpClient } = (function () {
   let instance: ObsidianHttpClient | null = null;
@@ -48,15 +50,22 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
 
     const headers = this.buildHeaders(request.headers, currentSession.value);
     const { body, contentType } = await this.prepareRequestBody(request);
+    const h = this.headersToObject(headers);
 
-    const response = await requestUrl({
+    const r: RequestUrlParam = {
       url: request.url,
       method: request.method,
-      headers: this.headersToObject(headers),
+      headers: h,
       contentType: contentType,
       body: body,
       throw: false
-    });
+    };
+
+    if (request.method === 'POST') {
+      getLogger('ObsidianHttpClient').debug('Making POST request', request, h);
+    }
+
+    const response = await requestUrl(r);
 
     if (isJson) {
       return new Response(response.text, {

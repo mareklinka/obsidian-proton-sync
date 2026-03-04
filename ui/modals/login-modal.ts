@@ -1,6 +1,8 @@
 import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
+import { getI18n } from '../../i18n';
+
 import type { App } from 'obsidian';
 
 export class ProtonDriveLoginModal extends Modal {
@@ -18,23 +20,24 @@ export class ProtonDriveLoginModal extends Modal {
   }
 
   onOpen(): void {
+    const { t } = getI18n();
     const { contentEl } = this;
 
     contentEl.empty();
 
-    contentEl.createEl('h2', { text: 'Connect to Proton Drive' });
+    contentEl.createEl('h2', { text: t.modals.login.title });
 
     const disclosure = contentEl.createEl('div', { cls: 'proton-sync-disclosure' });
     disclosure.createEl('p', {
-      text: '⚠️ Your credentials are never stored or logged.'
+      text: t.modals.shared.credentialsDisclosure
     });
 
     new Setting(contentEl)
-      .setName('Email')
-      .setDesc('Your Proton account email address.')
+      .setName(t.modals.login.emailName)
+      .setDesc(t.modals.login.emailDescription)
       .addText(text =>
         text
-          .setPlaceholder('john.shepard@proton.me')
+          .setPlaceholder(t.modals.login.emailPlaceholder)
           .setValue('')
           .onChange(value => {
             this.email = value.trim();
@@ -42,8 +45,8 @@ export class ProtonDriveLoginModal extends Modal {
       );
 
     new Setting(contentEl)
-      .setName('Password')
-      .setDesc('Never stored. Used only for this login attempt.')
+      .setName(t.modals.login.passwordName)
+      .setDesc(t.modals.login.passwordDescription)
       .addText(text => {
         text.inputEl.type = 'password';
         text.onChange(value => {
@@ -53,7 +56,7 @@ export class ProtonDriveLoginModal extends Modal {
 
     new Setting(contentEl).addButton(button =>
       button
-        .setButtonText('Connect')
+        .setButtonText(t.modals.login.submit)
         .setCta()
         .onClick(async () => {
           this.loginSubject.next({

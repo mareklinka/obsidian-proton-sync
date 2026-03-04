@@ -74,22 +74,6 @@
   color: var(--text-muted);
 }
 
-.proton-sync-config-pull-button::after {
-  content: 'Pull';
-  margin-left: 5px;
-  display: inline-block;
-  margin-top: auto;
-  margin-bottom: auto;
-}
-
-.proton-sync-config-push-button::after {
-  content: 'Push';
-  margin-left: 5px;
-  display: inline-block;
-  margin-top: auto;
-  margin-bottom: auto;
-}
-
 .proton-sync-progress {
   min-width: min(480px, 90vw);
 }

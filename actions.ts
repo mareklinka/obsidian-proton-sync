@@ -1,6 +1,7 @@
 import { Effect, Option } from 'effect';
 import { Notice } from 'obsidian';
 
+import { getI18n } from './i18n';
 import { getLogger } from './services/ConsoleLogger';
 import { getSyncService, SyncAlreadyInProgressError } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
@@ -10,6 +11,7 @@ import { getSyncProgressModal } from './ui/modals/sync-progress-modal';
 import type { App } from 'obsidian';
 
 export async function pushVault(app: App): Promise<void> {
+  const { t } = getI18n();
   const confirmation = await confirmPrune(app, 'push');
 
   if (!confirmation || !confirmation.confirmed) {
@@ -20,7 +22,7 @@ export async function pushVault(app: App): Promise<void> {
   const progressModal = getSyncProgressModal();
   progressModal.open();
 
-  new Notice('Pushing vault to Proton Drive...');
+  new Notice(t.actions.notices.pushingStarted);
 
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -38,7 +40,7 @@ export async function pushVault(app: App): Promise<void> {
         Effect.tap(() =>
           Effect.sync(() => {
             progressModal.markCompleted();
-            new Notice('Push completed.');
+            new Notice(t.actions.notices.pushCompleted);
           })
         )
       );
@@ -46,26 +48,26 @@ export async function pushVault(app: App): Promise<void> {
       Effect.catchTag('SyncAlreadyInProgressError', () =>
         Effect.sync(() => {
           progressModal.close();
-          new Notice('A sync is already in progress. Please wait for it to complete.');
+          new Notice(t.actions.notices.syncAlreadyInProgress);
         })
       ),
       Effect.catchTag('VaultRootIdNotAvailableError', () =>
         Effect.sync(() => {
           progressModal.close();
-          new Notice('Vault root ID is not available. Please ensure your Proton account is connected correctly.');
+          new Notice(t.actions.notices.vaultRootUnavailable);
         })
       ),
       Effect.catchTag('ProtonApiError', e =>
         Effect.sync(() => {
           getLogger('SyncActions').error(`Push failed due to Proton API error ${e.code}: ${e.message}`);
-          progressModal.markFailed('Push failed. Please try again.');
+          progressModal.markFailed(t.actions.notices.pushFailed);
         })
       ),
       Effect.catchAll(e => {
         getLogger('SyncActions').error('Push failed', e);
         return Effect.sync(() => {
-          progressModal.markFailed('Push failed. Please try again.');
-          new Notice('Push failed. Please try again.');
+          progressModal.markFailed(t.actions.notices.pushFailed);
+          new Notice(t.actions.notices.pushFailed);
         });
       })
     )
@@ -73,6 +75,8 @@ export async function pushVault(app: App): Promise<void> {
 }
 
 export async function pullVault(app: App): Promise<void> {
+  const { t } = getI18n();
+
   const confirmation = await confirmPrune(app, 'pull');
   if (!confirmation || !confirmation.confirmed) {
     return;
@@ -82,7 +86,7 @@ export async function pullVault(app: App): Promise<void> {
   const progressModal = getSyncProgressModal();
   progressModal.open();
 
-  new Notice('Pulling vault data from Proton Drive...');
+  new Notice(t.actions.notices.pullStarted);
 
   await Effect.runPromise(
     Effect.gen(function* () {
@@ -100,7 +104,7 @@ export async function pullVault(app: App): Promise<void> {
         Effect.tap(() =>
           Effect.sync(() => {
             progressModal.markCompleted();
-            new Notice('Pull completed.');
+            new Notice(t.actions.notices.pullCompleted);
           })
         )
       );
@@ -108,20 +112,20 @@ export async function pullVault(app: App): Promise<void> {
       Effect.catchTag('SyncAlreadyInProgressError', () =>
         Effect.sync(() => {
           progressModal.close();
-          new Notice('A sync is already in progress. Please wait for it to complete.');
+          new Notice(t.actions.notices.syncAlreadyInProgress);
         })
       ),
       Effect.catchTag('VaultRootIdNotAvailableError', () =>
         Effect.sync(() => {
           progressModal.close();
-          new Notice('Vault root ID is not available. Please ensure your Proton account is connected correctly.');
+          new Notice(t.actions.notices.vaultRootUnavailable);
         })
       ),
       Effect.catchAll(e => {
         getLogger('SyncActions').error('Pull failed', e);
         return Effect.sync(() => {
-          progressModal.markFailed('Pull failed. Please try again.');
-          new Notice('Pull failed. Please try again.');
+          progressModal.markFailed(t.actions.notices.pullFailed);
+          new Notice(t.actions.notices.pullFailed);
         });
       })
     )
@@ -132,13 +136,13 @@ async function confirmPrune(
   app: App,
   action: 'push' | 'pull'
 ): Promise<{ confirmed: boolean; prune: boolean } | false> {
-  const title = action === 'push' ? 'Push vault to Proton Drive' : 'Pull vault from Proton Drive';
-  const toggleLabel = action === 'push' ? 'Prune remote vault' : 'Prune local vault';
+  const { t } = getI18n();
+  const title = action === 'push' ? t.actions.confirmation.pushTitle : t.actions.confirmation.pullTitle;
+  const toggleLabel =
+    action === 'push' ? t.actions.confirmation.pruneRemoteLabel : t.actions.confirmation.pruneLocalLabel;
   const toggleDescription =
-    action === 'push'
-      ? 'This will remove all remote files not present locally.'
-      : 'This will remove all local files not present in Proton Drive.';
-  const confirmButtonLabel = action === 'push' ? 'Push' : 'Pull';
+    action === 'push' ? t.actions.confirmation.pruneRemoteDescription : t.actions.confirmation.pruneLocalDescription;
+  const confirmButtonLabel = action === 'push' ? t.actions.confirmation.pushLabel : t.actions.confirmation.pullLabel;
 
   const confirmation = await Effect.runPromise(
     promptFromModal(

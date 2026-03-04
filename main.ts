@@ -1,8 +1,9 @@
 import { Effect, Option } from 'effect';
-import { normalizePath, Notice, Plugin } from 'obsidian';
+import { normalizePath, getLanguage, Notice, Plugin } from 'obsidian';
 import { combineLatest, distinctUntilChanged, map, type Subscription } from 'rxjs';
 
 import { pullVault, pushVault } from './actions';
+import { getI18n, initI18n } from './i18n';
 import { getProtonSessionService, initProtonSessionService } from './proton/auth/ProtonSessionService';
 import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
 import { initProtonAccount } from './proton/drive/ProtonAccount';
@@ -40,7 +41,11 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   private readonly subscriptions: Subscription[] = [];
 
   async onload(): Promise<void> {
+    initI18n(getLanguage());
+    const { t } = getI18n();
+
     this.logger.info('Loading Proton Drive Sync plugin', this.manifest.version);
+    this.logger.info('Obsidian language:', getLanguage());
 
     const settings = initObsidianSettingsStore(this.defaultRemoteVaultRootPath, {
       save: this.saveData.bind(this),
@@ -57,7 +62,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
         .loadSession()
         .pipe(
           Effect.catchTag('ProtonApiCommunicationError', error =>
-            Effect.succeed(this.logger.error('Failed to re-establish Proton session. Please log in again.', error))
+            Effect.succeed(this.logger.error(t.main.notices.protonApiCommunicationFailed(error.message), error))
           )
         )
     );
@@ -101,22 +106,16 @@ export default class ProtonDriveSyncPlugin extends Plugin {
               this.logger.error('Error in vault root setup', error);
               getObsidianSettingsStore().set('vaultRootNodeUid', Option.none());
 
-              return yield* error;
-            });
-          }),
-          Effect.catchTags({
-            InvalidName: () => Effect.succeed(new Notice('Invalid folder name.')),
-            ItemAlreadyExists: () => Effect.succeed(new Notice('Folder already exists.')),
-            MyFilesRootFilesNotFound: () =>
-              Effect.succeed(new Notice('The "My Files" root folder was not found in Proton Drive.')),
-            GenericProtonDriveError: () =>
-              Effect.succeed(
-                new Notice(
-                  'An error occurred while setting up the vault root folder in Proton Drive. Please try again later.'
-                )
-              )
-          })
-        );
+            return yield* error;
+          });
+        }),
+        Effect.catchTags({
+          InvalidName: () => Effect.succeed(new Notice(t.main.notices.invalidFolderName)),
+          ItemAlreadyExists: () => Effect.succeed(new Notice(t.main.notices.folderAlreadyExists)),
+          MyFilesRootFilesNotFound: () => Effect.succeed(new Notice(t.main.notices.myFilesRootNotFound)),
+          GenericProtonDriveError: () => Effect.succeed(new Notice(t.main.notices.setupVaultRootFailed))
+        })
+      );
 
         await Effect.runPromise(effect);
       }
@@ -127,13 +126,13 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       syncState$: syncService.state$
     });
 
-    this.addRibbonIcon('cloud-cog', 'Proton Drive Sync', () => {
+    this.addRibbonIcon('cloud-cog', t.ribbon.openSyncActions, () => {
       void this.openSyncActionDialog();
     });
 
     this.addCommand({
       id: PUSH_CONFIG_COMMAND_ID,
-      name: 'Push vault to Proton Drive',
+      name: t.commands.pushVault,
       icon: 'cloud-upload',
       callback: () => {
         void pushVault(this.app);
@@ -142,7 +141,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     this.addCommand({
       id: PULL_CONFIG_COMMAND_ID,
-      name: 'Pull vault from Proton Drive',
+      name: t.commands.pullVault,
       icon: 'cloud-download',
       callback: () => {
         void pullVault(this.app);
@@ -162,8 +161,10 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   async signIn(credentials: { email: string; password: string }): Promise<void> {
+    const { t } = getI18n();
+
     if (!credentials.email || !credentials.password) {
-      new Notice('Email and password are required to connect.');
+      new Notice(t.main.notices.credentialsRequired);
       return;
     }
 
@@ -182,26 +183,25 @@ export default class ProtonDriveSyncPlugin extends Plugin {
         })
       ).pipe(
         Effect.catchTags({
-          CaptchaDataNotProvidedError: () =>
-            Effect.succeed(new Notice('Captcha data was not provided. Login aborted.')),
-          CaptchaRequiredError: () => Effect.succeed(new Notice('Captcha is required to login. Login aborted.')),
-          TwoFactorCodeRequiredError: () =>
-            Effect.succeed(new Notice('Two-factor code is required to login. Login aborted.')),
-          EncryptionPasswordRequiredError: () =>
-            Effect.succeed(new Notice('Mailbox password is required to login. Login aborted.')),
+          CaptchaDataNotProvidedError: () => Effect.succeed(new Notice(t.main.notices.captchaDataNotProvided)),
+          CaptchaRequiredError: () => Effect.succeed(new Notice(t.main.notices.captchaRequired)),
+          TwoFactorCodeRequiredError: () => Effect.succeed(new Notice(t.main.notices.twoFactorRequired)),
+          EncryptionPasswordRequiredError: () => Effect.succeed(new Notice(t.main.notices.mailboxPasswordRequired)),
           ProtonApiCommunicationError: error =>
-            Effect.succeed(new Notice(`Failed to communicate with Proton API: ${error.message}. Login aborted.`))
+            Effect.succeed(new Notice(t.main.notices.protonApiCommunicationFailed(error.message)))
         })
       )
     );
   }
 
   async signOut(): Promise<void> {
+    const { t } = getI18n();
+
     this.logger.info('Disconnecting from Proton Drive');
 
     await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
     getObsidianSettingsStore().set('vaultRootNodeUid', Option.none());
-    new Notice('Disconnected from Proton Drive.');
+    new Notice(t.main.notices.disconnected);
   }
 
   private ensureVaultRootFolder(remoteVaultRootPath: string | null) {

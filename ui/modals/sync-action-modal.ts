@@ -1,6 +1,8 @@
 import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
+import { getI18n } from '../../i18n';
+
 import type { App } from 'obsidian';
 
 export type ConfigSyncAction = 'push' | 'pull';
@@ -19,18 +21,19 @@ export class ProtonDriveSyncActionModal extends Modal {
   }
 
   onOpen(): void {
+    const { t } = getI18n();
     const { contentEl } = this;
     contentEl.empty();
 
-    contentEl.createEl('h2', { text: 'Proton Drive Sync' });
+    contentEl.createEl('h2', { text: t.modals.syncAction.title });
     contentEl.createEl('p', {
-      text: 'Choose whether to push your local vault data to Proton Drive, or pull remote data to local. This operation synchronizes both notes and vault configuration.'
+      text: t.modals.syncAction.description
     });
 
     new Setting(contentEl)
       .addButton(button =>
         button
-          .setIcon('cloud-upload')
+          .setButtonText(t.modals.syncAction.pushButton)
           .setClass('proton-sync-config-push-button')
           .onClick(() => {
             this.didResolve = true;
@@ -40,7 +43,7 @@ export class ProtonDriveSyncActionModal extends Modal {
       )
       .addButton(button =>
         button
-          .setIcon('cloud-download')
+          .setButtonText(t.modals.syncAction.pullButton)
           .setClass('proton-sync-config-pull-button')
           .onClick(() => {
             this.didResolve = true;

@@ -1,6 +1,7 @@
 import { Modal, Setting } from 'obsidian';
 import { type Subscription } from 'rxjs';
 
+import { getI18n } from '../../i18n';
 import { getSyncService } from '../../services/SyncService';
 import { toConfigSyncProgressViewState } from '../config-sync-progress-state';
 
@@ -38,22 +39,23 @@ class SyncProgressModal extends Modal {
   }
 
   onOpen(): void {
+    const { t } = getI18n();
     const { contentEl } = this;
     contentEl.empty();
     contentEl.addClass('proton-sync-config-progress');
     contentEl.removeClass('proton-sync-progress--failed');
     contentEl.removeClass('proton-sync-progress--completed');
 
-    contentEl.createEl('h2', { text: 'Proton Drive Sync' });
+    contentEl.createEl('h2', { text: t.modals.syncProgress.title });
 
     this.messageEl = contentEl.createEl('p', {
       cls: 'proton-sync-progress__message',
-      text: 'No sync operations are currently running.'
+      text: t.modals.syncProgress.initialMessage
     });
 
     this.detailsEl = contentEl.createEl('p', {
       cls: 'proton-sync-progress__details',
-      text: ''
+      text: t.modals.syncProgress.initialDetails
     });
 
     this.progressBarEl = contentEl.createDiv({
@@ -69,9 +71,7 @@ class SyncProgressModal extends Modal {
       cls: 'proton-sync-progress__bar-fill'
     });
 
-    const setting = new Setting(contentEl).setDesc(
-      'You can close this dialog at any time. The sync will continue in the background.'
-    );
+    const setting = new Setting(contentEl).setDesc(t.modals.syncProgress.closeHint);
 
     this.stateSubscription = getSyncService().state$.subscribe(state => {
       if (state.state === 'idle') {
@@ -103,18 +103,19 @@ class SyncProgressModal extends Modal {
   }
 
   markCompleted(): void {
+    const { t } = getI18n();
     this.clearAutoCloseTimers();
     this.terminalState = 'completed';
     this.contentEl.removeClass('proton-sync-progress--failed');
     this.contentEl.addClass('proton-sync-progress--completed');
 
     let secondsRemaining = 5;
-    this.render('Operation complete.', this.toAutoCloseMessage(secondsRemaining), 100);
+    this.render(t.modals.syncProgress.completedMessage, this.toAutoCloseMessage(secondsRemaining), 100);
 
     this.autoCloseIntervalId = window.setInterval(() => {
       secondsRemaining -= 1;
       if (secondsRemaining > 0) {
-        this.render('Operation complete.', this.toAutoCloseMessage(secondsRemaining), 100);
+        this.render(t.modals.syncProgress.completedMessage, this.toAutoCloseMessage(secondsRemaining), 100);
       }
     }, 1000);
 
@@ -125,12 +126,13 @@ class SyncProgressModal extends Modal {
   }
 
   markFailed(message: string): void {
+    const { t } = getI18n();
     this.terminalState = 'failed';
     this.contentEl.removeClass('proton-sync-progress--completed');
     this.contentEl.addClass('proton-sync-progress--failed');
 
     this.progressBarEl?.hide();
-    this.render('Operation failed.', message, null);
+    this.render(t.modals.syncProgress.failedMessage, message, null);
   }
 
   private render(message: string, details: string, progressPercent: number | null): void {
@@ -155,8 +157,8 @@ class SyncProgressModal extends Modal {
   }
 
   private toAutoCloseMessage(secondsRemaining: number): string {
-    const unit = secondsRemaining === 1 ? 'second' : 'seconds';
-    return `All changes have been processed. This dialog will close in ${secondsRemaining} ${unit}.`;
+    const { t } = getI18n();
+    return t.modals.syncProgress.autoCloseMessage(secondsRemaining);
   }
 
   private clearAutoCloseTimers(): void {

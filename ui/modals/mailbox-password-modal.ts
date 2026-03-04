@@ -1,6 +1,8 @@
 import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
+import { getI18n } from '../../i18n';
+
 import type { App } from 'obsidian';
 
 export class ProtonDriveMailboxPasswordModal extends Modal {
@@ -18,19 +20,20 @@ export class ProtonDriveMailboxPasswordModal extends Modal {
   }
 
   onOpen(): void {
+    const { t } = getI18n();
     const { contentEl } = this;
 
     contentEl.empty();
 
-    contentEl.createEl('h2', { text: 'Mailbox password required' });
+    contentEl.createEl('h2', { text: t.modals.mailboxPassword.title });
     const disclosure = contentEl.createEl('div', { cls: 'proton-sync-disclosure' });
     disclosure.createEl('p', {
-      text: '⚠️ Your credentials are never stored or logged.'
+      text: t.modals.shared.credentialsDisclosure
     });
 
     new Setting(contentEl)
-      .setName('Mailbox password')
-      .setDesc('Required for Proton accounts that use a separate mailbox password.')
+      .setName(t.modals.mailboxPassword.passwordName)
+      .setDesc(t.modals.mailboxPassword.passwordDescription)
       .addText(text => {
         text.inputEl.type = 'password';
         text.onChange(value => {
@@ -40,7 +43,7 @@ export class ProtonDriveMailboxPasswordModal extends Modal {
 
     new Setting(contentEl).addButton(button =>
       button
-        .setButtonText('Submit')
+        .setButtonText(t.modals.mailboxPassword.submit)
         .setCta()
         .onClick(() => {
           this.didResolve = true;
