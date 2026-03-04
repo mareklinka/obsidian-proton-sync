@@ -25,19 +25,19 @@ export function toConfigSyncProgressViewState(state: SyncState): ConfigSyncProgr
     case 'remoteTreeBuild':
       return {
         message: 'Scanning remote files…',
-        details: 'Building remote file tree from Proton Drive.',
+        details: 'Building remote file tree.',
         progressPercent: null
       };
     case 'diffComputation':
       return {
-        message: 'Computing differences…',
-        details: 'Preparing the operation plan.',
+        message: 'Comparing files…',
+        details: 'Determining files to synchronize.',
         progressPercent: null
       };
     case 'applyingChanges': {
       const progressPercent =
         state.totalItems <= 0 ? 0 : clampProgressPercent((state.processedItems / state.totalItems) * 100);
-      const directionText = state.state === 'pulling' ? 'Downloading Vault items...' : 'Uploading Vault items...';
+      const directionText = state.state === 'pulling' ? 'Downloading notes...' : 'Uploading notes...';
 
       return {
         message: directionText,
@@ -47,8 +47,8 @@ export function toConfigSyncProgressViewState(state: SyncState): ConfigSyncProgr
     }
     default:
       return {
-        message: 'Synchronizing configuration…',
-        details: 'Processing changes.',
+        message: 'Synchronizing...',
+        details: '',
         progressPercent: null
       };
   }
