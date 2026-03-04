@@ -25,6 +25,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   public readonly loggingChanged$ = this.loggingChangedSubject.asObservable();
 
   private stateSub: Subscription | undefined = undefined;
+  private remoteVaultRootPath: string = '';
 
   constructor(
     plugin: ProtonDriveSyncPlugin,
@@ -90,20 +91,14 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
       }
 
       new Setting(containerEl)
-        .setName('Log level')
-        .setDesc('Minimum log severity to write to the developer console.')
-        .addDropdown(dropdown => {
-          dropdown
-            .addOption(LogLevel.debug, 'Debug')
-            .addOption(LogLevel.info, 'Info')
-            .addOption(LogLevel.warn, 'Warn')
-            .addOption(LogLevel.error, 'Error')
-            .setValue(settings.logLevel)
-            .onChange(value => {
-              const logLevel = value as LogLevel;
-              settingsStore.setLogLevel(logLevel);
-              this.loggingChangedSubject.next({ isEnabled: true, minLevel: logLevel });
-            });
+        .setName('Remote vault root')
+        .setDesc('The root folder in Proton Drive where your vault will be synced.')
+        .addText(text => {
+          text.setPlaceholder('e.g. obsidian-notes/my-vault');
+          text.setValue(settings.remoteVaultRootPath ?? '');
+          text.onChange(value => {
+            this.remoteVaultRootPath = value;
+          });
         });
 
       new Setting(containerEl)
@@ -130,10 +125,29 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             commit(text.inputEl.value);
           });
         });
+
+      new Setting(containerEl)
+        .setName('Log level')
+        .setDesc('Minimum log severity to write to the developer console.')
+        .addDropdown(dropdown => {
+          dropdown
+            .addOption(LogLevel.debug, 'Debug')
+            .addOption(LogLevel.info, 'Info')
+            .addOption(LogLevel.warn, 'Warn')
+            .addOption(LogLevel.error, 'Error')
+            .setValue(settings.logLevel)
+            .onChange(value => {
+              const logLevel = value as LogLevel;
+              settingsStore.setLogLevel(logLevel);
+              this.loggingChangedSubject.next({ isEnabled: true, minLevel: logLevel });
+            });
+        });
     });
   }
 
   public hide() {
+    // vault root is only updated on tab hide to avoid having to create the folders in Proton on every change
+    getObsidianSettingsStore().setRemoteVaultRootPath(this.remoteVaultRootPath);
     this.stateSub?.unsubscribe();
     this.stateSub = undefined;
     super.hide();

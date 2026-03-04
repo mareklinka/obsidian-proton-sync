@@ -1,6 +1,6 @@
 import { Effect, Option } from 'effect';
-import { Notice, Plugin } from 'obsidian';
-import { type Subscription } from 'rxjs';
+import { normalizePath, Notice, Plugin } from 'obsidian';
+import { combineLatest, distinctUntilChanged, map, type Subscription } from 'rxjs';
 
 import { pullVault, pushVault } from './actions';
 import { getProtonSessionService, initProtonSessionService } from './proton/auth/ProtonSessionService';
@@ -9,7 +9,11 @@ import { initProtonAccount } from './proton/drive/ProtonAccount';
 import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { initObsidianFileApi } from './services/ObsidianFileApi';
 import { initObsidianSecretStore } from './services/ObsidianSecretStore';
-import { getObsidianSettingsStore, initObsidianSettingsStore } from './services/ObsidianSettingsStore';
+import {
+  getObsidianSettingsStore,
+  initObsidianSettingsStore,
+  DEFAULT_SYNC_CONTAINER_NAME
+} from './services/ObsidianSettingsStore';
 import { getLogger } from './services/ObsidianSyncLogger';
 import { getProtonCloudObserver, initProtonCloudObserver } from './services/ProtonCloudObserver';
 import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
@@ -25,10 +29,12 @@ import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-b
 
 const PUSH_CONFIG_COMMAND_ID = 'push-vault-config';
 const PULL_CONFIG_COMMAND_ID = 'pull-vault-config';
-const SYNC_CONTAINER_NAME = 'obsidian-notes';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
   private readonly logger = getLogger('Main');
+  private readonly defaultRemoteVaultRootPath = normalizePath(
+    `${DEFAULT_SYNC_CONTAINER_NAME}/${this.app.vault.getName()}`
+  );
   private statusBarController: SyncStatusBarController | null = null;
 
   private readonly subscriptions: Subscription[] = [];
@@ -36,7 +42,11 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   async onload(): Promise<void> {
     this.logger.info('Loading Proton Drive Sync plugin', this.manifest.version);
 
-    const settings = initObsidianSettingsStore({ save: this.saveData.bind(this), load: this.loadData.bind(this) });
+    const settings = initObsidianSettingsStore(this.defaultRemoteVaultRootPath, {
+      save: this.saveData.bind(this),
+      load: this.loadData.bind(this)
+    });
+
     await settings.load();
     initObsidianSecretStore(this.app.secretStorage);
     initObsidianFileApi(this.app.vault);
@@ -61,59 +71,56 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     initSyncProgressModal(this.app);
     const syncService = getSyncService();
 
-    sessionService.authState$.subscribe(async authState => {
-      const effect = Effect.gen(this, function* () {
-        this.logger.info('Authentication state changed', authState);
+    const remoteVaultRootPath$ = settings.settings$.pipe(
+      map(_ => _.remoteVaultRootPath),
+      distinctUntilChanged()
+    );
+    combineLatest([remoteVaultRootPath$, sessionService.authState$]).subscribe(
+      async ([remoteVaultRootPath, authState]) => {
+        const effect = Effect.gen(this, function* () {
+          this.logger.debug(
+            'Auth state or remote vault root path changed. Setting up vault root in Proton Drive if needed.',
+            {
+              authState,
+              remoteVaultRootPath
+            }
+          );
+          const session = sessionService.getCurrentSession();
+          settings.setAuthenticationResult(session);
 
-        const session = sessionService.getCurrentSession();
-        settings.setAuthenticationResult(session);
+          if (authState === 'connected') {
+            const vaultRoot = yield* this.ensureVaultRootFolder(remoteVaultRootPath);
+            getObsidianSettingsStore().setVaultRootNodeUid(vaultRoot.id);
+            yield* getProtonCloudObserver().subscribeToTreeChanges(vaultRoot.treeEventScopeId);
+          } else if (authState === 'disconnected') {
+            getProtonCloudObserver().unsubscribeFromTreeChanges();
+          }
+        }).pipe(
+          Effect.catchAll(error => {
+            return Effect.gen(this, function* () {
+              this.logger.error('Error in vault root setup', error);
+              getObsidianSettingsStore().setVaultRootNodeUid(null);
 
-        if (authState === 'connected') {
-          const protonApi = getProtonDriveApi();
-          const myFilesRoot = yield* protonApi.getRootFolder();
-          const maybeSyncRoot = yield* protonApi.getFolderByName(SYNC_CONTAINER_NAME, myFilesRoot.id);
-
-          const syncRoot = Option.isSome(maybeSyncRoot)
-            ? maybeSyncRoot.value
-            : yield* protonApi.createFolder(SYNC_CONTAINER_NAME, myFilesRoot.id);
-
-          const maybeVaultContainerRoot = yield* protonApi.getFolderByName(this.app.vault.getName(), syncRoot.id);
-
-          const vaultRoot = Option.isSome(maybeVaultContainerRoot)
-            ? maybeVaultContainerRoot.value
-            : yield* protonApi.createFolder(this.app.vault.getName(), syncRoot.id);
-          this.logger.info('Vault node root ID is: ', vaultRoot.id);
-
-          getObsidianSettingsStore().setVaultRootNodeUid(vaultRoot.id);
-          yield* getProtonCloudObserver().subscribeToTreeChanges(vaultRoot.treeEventScopeId);
-        } else if (authState === 'disconnected') {
-          getProtonCloudObserver().unsubscribeFromTreeChanges();
-        }
-      }).pipe(
-        Effect.catchAll(error => {
-          return Effect.gen(this, function* () {
-            this.logger.error('Error in vault root setup', error);
-            getObsidianSettingsStore().setVaultRootNodeUid(null);
-
-            return yield* error;
-          });
-        }),
-        Effect.catchTags({
-          InvalidName: () => Effect.succeed(new Notice('Invalid folder name.')),
-          ItemAlreadyExists: () => Effect.succeed(new Notice('Folder already exists.')),
-          MyFilesRootFilesNotFound: () =>
-            Effect.succeed(new Notice('The "My Files" root folder was not found in Proton Drive.')),
-          GenericProtonDriveError: () =>
-            Effect.succeed(
-              new Notice(
-                'An error occurred while setting up the vault root folder in Proton Drive. Please try again later.'
+              return yield* error;
+            });
+          }),
+          Effect.catchTags({
+            InvalidName: () => Effect.succeed(new Notice('Invalid folder name.')),
+            ItemAlreadyExists: () => Effect.succeed(new Notice('Folder already exists.')),
+            MyFilesRootFilesNotFound: () =>
+              Effect.succeed(new Notice('The "My Files" root folder was not found in Proton Drive.')),
+            GenericProtonDriveError: () =>
+              Effect.succeed(
+                new Notice(
+                  'An error occurred while setting up the vault root folder in Proton Drive. Please try again later.'
+                )
               )
-            )
-        })
-      );
+          })
+        );
 
-      await Effect.runPromise(effect);
-    });
+        await Effect.runPromise(effect);
+      }
+    );
 
     this.statusBarController = createSyncStatusBar(this, {
       loginState$: sessionService.authState$,
@@ -195,6 +202,37 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
     getObsidianSettingsStore().setVaultRootNodeUid(null);
     new Notice('Disconnected from Proton Drive.');
+  }
+
+  private ensureVaultRootFolder(remoteVaultRootPath: string | null) {
+    return Effect.gen(this, function* () {
+      const protonApi = getProtonDriveApi();
+      const myFilesRoot = yield* protonApi.getRootFolder();
+
+      const normalizedRemoteRootPath = normalizePath(remoteVaultRootPath ?? this.defaultRemoteVaultRootPath);
+      const pathSegments = normalizedRemoteRootPath.split('/').filter(segment => segment.trim() !== '');
+
+      let remoteRootId = myFilesRoot.id;
+      for (const segment of pathSegments) {
+        const maybeFolder = yield* protonApi.getFolderByName(segment, remoteRootId);
+        if (Option.isSome(maybeFolder)) {
+          remoteRootId = maybeFolder.value.id;
+        } else {
+          const newFolder = yield* protonApi.createFolder(segment, remoteRootId);
+          remoteRootId = newFolder.id;
+        }
+      }
+
+      const maybeVaultContainerRoot = yield* protonApi.getFolderByName(this.app.vault.getName(), remoteRootId);
+
+      const vaultRoot = Option.isSome(maybeVaultContainerRoot)
+        ? maybeVaultContainerRoot.value
+        : yield* protonApi.createFolder(this.app.vault.getName(), remoteRootId);
+
+      this.logger.info('Vault node root ID is: ', vaultRoot.id);
+
+      return vaultRoot;
+    });
   }
 
   private async openSyncActionDialog(): Promise<void> {
