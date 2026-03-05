@@ -135,3 +135,7 @@
 .proton-sync-status-label {
   font-weight: 500;
 }
+
+.proton-sync-full-width {
+  width: 100%;
+}

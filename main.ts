@@ -1,4 +1,4 @@
-import { Effect, Option } from 'effect';
+import { Data, Effect, Option } from 'effect';
 import { getLanguage, normalizePath, Notice, Plugin } from 'obsidian';
 import { combineLatest, distinctUntilChanged, map, type Subscription } from 'rxjs';
 
@@ -17,6 +17,7 @@ import {
   initObsidianSettingsStore
 } from './services/ObsidianSettingsStore';
 import { getProtonCloudObserver, initProtonCloudObserver } from './services/ProtonCloudObserver';
+import type { ProtonFolder } from './services/ProtonDriveApi';
 import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
 import { getSyncService, initSyncService } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
@@ -62,7 +63,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
         .loadSession()
         .pipe(
           Effect.catchTag('ProtonApiCommunicationError', error =>
-            Effect.succeed(this.logger.error(t.main.notices.protonApiCommunicationFailed(error.message), error))
+            Effect.succeed(this.logger.error(t.main.notices.login.protonApiCommunicationFailed(error.message), error))
           )
         )
     );
@@ -113,7 +114,12 @@ export default class ProtonDriveSyncPlugin extends Plugin {
             InvalidName: () => Effect.succeed(new Notice(t.main.notices.invalidFolderName)),
             ItemAlreadyExists: () => Effect.succeed(new Notice(t.main.notices.folderAlreadyExists)),
             MyFilesRootFilesNotFound: () => Effect.succeed(new Notice(t.main.notices.myFilesRootNotFound)),
-            GenericProtonDriveError: () => Effect.succeed(new Notice(t.main.notices.setupVaultRootFailed))
+            GenericProtonDriveError: () => Effect.succeed(new Notice(t.main.notices.setupVaultRootFailed)),
+            ProtonApiError: () => Effect.succeed(new Notice(t.main.notices.protonApiError)),
+            AmbiguousSharedPathError: () => Effect.succeed(new Notice(t.main.notices.ambiguousSharedPath)),
+            SharedFolderNotFoundError: () => Effect.succeed(new Notice(t.main.notices.sharedFolderNotFound)),
+            InvalidSharedPathError: () => Effect.succeed(new Notice(t.main.notices.invalidSharedPath)),
+            TreeEventSubscriptionFailed: () => Effect.succeed(new Notice(t.main.notices.treeSubscriptionFailed))
           })
         );
 
@@ -164,7 +170,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     const { t } = getI18n();
 
     if (!credentials.email || !credentials.password) {
-      new Notice(t.main.notices.credentialsRequired);
+      new Notice(t.main.notices.login.credentialsRequired);
       return;
     }
 
@@ -183,12 +189,13 @@ export default class ProtonDriveSyncPlugin extends Plugin {
         })
       ).pipe(
         Effect.catchTags({
-          CaptchaDataNotProvidedError: () => Effect.succeed(new Notice(t.main.notices.captchaDataNotProvided)),
-          CaptchaRequiredError: () => Effect.succeed(new Notice(t.main.notices.captchaRequired)),
-          TwoFactorCodeRequiredError: () => Effect.succeed(new Notice(t.main.notices.twoFactorRequired)),
-          EncryptionPasswordRequiredError: () => Effect.succeed(new Notice(t.main.notices.mailboxPasswordRequired)),
+          CaptchaDataNotProvidedError: () => Effect.succeed(new Notice(t.main.notices.login.captchaDataNotProvided)),
+          CaptchaRequiredError: () => Effect.succeed(new Notice(t.main.notices.login.captchaRequired)),
+          TwoFactorCodeRequiredError: () => Effect.succeed(new Notice(t.main.notices.login.twoFactorRequired)),
+          EncryptionPasswordRequiredError: () =>
+            Effect.succeed(new Notice(t.main.notices.login.mailboxPasswordRequired)),
           ProtonApiCommunicationError: error =>
-            Effect.succeed(new Notice(t.main.notices.protonApiCommunicationFailed(error.message)))
+            Effect.succeed(new Notice(t.main.notices.login.protonApiCommunicationFailed(error.message)))
         })
       )
     );
@@ -206,32 +213,62 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   private ensureVaultRootFolder(remoteVaultRootPath: string | null) {
     return Effect.gen(this, function* () {
-      const protonApi = getProtonDriveApi();
-      const myFilesRoot = yield* protonApi.getRootFolder();
-
       const normalizedRemoteRootPath = normalizePath(remoteVaultRootPath ?? this.defaultRemoteVaultRootPath);
       const pathSegments = normalizedRemoteRootPath.split('/').filter(segment => segment.trim() !== '');
 
-      let remoteRootId = myFilesRoot.id;
+      const protonApi = getProtonDriveApi();
+
+      let remoteRootId: ProtonFolder;
+      if (normalizedRemoteRootPath.startsWith('$shared$/')) {
+        // target root is a folder shared with the user - we should not attempt to create it, only to find it
+        if (pathSegments.length < 2) {
+          // at least $shared$ and one folder name are required in the path
+          return yield* new InvalidSharedPathError();
+        }
+
+        const shareName = pathSegments[1];
+        const shares = yield* protonApi.getSharedFolders();
+        const matchingShares = shares.filter(share => share.name === shareName);
+
+        if (matchingShares.length === 0) {
+          return yield* new SharedFolderNotFoundError();
+        }
+
+        if (matchingShares.length > 1) {
+          return yield* new AmbiguousSharedPathError();
+        }
+
+        const targetShare = matchingShares[0];
+
+        remoteRootId = yield* this.ensureRemotePath(targetShare, pathSegments.slice(2));
+      } else {
+        // target root is the user's own folder
+        const myFilesRoot = yield* protonApi.getRootFolder();
+        remoteRootId = yield* this.ensureRemotePath(myFilesRoot, pathSegments);
+      }
+
+      this.logger.info('Vault node root ID is: ', remoteRootId);
+
+      return remoteRootId;
+    });
+  }
+
+  private ensureRemotePath(parent: ProtonFolder, pathSegments: string[]) {
+    const protonApi = getProtonDriveApi();
+    let currentFolder = parent;
+
+    return Effect.gen(this, function* () {
       for (const segment of pathSegments) {
-        const maybeFolder = yield* protonApi.getFolderByName(segment, remoteRootId);
+        const maybeFolder = yield* protonApi.getFolderByName(segment, currentFolder.id);
         if (Option.isSome(maybeFolder)) {
-          remoteRootId = maybeFolder.value.id;
+          currentFolder = maybeFolder.value;
         } else {
-          const newFolder = yield* protonApi.createFolder(segment, remoteRootId);
-          remoteRootId = newFolder.id;
+          const newFolder = yield* protonApi.createFolder(segment, currentFolder.id);
+          currentFolder = newFolder;
         }
       }
 
-      const maybeVaultContainerRoot = yield* protonApi.getFolderByName(this.app.vault.getName(), remoteRootId);
-
-      const vaultRoot = Option.isSome(maybeVaultContainerRoot)
-        ? maybeVaultContainerRoot.value
-        : yield* protonApi.createFolder(this.app.vault.getName(), remoteRootId);
-
-      this.logger.info('Vault node root ID is: ', vaultRoot.id);
-
-      return vaultRoot;
+      return currentFolder;
     });
   }
 
@@ -270,3 +307,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     return settingTab;
   }
 }
+
+class InvalidSharedPathError extends Data.TaggedError('InvalidSharedPathError') {}
+class SharedFolderNotFoundError extends Data.TaggedError('SharedFolderNotFoundError') {}
+class AmbiguousSharedPathError extends Data.TaggedError('AmbiguousSharedPathError') {}

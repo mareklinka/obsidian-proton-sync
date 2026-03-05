@@ -62,6 +62,12 @@ export async function pushVault(app: App): Promise<void> {
           progressModal.markFailed(t.actions.notices.pushFailed);
         })
       ),
+      Effect.catchTag('PermissionError', () =>
+        Effect.sync(() => {
+          getLogger('SyncActions').error(`Push failed due to permission issues.`);
+          progressModal.markFailed(t.actions.notices.permissionError);
+        })
+      ),
       Effect.catchAll(e => {
         getLogger('SyncActions').error('Push failed', e);
         return Effect.sync(() => {

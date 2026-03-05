@@ -11,6 +11,7 @@ import {
   InvalidNameError,
   ItemAlreadyExistsError,
   MyFilesRootFilesNotFound,
+  PermissionError,
   ProtonApiError,
   ProtonFileId,
   ProtonFolderId,
@@ -69,6 +70,28 @@ class ProtonDriveApi {
       }
 
       return ProtonDriveApi.createFolderFromNode(node.value);
+    });
+  }
+
+  public getSharedFolders(): Effect.Effect<ProtonFolder[], MyFilesRootFilesNotFound | GenericProtonDriveError> {
+    return Effect.tryPromise({
+      try: async () => {
+        const shares: ProtonFolder[] = [];
+        for await (const share of this.client.iterateSharedNodesWithMe()) {
+          if (!share.ok) {
+            continue;
+          }
+
+          if (share.value.type !== NodeType.Folder) {
+            continue;
+          }
+
+          shares.push(ProtonDriveApi.createFolderFromNode(share.value));
+        }
+
+        return shares;
+      },
+      catch: () => new GenericProtonDriveError()
     });
   }
 
@@ -174,7 +197,13 @@ class ProtonDriveApi {
         const controller = await result.uploadFromStream(stream, []);
         await controller.completion();
       },
-      catch: () => {
+      catch: e => {
+        if (e instanceof ValidationError) {
+          if (e.code === 2011) {
+            return new PermissionError();
+          }
+        }
+
         return new FileUploadError();
       }
     });
@@ -194,7 +223,13 @@ class ProtonDriveApi {
         const controller = await result.uploadFromStream(stream, []);
         await controller.completion();
       },
-      catch: () => {
+      catch: e => {
+        if (e instanceof ValidationError) {
+          if (e.code === 2011) {
+            return new PermissionError();
+          }
+        }
+
         return new FileUploadError();
       }
     });

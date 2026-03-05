@@ -100,13 +100,14 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
       new Setting(containerEl)
         .setName(t.settings.remoteVaultRoot.name)
-        .setDesc(t.settings.remoteVaultRoot.description)
+        .setDesc(this.buildRootPathDescriptionFragment())
         .addText(text => {
           text.setPlaceholder(t.settings.remoteVaultRoot.placeholder);
           text.setValue(settings.remoteVaultRootPath ?? '');
           text.onChange(value => {
             this.remoteVaultRootPath = value;
           });
+          text.inputEl.classList.add('proton-sync-full-width');
         });
 
       new Setting(containerEl)
@@ -197,6 +198,26 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     }
 
     fragment.appendChild(list);
+
+    return fragment;
+  }
+
+  private buildRootPathDescriptionFragment(): DocumentFragment {
+    const { t } = getI18n();
+    const fragment = document.createDocumentFragment();
+
+    const line1 = document.createElement('div');
+    line1.innerHTML = `<span>${t.settings.remoteVaultRoot.description1}</span>`;
+
+    const line2 = document.createElement('div');
+    line2.innerHTML = `<span>${t.settings.remoteVaultRoot.description2}</span>`;
+
+    const line3 = document.createElement('div');
+    line3.innerHTML = `<span class="proton-sync-status-label">${t.settings.remoteVaultRoot.description3}</span>`;
+
+    fragment.appendChild(line1);
+    fragment.appendChild(line2);
+    fragment.appendChild(line3);
 
     return fragment;
   }

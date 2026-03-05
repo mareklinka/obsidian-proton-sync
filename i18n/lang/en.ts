@@ -15,18 +15,26 @@ export const en = {
   },
   main: {
     notices: {
+      login: {
+        credentialsRequired: 'Email and password are required to connect.',
+        captchaDataNotProvided: 'Captcha data was not provided. Login aborted.',
+        captchaRequired: 'Captcha is required to login. Login aborted.',
+        twoFactorRequired: 'Two-factor code is required to login. Login aborted.',
+        mailboxPasswordRequired: 'Mailbox password is required to login. Login aborted.',
+        protonApiCommunicationFailed: (message: string) =>
+          `Failed to communicate with Proton API: ${message}. Login aborted.`
+      },
       invalidFolderName: 'Invalid folder name.',
       folderAlreadyExists: 'Folder already exists.',
       myFilesRootNotFound: 'The "My Files" root folder was not found in Proton Drive.',
       setupVaultRootFailed:
         'An error occurred while setting up the vault root folder in Proton Drive. Please try again later.',
-      credentialsRequired: 'Email and password are required to connect.',
-      captchaDataNotProvided: 'Captcha data was not provided. Login aborted.',
-      captchaRequired: 'Captcha is required to login. Login aborted.',
-      twoFactorRequired: 'Two-factor code is required to login. Login aborted.',
-      mailboxPasswordRequired: 'Mailbox password is required to login. Login aborted.',
-      protonApiCommunicationFailed: (message: string) =>
-        `Failed to communicate with Proton API: ${message}. Login aborted.`,
+      protonApiError: 'Failed to communicate with Proton API.',
+      ambiguousSharedPath: 'The specified shared folder path is ambiguous.',
+      sharedFolderNotFound: 'The specified shared folder was not found.',
+      invalidSharedPath: 'The specified shared folder path is invalid.',
+      treeSubscriptionFailed:
+        'Failed to subscribe to remote file tree updates. Remote changes may not be detected until you restart Obsidian.',
       disconnected: 'Disconnected from Proton Drive.'
     }
   },
@@ -38,6 +46,8 @@ export const en = {
       pullCompleted: 'Pull completed.',
       syncAlreadyInProgress: 'A sync is already in progress. Please wait for it to complete.',
       vaultRootUnavailable: 'Vault root ID is not available. Please ensure your Proton account is connected correctly.',
+      permissionError:
+        'You do not have permission to perform this action. Please check your Proton Drive folder permissions.',
       pushFailed: 'Push failed. Please try again.',
       pullFailed: 'Pull failed. Please try again.'
     },
@@ -84,7 +94,9 @@ export const en = {
     },
     remoteVaultRoot: {
       name: 'Remote vault root',
-      description: 'The root folder in Proton Drive where your vault will be synced.',
+      description1: 'The root folder in Proton Drive where your vault will be synced.',
+      description2: 'To use a folder shared with you, use the format:',
+      description3: '$shared$/[shared folder name]/[rest of path]',
       placeholder: 'e.g. obsidian-notes/my-vault'
     },
     logLevel: {
