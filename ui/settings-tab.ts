@@ -98,12 +98,14 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         );
       }
 
+      this.remoteVaultRootPath = settings.remoteVaultRootPath ?? '';
+
       new Setting(containerEl)
         .setName(t.settings.remoteVaultRoot.name)
         .setDesc(this.buildRootPathDescriptionFragment())
         .addText(text => {
           text.setPlaceholder(t.settings.remoteVaultRoot.placeholder);
-          text.setValue(settings.remoteVaultRootPath ?? '');
+          text.setValue(this.remoteVaultRootPath);
           text.onChange(value => {
             this.remoteVaultRootPath = value;
           });
