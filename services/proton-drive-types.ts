@@ -44,6 +44,7 @@ export type ProtonDriveError =
   | MyFilesRootFilesNotFound
   | NotAFolderError
   | GenericProtonDriveError
+  | ProtonRequestCancelledError
   | ProtonApiError
   | InvalidNameError
   | ItemAlreadyExistsError
@@ -53,6 +54,9 @@ export type ProtonDriveError =
 export class MyFilesRootFilesNotFound extends Data.TaggedError('MyFilesRootFilesNotFound') {}
 export class NotAFolderError extends Data.TaggedError('NotAFolder') {}
 export class GenericProtonDriveError extends Data.TaggedError('GenericProtonDriveError') {}
+export class ProtonRequestCancelledError extends Data.TaggedError('ProtonRequestCancelledError')<{
+  reason?: unknown;
+}> {}
 export class ProtonApiError extends Data.TaggedError('ProtonApiError')<{ code: number; message: string }> {}
 export class InvalidNameError extends Data.TaggedError('InvalidName') {}
 export class ItemAlreadyExistsError extends Data.TaggedError('ItemAlreadyExists') {}

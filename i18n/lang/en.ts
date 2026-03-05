@@ -40,6 +40,7 @@ export const en = {
       pushCompleted: 'Push completed.',
       pullStarted: 'Pulling vault data from Proton Drive...',
       pullCompleted: 'Pull completed.',
+      syncCancelled: 'Sync cancelled.',
       syncAlreadyInProgress: 'A sync is already in progress. Please wait for it to complete.',
       vaultRootUnavailable: 'Vault root ID is not available. Please ensure your Proton account is connected correctly.',
       permissionError:
@@ -161,6 +162,9 @@ export const en = {
       title: 'Proton Drive Sync',
       initialMessage: 'No sync operations are currently running.',
       initialDetails: '',
+      cancellingMessage: 'Cancelling...',
+      cancellingDetails: 'Waiting for the current operation to complete.',
+      cancelledMessage: 'Operation cancelled.',
       closeHint: 'You can close this dialog at any time. The sync will continue in the background.',
       completedMessage: 'Operation complete.',
       failedMessage: 'Operation failed.',

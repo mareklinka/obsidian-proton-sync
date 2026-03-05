@@ -30,8 +30,10 @@ class SyncProgressModal extends Modal {
   private progressFillEl: HTMLElement | null = null;
   private autoCloseIntervalId: number | null = null;
   private autoCloseTimeoutId: number | null = null;
+  private cancelButtonSetting: Setting | null = null;
+  private cancelButtonEl: HTMLButtonElement | null = null;
 
-  private terminalState: 'running' | 'completed' | 'failed' = 'running';
+  private terminalState: 'running' | 'completed' | 'failed' | 'cancelled' = 'running';
 
   constructor(app: App) {
     super(app);
@@ -70,15 +72,39 @@ class SyncProgressModal extends Modal {
       cls: 'proton-sync-progress__bar-fill'
     });
 
+    this.cancelButtonSetting = new Setting(contentEl);
+    this.cancelButtonSetting.addButton(button => {
+      button
+        .setButtonText(t.common.cancel)
+        .setWarning()
+        .onClick(() => {
+          const wasCancelled = getSyncService().cancelCurrentOperation();
+          if (!wasCancelled) {
+            return;
+          }
+
+          if (this.cancelButtonEl) {
+            this.cancelButtonEl.disabled = true;
+          }
+
+          this.render(t.modals.syncProgress.cancellingMessage, t.modals.syncProgress.cancellingDetails, null);
+        });
+
+      this.cancelButtonEl = button.buttonEl;
+    });
+
     const setting = new Setting(contentEl).setDesc(t.modals.syncProgress.closeHint);
+    this.cancelButtonSetting.settingEl.hide();
 
     this.stateSubscription = getSyncService().state$.subscribe(state => {
       if (state.state === 'idle') {
         setting.descEl.hide();
         this.progressBarEl?.hide();
+        this.cancelButtonSetting?.settingEl.hide();
       } else {
         setting.descEl.show();
         this.progressBarEl?.show();
+        this.cancelButtonSetting?.settingEl.show();
       }
 
       if (this.terminalState !== 'running') {
@@ -98,6 +124,8 @@ class SyncProgressModal extends Modal {
     this.detailsEl = null;
     this.progressBarEl = null;
     this.progressFillEl = null;
+    this.cancelButtonSetting = null;
+    this.cancelButtonEl = null;
     this.terminalState = 'running';
   }
 
@@ -131,7 +159,12 @@ class SyncProgressModal extends Modal {
     this.contentEl.addClass('proton-sync-progress--failed');
 
     this.progressBarEl?.hide();
+    this.cancelButtonSetting?.settingEl.hide();
     this.render(t.modals.syncProgress.failedMessage, message, null);
+  }
+
+  markCancelled(): void {
+    this.close();
   }
 
   private render(message: string, details: string, progressPercent: number | null): void {

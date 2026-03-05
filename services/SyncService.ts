@@ -13,7 +13,8 @@ import type {
   InvalidNameError,
   ItemAlreadyExistsError,
   ProtonApiError,
-  ProtonFileId
+  ProtonFileId,
+  ProtonRequestCancelledError
 } from './proton-drive-types';
 import { ProtonFolderId, TreeEventScopeId } from './proton-drive-types';
 import type { ProtonFile, ProtonFolder } from './ProtonDriveApi';
@@ -125,6 +126,7 @@ class SyncService {
   private readonly logger = getLogger('SyncService');
   private readonly stateSubject = new BehaviorSubject<SyncState>({ state: 'idle' });
   public readonly state$ = this.stateSubject.asObservable();
+  private activeAbortController: AbortController | null = null;
 
   constructor(private readonly vault: Vault) {}
 
@@ -132,35 +134,74 @@ class SyncService {
     return this.stateSubject.value;
   }
 
-  public push(prune: boolean) {
+  public push(prune: boolean, signal?: AbortSignal) {
     return Effect.gen(this, function* () {
       if (this.stateSubject.value.state !== 'idle') {
         yield* new SyncAlreadyInProgressError();
       }
 
-      const idleEffect = Effect.sync(() => this.stateSubject.next({ state: 'idle' }));
+      const { controller, signal: syncSignal, cleanup } = this.createCancellationContext(signal);
+      this.activeAbortController = controller;
 
-      yield* this.pushImpl(prune).pipe(Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect }));
+      const idleEffect = Effect.sync(() => {
+        this.stateSubject.next({ state: 'idle' });
+        if (this.activeAbortController === controller) {
+          this.activeAbortController = null;
+        }
+        cleanup();
+      });
+
+      yield* this.pushImpl(prune, syncSignal).pipe(
+        Effect.catchTag('ProtonRequestCancelledError', error =>
+          Effect.fail(new SyncCancelledError({ reason: error.reason }))
+        ),
+        Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect })
+      );
     });
   }
 
-  public pull(prune: boolean) {
+  public pull(prune: boolean, signal?: AbortSignal) {
     return Effect.gen(this, function* () {
       if (this.stateSubject.value.state !== 'idle') {
         yield* new SyncAlreadyInProgressError();
       }
 
-      const idleEffect = Effect.sync(() => this.stateSubject.next({ state: 'idle' }));
+      const { controller, signal: syncSignal, cleanup } = this.createCancellationContext(signal);
+      this.activeAbortController = controller;
 
-      yield* this.pullImpl(prune).pipe(Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect }));
+      const idleEffect = Effect.sync(() => {
+        this.stateSubject.next({ state: 'idle' });
+        if (this.activeAbortController === controller) {
+          this.activeAbortController = null;
+        }
+        cleanup();
+      });
+
+      yield* this.pullImpl(prune, syncSignal).pipe(
+        Effect.catchTag('ProtonRequestCancelledError', error =>
+          Effect.fail(new SyncCancelledError({ reason: error.reason }))
+        ),
+        Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect })
+      );
     });
   }
 
-  private pushImpl(prune: boolean) {
+  public cancelCurrentOperation(reason: unknown = 'User cancelled sync operation.'): boolean {
+    if (!this.activeAbortController || this.activeAbortController.signal.aborted) {
+      return false;
+    }
+
+    this.activeAbortController.abort(reason);
+    return true;
+  }
+
+  private pushImpl(prune: boolean, signal: AbortSignal) {
     return Effect.gen(this, function* () {
       const logger = this.logger.withScope('push');
       const timingLogger = logger.withScope(SYNC_TIMING_SCOPE);
       logger.info('Starting config push');
+
+      yield* this.ensureNotCancelled(signal);
 
       const vaultRootNodeId = getObsidianSettingsStore().get('vaultRootNodeUid');
 
@@ -172,6 +213,7 @@ class SyncService {
 
       const fileApi = getObsidianFileApi();
       const localRoot = yield* this.withTiming(timingLogger, 'Computed local file tree', fileApi.getFileTree());
+      yield* this.ensureNotCancelled(signal);
 
       this.stateSubject.next({ state: 'pushing', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
 
@@ -181,10 +223,11 @@ class SyncService {
         timingLogger,
         'Computed remote file tree',
         Effect.gen(this, function* () {
-          const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value);
-          return yield* this.buildRemoteTree(remoteConfigRootFolder);
+          const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value, signal);
+          return yield* this.buildRemoteTree(remoteConfigRootFolder, signal);
         })
       );
+      yield* this.ensureNotCancelled(signal);
 
       this.stateSubject.next({ state: 'pushing', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
 
@@ -195,6 +238,7 @@ class SyncService {
           return this.computePushCreationOperations(localRoot, remoteRoot, logger);
         })
       );
+      yield* this.ensureNotCancelled(signal);
 
       if (prune) {
         yield* this.withTiming(
@@ -204,23 +248,26 @@ class SyncService {
             syncOps.push(...this.computePushPruneOperations(localRoot, remoteRoot));
           })
         );
+        yield* this.ensureNotCancelled(signal);
       }
 
       yield* this.withTiming(
         timingLogger,
         'Applied operations',
-        this.applyPushOperations(syncOps, logger, driveApi, fileApi)
+        this.applyPushOperations(syncOps, logger, driveApi, fileApi, signal)
       );
 
       this.stateSubject.next({ state: 'idle' });
     });
   }
 
-  private pullImpl(prune: boolean) {
+  private pullImpl(prune: boolean, signal: AbortSignal) {
     return Effect.gen(this, function* () {
       const logger = this.logger.withScope('pull');
       const timingLogger = logger.withScope(SYNC_TIMING_SCOPE);
       logger.info('Starting config pull', { deleteLocalOrphans: prune });
+
+      yield* this.ensureNotCancelled(signal);
 
       const vaultRootNodeId = getObsidianSettingsStore().get('vaultRootNodeUid');
 
@@ -231,6 +278,7 @@ class SyncService {
       this.stateSubject.next({ state: 'pulling', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });
       const fileApi = getObsidianFileApi();
       const localRoot = yield* this.withTiming(timingLogger, 'Computed local file tree', fileApi.getFileTree());
+      yield* this.ensureNotCancelled(signal);
 
       this.stateSubject.next({ state: 'pulling', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
 
@@ -238,10 +286,11 @@ class SyncService {
         timingLogger,
         'Computed remote file tree',
         Effect.gen(this, function* () {
-          const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value);
-          return yield* this.buildRemoteTree(remoteConfigRootFolder);
+          const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value, signal);
+          return yield* this.buildRemoteTree(remoteConfigRootFolder, signal);
         })
       );
+      yield* this.ensureNotCancelled(signal);
 
       this.stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
 
@@ -250,12 +299,14 @@ class SyncService {
         'Computed pull creation operations',
         Effect.sync(() => this.computePullCreationOperations(localRoot, remoteRoot, logger))
       );
+      yield* this.ensureNotCancelled(signal);
 
       const { localFileDeletePaths, localFolderDeletePaths } = yield* this.withTiming(
         timingLogger,
         'Computed pull prune operations',
         Effect.sync(() => this.computePullPruneOperations(localRoot, remoteRoot, prune))
       );
+      yield* this.ensureNotCancelled(signal);
 
       const keptFolderDeletes: string[] = [];
       for (const folderPath of Array.from(localFolderDeletePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
@@ -292,7 +343,7 @@ class SyncService {
       yield* this.withTiming(
         timingLogger,
         'Applied operations',
-        this.applyPullOperations(pullOps, logger, getProtonDriveApi(), fileApi)
+        this.applyPullOperations(pullOps, logger, getProtonDriveApi(), fileApi, signal)
       );
 
       this.stateSubject.next({ state: 'idle' });
@@ -303,13 +354,16 @@ class SyncService {
     pullOps: PullSyncOperation[],
     logger: ReturnType<typeof getLogger>,
     driveApi: ReturnType<typeof getProtonDriveApi>,
-    fileApi: ReturnType<typeof getObsidianFileApi>
+    fileApi: ReturnType<typeof getObsidianFileApi>,
+    signal: AbortSignal
   ) {
     return Effect.gen(this, function* () {
       const totalOps = pullOps.length;
       let processedOps = 0;
 
       for (const op of pullOps) {
+        yield* this.ensureNotCancelled(signal);
+
         this.stateSubject.next({
           state: 'pulling',
           subState: 'applyingChanges',
@@ -335,7 +389,7 @@ class SyncService {
                 yield* fileApi.ensureFolder(parentPath);
               }
 
-              const data = yield* driveApi.downloadFile(op.details.remoteId);
+              const data = yield* driveApi.downloadFile(op.details.remoteId, signal);
               yield* fileApi.writeFileContent(op.details.rawPath, data, op.details.remoteModifiedAt);
             }
             break;
@@ -362,7 +416,8 @@ class SyncService {
     syncOps: PushSyncOperation[],
     logger: ReturnType<typeof getLogger>,
     driveApi: ReturnType<typeof getProtonDriveApi>,
-    fileApi: ReturnType<typeof getObsidianFileApi>
+    fileApi: ReturnType<typeof getObsidianFileApi>,
+    signal: AbortSignal
   ) {
     return Effect.gen(this, function* () {
       const totalOps = syncOps.length;
@@ -370,6 +425,8 @@ class SyncService {
       const deleteNodeIds: Array<ProtonFileId | ProtonFolderId> = [];
 
       while (syncOps.length > 0) {
+        yield* this.ensureNotCancelled(signal);
+
         const op = syncOps.shift();
         if (!op) {
           continue;
@@ -391,7 +448,7 @@ class SyncService {
           case 'createFolder':
             {
               logger.debug('Creating folder', { name: op.details.name, parentId: op.details.parentId.uid });
-              const newRemoteFolder = yield* driveApi.createFolder(op.details.name, op.details.parentId);
+              const newRemoteFolder = yield* driveApi.createFolder(op.details.name, op.details.parentId, signal);
               for (const item of syncOps) {
                 if ('parentId' in item.details && item.details.parentId.equals(op.details.id)) {
                   item.details.parentId = newRemoteFolder.id;
@@ -410,7 +467,7 @@ class SyncService {
                 op.details.sha1
               );
 
-              yield* driveApi.uploadFile(op.details.name, data, metadata, op.details.parentId);
+              yield* driveApi.uploadFile(op.details.name, data, metadata, op.details.parentId, signal);
             }
             break;
           case 'updateFile':
@@ -423,13 +480,15 @@ class SyncService {
                 data.byteLength,
                 op.details.sha1
               );
-              yield* driveApi.uploadRevision(op.details.id, data, metadata);
+              yield* driveApi.uploadRevision(op.details.id, data, metadata, signal);
             }
             break;
         }
       }
 
       if (deleteNodeIds.length > 0) {
+        yield* this.ensureNotCancelled(signal);
+
         this.stateSubject.next({
           state: 'pushing',
           subState: 'applyingChanges',
@@ -437,7 +496,7 @@ class SyncService {
           processedItems: processedOps
         });
 
-        yield* driveApi.trashNodes(deleteNodeIds);
+        yield* driveApi.trashNodes(deleteNodeIds, signal);
       }
     });
   }
@@ -742,7 +801,7 @@ class SyncService {
     return { localFileDeletePaths, localFolderDeletePaths };
   }
 
-  private buildRemoteTree(remoteConfigRoot: ProtonFolder) {
+  private buildRemoteTree(remoteConfigRoot: ProtonFolder, signal: AbortSignal) {
     return Effect.gen(this, function* () {
       const driveApi = getProtonDriveApi();
 
@@ -756,12 +815,14 @@ class SyncService {
       ];
 
       while (queue.length > 0) {
+        yield* this.ensureNotCancelled(signal);
+
         const current = queue.shift();
         if (!current) {
           continue;
         }
 
-        for (const child of yield* driveApi.getChildren(current.folder.id)) {
+        for (const child of yield* driveApi.getChildren(current.folder.id, signal)) {
           const relativePath = normalizePath(
             current.relativePath ? `${current.relativePath}/${child.name}` : child.name
           );
@@ -788,8 +849,12 @@ class SyncService {
 
   private getOrCreateRemoteRoot(
     configDir: string,
-    vaultRootId: ProtonFolderId
-  ): Effect.Effect<ProtonFolder, GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError | ProtonApiError> {
+    vaultRootId: ProtonFolderId,
+    signal?: AbortSignal
+  ): Effect.Effect<
+    ProtonFolder,
+    GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError | ProtonApiError | ProtonRequestCancelledError
+  > {
     return Effect.gen(this, function* () {
       let currentFolder: ProtonFolder = {
         id: vaultRootId,
@@ -801,13 +866,13 @@ class SyncService {
       const driveApi = getProtonDriveApi();
 
       for (const segment of configDir.split('/').filter(Boolean)) {
-        const remoteFolder = yield* driveApi.getFolderByName(segment, currentFolder.id);
+        const remoteFolder = yield* driveApi.getFolderByName(segment, currentFolder.id, signal);
 
         if (Option.isSome(remoteFolder)) {
           return remoteFolder.value;
         }
 
-        const created = yield* driveApi.createFolder(segment, currentFolder.id);
+        const created = yield* driveApi.createFolder(segment, currentFolder.id, signal);
         currentFolder = created;
       }
 
@@ -878,6 +943,40 @@ class SyncService {
       return result;
     });
   }
+
+  private ensureNotCancelled(signal: AbortSignal): Effect.Effect<void, SyncCancelledError> {
+    if (signal.aborted) {
+      return Effect.fail(new SyncCancelledError({ reason: signal.reason }));
+    }
+
+    return Effect.void;
+  }
+
+  private createCancellationContext(signal?: AbortSignal): {
+    controller: AbortController;
+    signal: AbortSignal;
+    cleanup: () => void;
+  } {
+    const controller = new AbortController();
+
+    if (!signal) {
+      return { controller, signal: controller.signal, cleanup: () => {} };
+    }
+
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      return { controller, signal: controller.signal, cleanup: () => {} };
+    }
+
+    const onAbort = () => controller.abort(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+
+    return {
+      controller,
+      signal: controller.signal,
+      cleanup: () => signal.removeEventListener('abort', onAbort)
+    };
+  }
 }
 
 function hasGlobMeta(pattern: string): boolean {
@@ -922,8 +1021,13 @@ function inferMediaType(path: string): string {
   return 'application/octet-stream';
 }
 
-export type ConfigSyncError = InvalidConfigPathError | VaultRootIdNotAvailableError | SyncAlreadyInProgressError;
+export type ConfigSyncError =
+  | InvalidConfigPathError
+  | VaultRootIdNotAvailableError
+  | SyncAlreadyInProgressError
+  | SyncCancelledError;
 
 export class InvalidConfigPathError extends Data.TaggedError('InvalidConfigPathError') {}
 export class VaultRootIdNotAvailableError extends Data.TaggedError('VaultRootIdNotAvailableError') {}
 export class SyncAlreadyInProgressError extends Data.TaggedError('SyncAlreadyInProgressError') {}
+export class SyncCancelledError extends Data.TaggedError('SyncCancelledError')<{ reason?: unknown }> {}

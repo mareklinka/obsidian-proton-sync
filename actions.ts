@@ -68,6 +68,13 @@ export async function pushVault(app: App): Promise<void> {
           progressModal.markFailed(t.actions.notices.permissionError);
         })
       ),
+      Effect.catchTag('SyncCancelledError', () =>
+        Effect.sync(() => {
+          getLogger('SyncActions').info('Push cancelled by user.');
+          progressModal.markCancelled();
+          new Notice(t.actions.notices.syncCancelled);
+        })
+      ),
       Effect.catchAll(e => {
         getLogger('SyncActions').error('Push failed', e);
         return Effect.sync(() => {
@@ -124,6 +131,13 @@ export async function pullVault(app: App): Promise<void> {
         Effect.sync(() => {
           progressModal.close();
           new Notice(t.actions.notices.vaultRootUnavailable);
+        })
+      ),
+      Effect.catchTag('SyncCancelledError', () =>
+        Effect.sync(() => {
+          getLogger('SyncActions').info('Pull cancelled by user.');
+          progressModal.markCancelled();
+          new Notice(t.actions.notices.syncCancelled);
         })
       ),
       Effect.catchAll(e => {
