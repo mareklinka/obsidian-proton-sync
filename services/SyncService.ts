@@ -108,7 +108,7 @@ interface LocalFolderDelete {
   rawPath: string;
 }
 
-type SyncOperation =
+type PushSyncOperation =
   | { type: 'createFolder'; details: FolderCreate }
   | { type: 'uploadFile'; details: FileUpload }
   | { type: 'updateFile'; details: FileUpdate }
@@ -144,7 +144,7 @@ class SyncService {
     });
   }
 
-  public pull(prune = false) {
+  public pull(prune: boolean) {
     return Effect.gen(this, function* () {
       if (this.stateSubject.value.state !== 'idle') {
         yield* new SyncAlreadyInProgressError();
@@ -233,7 +233,6 @@ class SyncService {
       const localRoot = yield* this.withTiming(timingLogger, 'Computed local file tree', fileApi.getFileTree());
 
       this.stateSubject.next({ state: 'pulling', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
-      const driveApi = getProtonDriveApi();
 
       const remoteRoot = yield* this.withTiming(
         timingLogger,
@@ -246,12 +245,17 @@ class SyncService {
 
       this.stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
 
-      const { localFileDeletePaths, localFolderDeletePaths, localFolderCreatePaths, localFileWrites } =
-        yield* this.withTiming(
-          timingLogger,
-          'Computed diff operations',
-          Effect.sync(() => this.computePullCreationOperations(localRoot, remoteRoot, logger, prune))
-        );
+      const { localFolderCreatePaths, localFileWrites } = yield* this.withTiming(
+        timingLogger,
+        'Computed pull creation operations',
+        Effect.sync(() => this.computePullCreationOperations(localRoot, remoteRoot, logger))
+      );
+
+      const { localFileDeletePaths, localFolderDeletePaths } = yield* this.withTiming(
+        timingLogger,
+        'Computed pull prune operations',
+        Effect.sync(() => this.computePullPruneOperations(localRoot, remoteRoot, prune))
+      );
 
       const keptFolderDeletes: string[] = [];
       for (const folderPath of Array.from(localFolderDeletePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
@@ -285,145 +289,77 @@ class SyncService {
         pullOps.push({ type: 'deleteLocalFolder', details: { rawPath: folderPath } });
       }
 
-      const totalOps = pullOps.length;
-      let processedOps = 0;
       yield* this.withTiming(
         timingLogger,
         'Applied operations',
-        Effect.gen(this, function* () {
-          for (const op of pullOps) {
-            this.stateSubject.next({
-              state: 'pulling',
-              subState: 'applyingChanges',
-              totalItems: totalOps,
-              processedItems: processedOps
-            });
-
-            switch (op.type) {
-              case 'createLocalFolder':
-                {
-                  logger.debug('Creating local folder', { path: op.details.rawPath });
-                  yield* fileApi.ensureFolder(op.details.rawPath);
-                }
-                break;
-              case 'writeLocalFile':
-                {
-                  logger.debug('Writing local file', {
-                    path: op.details.rawPath,
-                    remoteModifiedAt: op.details.remoteModifiedAt
-                  });
-                  const parentPath = getParentPath(op.details.rawPath);
-                  if (parentPath) {
-                    yield* fileApi.ensureFolder(parentPath);
-                  }
-
-                  const data = yield* driveApi.downloadFile(op.details.remoteId);
-                  yield* fileApi.writeFileContent(op.details.rawPath, data, op.details.remoteModifiedAt);
-                }
-                break;
-              case 'deleteLocalFile':
-                {
-                  logger.debug('Deleting local file', { path: op.details.rawPath });
-                  yield* fileApi.deleteFile(op.details.rawPath);
-                }
-                break;
-              case 'deleteLocalFolder':
-                {
-                  logger.debug('Deleting local folder', { path: op.details.rawPath });
-                  yield* fileApi.deleteFolder(op.details.rawPath);
-                }
-                break;
-            }
-
-            processedOps += 1;
-          }
-
-          return {
-            totalOperations: totalOps,
-            deletionCount: keptFileDeletes.length + keptFolderDeletes.length
-          };
-        })
+        this.applyPullOperations(pullOps, logger, getProtonDriveApi(), fileApi)
       );
 
       this.stateSubject.next({ state: 'idle' });
     });
   }
 
-  private buildRemoteTree(remoteConfigRoot: ProtonFolder) {
+  private applyPullOperations(
+    pullOps: PullSyncOperation[],
+    logger: ReturnType<typeof getLogger>,
+    driveApi: ReturnType<typeof getProtonDriveApi>,
+    fileApi: ReturnType<typeof getObsidianFileApi>
+  ) {
     return Effect.gen(this, function* () {
-      const driveApi = getProtonDriveApi();
+      const totalOps = pullOps.length;
+      let processedOps = 0;
 
-      const root: ProtonRecursiveFolder = {
-        ...remoteConfigRoot,
-        children: []
-      };
+      for (const op of pullOps) {
+        this.stateSubject.next({
+          state: 'pulling',
+          subState: 'applyingChanges',
+          totalItems: totalOps,
+          processedItems: processedOps
+        });
 
-      const queue: Array<{ folder: ProtonRecursiveFolder; relativePath: string }> = [
-        { folder: root, relativePath: '' }
-      ];
+        switch (op.type) {
+          case 'createLocalFolder':
+            {
+              logger.debug('Creating local folder', { path: op.details.rawPath });
+              yield* fileApi.ensureFolder(op.details.rawPath);
+            }
+            break;
+          case 'writeLocalFile':
+            {
+              logger.debug('Writing local file', {
+                path: op.details.rawPath,
+                remoteModifiedAt: op.details.remoteModifiedAt
+              });
+              const parentPath = getParentPath(op.details.rawPath);
+              if (parentPath) {
+                yield* fileApi.ensureFolder(parentPath);
+              }
 
-      while (queue.length > 0) {
-        const current = queue.shift();
-        if (!current) {
-          continue;
+              const data = yield* driveApi.downloadFile(op.details.remoteId);
+              yield* fileApi.writeFileContent(op.details.rawPath, data, op.details.remoteModifiedAt);
+            }
+            break;
+          case 'deleteLocalFile':
+            {
+              logger.debug('Deleting local file', { path: op.details.rawPath });
+              yield* fileApi.deleteFile(op.details.rawPath);
+            }
+            break;
+          case 'deleteLocalFolder':
+            {
+              logger.debug('Deleting local folder', { path: op.details.rawPath });
+              yield* fileApi.deleteFolder(op.details.rawPath);
+            }
+            break;
         }
 
-        for (const child of yield* driveApi.getChildren(current.folder.id)) {
-          const relativePath = normalizePath(
-            current.relativePath ? `${current.relativePath}/${child.name}` : child.name
-          );
-          if (!relativePath || this.isExcluded(relativePath)) {
-            continue;
-          }
-
-          if (child._tag === 'folder') {
-            const folderNode: ProtonRecursiveFolder = {
-              ...child,
-              children: []
-            };
-            current.folder.children.push(folderNode);
-            queue.push({ folder: folderNode, relativePath });
-          } else if (child._tag === 'file') {
-            current.folder.children.push(child);
-          }
-        }
+        processedOps += 1;
       }
-
-      return root;
-    });
-  }
-
-  private getOrCreateRemoteRoot(
-    configDir: string,
-    vaultRootId: ProtonFolderId
-  ): Effect.Effect<ProtonFolder, GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError | ProtonApiError> {
-    return Effect.gen(this, function* () {
-      let currentFolder: ProtonFolder = {
-        id: vaultRootId,
-        name: '',
-        _tag: 'folder',
-        parentId: Option.none(),
-        treeEventScopeId: new TreeEventScopeId('')
-      };
-      const driveApi = getProtonDriveApi();
-
-      for (const segment of configDir.split('/').filter(Boolean)) {
-        const remoteFolder = yield* driveApi.getFolderByName(segment, currentFolder.id);
-
-        if (Option.isSome(remoteFolder)) {
-          return remoteFolder.value;
-        }
-
-        const created = yield* driveApi.createFolder(segment, currentFolder.id);
-        currentFolder = created;
-      }
-
-      return currentFolder;
     });
   }
 
   private applyPushOperations(
-    syncOps: SyncOperation[],
+    syncOps: PushSyncOperation[],
     logger: ReturnType<typeof getLogger>,
     driveApi: ReturnType<typeof getProtonDriveApi>,
     fileApi: ReturnType<typeof getObsidianFileApi>
@@ -506,8 +442,8 @@ class SyncService {
     });
   }
 
-  private computePushPruneOperations(localRoot: VaultFolder, remoteRoot: ProtonRecursiveFolder): SyncOperation[] {
-    const syncOps: SyncOperation[] = [];
+  private computePushPruneOperations(localRoot: VaultFolder, remoteRoot: ProtonRecursiveFolder): PushSyncOperation[] {
+    const syncOps: PushSyncOperation[] = [];
 
     const q: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [{ local: localRoot, remote: remoteRoot }];
     while (q.length > 0) {
@@ -544,76 +480,12 @@ class SyncService {
     return syncOps;
   }
 
-  private buildUploadMetadata(
-    relativePath: string,
-    modifiedAt: number,
-    expectedSize: number,
-    expectedSha1: string
-  ): UploadMetadata {
-    return {
-      mediaType: inferMediaType(relativePath),
-      expectedSize,
-      modificationTime: new Date(modifiedAt),
-      expectedSha1
-    };
-  }
-
-  private isExcluded(relativePath: string): boolean {
-    const normalized = normalizePath(relativePath);
-    if (!normalized) {
-      return false;
-    }
-
-    const canonical = canonicalizePath(normalized);
-    const excluded = canonicalizePath(this.vault.configDir + EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH);
-    if (canonical.path === excluded.path || canonical.path.startsWith(`${excluded.path}/`)) {
-      return true;
-    }
-
-    const ignoredPaths = getObsidianSettingsStore().get('ignoredPaths');
-    for (const pattern of ignoredPaths) {
-      const normalizedPattern = normalizePath(pattern?.trim() ?? '');
-      if (!normalizedPattern) {
-        continue;
-      }
-
-      const canonicalPattern = canonicalizePath(normalizedPattern).path;
-
-      if (picomatch.isMatch(canonical.path, canonicalPattern, { nocase: true, dot: true })) {
-        return true;
-      }
-
-      if (!hasGlobMeta(canonicalPattern) && canonical.path.startsWith(`${canonicalPattern}/`)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private withTiming<A, E, R>(
-    timingLogger: TimingLogger,
-    operationName: string,
-    effect: Effect.Effect<A, E, R>
-  ): Effect.Effect<A, E, R> {
-    return Effect.gen(function* () {
-      const startedAt = Date.now();
-      const result = yield* effect;
-
-      timingLogger.debug(operationName, {
-        durationMs: Date.now() - startedAt
-      });
-
-      return result;
-    });
-  }
-
   private computePushCreationOperations(
     localRoot: VaultFolder,
     remoteRoot: ProtonRecursiveFolder,
     logger: ReturnType<typeof getLogger>
-  ): SyncOperation[] {
-    const syncOps: SyncOperation[] = [];
+  ): PushSyncOperation[] {
+    const syncOps: PushSyncOperation[] = [];
 
     const q: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [{ local: localRoot, remote: remoteRoot }];
     while (q.length > 0) {
@@ -706,13 +578,10 @@ class SyncService {
   private computePullCreationOperations(
     localRoot: VaultFolder,
     remoteRoot: ProtonRecursiveFolder,
-    logger: ReturnType<typeof getLogger>,
-    prune: boolean
+    logger: ReturnType<typeof getLogger>
   ) {
     const localFolderCreatePaths = new Set<string>();
     const localFileWrites = new Map<string, LocalFileWrite>();
-    const localFileDeletePaths = new Set<string>();
-    const localFolderDeletePaths = new Set<string>();
 
     const q: { local: VaultFolder; remote: ProtonRecursiveFolder; relativePath: string }[] = [
       { local: localRoot, remote: remoteRoot, relativePath: '' }
@@ -746,11 +615,6 @@ class SyncService {
 
         if (remoteChild._tag === 'folder') {
           const localFolder = localFoldersByName.get(remoteChild.name);
-          const localFile = localFilesByName.get(remoteChild.name);
-
-          if (localFile && localFile._type === 'file') {
-            localFileDeletePaths.add(localFile.rawPath);
-          }
 
           if (!localFolder) {
             localFolderCreatePaths.add(localPath);
@@ -769,12 +633,7 @@ class SyncService {
             q.push({ local: localFolder, remote: remoteChild, relativePath: localPath });
           }
         } else {
-          const localFolder = localFoldersByName.get(remoteChild.name);
           const localFile = localFilesByName.get(remoteChild.name);
-
-          if (localFolder) {
-            localFolderDeletePaths.add(localFolder.rawPath);
-          }
 
           if (!localFile || localFile._type !== 'file') {
             localFileWrites.set(localPath, {
@@ -805,30 +664,219 @@ class SyncService {
           });
         }
       }
+    }
 
-      if (prune) {
-        for (const localChild of localChildren) {
-          const remoteMatch = item.remote.children.find(
-            remoteChild =>
-              remoteChild.name === localChild.name &&
-              ((remoteChild._tag === 'folder' && localChild._type === 'folder') ||
-                (remoteChild._tag === 'file' && localChild._type === 'file'))
-          );
+    return { localFolderCreatePaths, localFileWrites };
+  }
 
-          if (remoteMatch) {
-            continue;
+  private computePullPruneOperations(localRoot: VaultFolder, remoteRoot: ProtonRecursiveFolder, prune: boolean) {
+    const localFileDeletePaths = new Set<string>();
+    const localFolderDeletePaths = new Set<string>();
+
+    if (!prune) {
+      return { localFileDeletePaths, localFolderDeletePaths };
+    }
+
+    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder }> = [{ local: localRoot, remote: remoteRoot }];
+
+    while (q.length > 0) {
+      const item = q.shift();
+      if (!item) {
+        continue;
+      }
+
+      const localChildren = item.local.children.filter(child => !this.isExcluded(child.rawPath));
+      const localFoldersByName = new Map<string, VaultFolder>();
+      const localFilesByName = new Map<string, (typeof localChildren)[number]>();
+
+      for (const child of localChildren) {
+        if (child._type === 'folder') {
+          localFoldersByName.set(child.name, child);
+        } else {
+          localFilesByName.set(child.name, child);
+        }
+      }
+
+      for (const remoteChild of item.remote.children) {
+        if (remoteChild._tag === 'folder') {
+          const localFolder = localFoldersByName.get(remoteChild.name);
+          const localFile = localFilesByName.get(remoteChild.name);
+
+          if (localFile && localFile._type === 'file') {
+            localFileDeletePaths.add(localFile.rawPath);
           }
 
-          if (localChild._type === 'folder') {
-            localFolderDeletePaths.add(localChild.rawPath);
-          } else {
-            localFileDeletePaths.add(localChild.rawPath);
+          if (localFolder) {
+            q.push({ local: localFolder, remote: remoteChild });
           }
+
+          continue;
+        }
+
+        const localFolder = localFoldersByName.get(remoteChild.name);
+        if (localFolder) {
+          localFolderDeletePaths.add(localFolder.rawPath);
+        }
+      }
+
+      for (const localChild of localChildren) {
+        const remoteMatch = item.remote.children.find(
+          remoteChild =>
+            remoteChild.name === localChild.name &&
+            ((remoteChild._tag === 'folder' && localChild._type === 'folder') ||
+              (remoteChild._tag === 'file' && localChild._type === 'file'))
+        );
+
+        if (remoteMatch) {
+          continue;
+        }
+
+        if (localChild._type === 'folder') {
+          localFolderDeletePaths.add(localChild.rawPath);
+        } else {
+          localFileDeletePaths.add(localChild.rawPath);
         }
       }
     }
 
-    return { localFolderCreatePaths, localFileWrites, localFileDeletePaths, localFolderDeletePaths };
+    return { localFileDeletePaths, localFolderDeletePaths };
+  }
+
+  private buildRemoteTree(remoteConfigRoot: ProtonFolder) {
+    return Effect.gen(this, function* () {
+      const driveApi = getProtonDriveApi();
+
+      const root: ProtonRecursiveFolder = {
+        ...remoteConfigRoot,
+        children: []
+      };
+
+      const queue: Array<{ folder: ProtonRecursiveFolder; relativePath: string }> = [
+        { folder: root, relativePath: '' }
+      ];
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (!current) {
+          continue;
+        }
+
+        for (const child of yield* driveApi.getChildren(current.folder.id)) {
+          const relativePath = normalizePath(
+            current.relativePath ? `${current.relativePath}/${child.name}` : child.name
+          );
+          if (!relativePath || this.isExcluded(relativePath)) {
+            continue;
+          }
+
+          if (child._tag === 'folder') {
+            const folderNode: ProtonRecursiveFolder = {
+              ...child,
+              children: []
+            };
+            current.folder.children.push(folderNode);
+            queue.push({ folder: folderNode, relativePath });
+          } else if (child._tag === 'file') {
+            current.folder.children.push(child);
+          }
+        }
+      }
+
+      return root;
+    });
+  }
+
+  private getOrCreateRemoteRoot(
+    configDir: string,
+    vaultRootId: ProtonFolderId
+  ): Effect.Effect<ProtonFolder, GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError | ProtonApiError> {
+    return Effect.gen(this, function* () {
+      let currentFolder: ProtonFolder = {
+        id: vaultRootId,
+        name: '',
+        _tag: 'folder',
+        parentId: Option.none(),
+        treeEventScopeId: new TreeEventScopeId('')
+      };
+      const driveApi = getProtonDriveApi();
+
+      for (const segment of configDir.split('/').filter(Boolean)) {
+        const remoteFolder = yield* driveApi.getFolderByName(segment, currentFolder.id);
+
+        if (Option.isSome(remoteFolder)) {
+          return remoteFolder.value;
+        }
+
+        const created = yield* driveApi.createFolder(segment, currentFolder.id);
+        currentFolder = created;
+      }
+
+      return currentFolder;
+    });
+  }
+
+  private buildUploadMetadata(
+    relativePath: string,
+    modifiedAt: number,
+    expectedSize: number,
+    expectedSha1: string
+  ): UploadMetadata {
+    return {
+      mediaType: inferMediaType(relativePath),
+      expectedSize,
+      modificationTime: new Date(modifiedAt),
+      expectedSha1
+    };
+  }
+
+  private isExcluded(relativePath: string): boolean {
+    const normalized = normalizePath(relativePath);
+    if (!normalized) {
+      return false;
+    }
+
+    const canonical = canonicalizePath(normalized);
+    const excluded = canonicalizePath(this.vault.configDir + EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH);
+    if (canonical.path === excluded.path || canonical.path.startsWith(`${excluded.path}/`)) {
+      return true;
+    }
+
+    const ignoredPaths = getObsidianSettingsStore().get('ignoredPaths');
+    for (const pattern of ignoredPaths) {
+      const normalizedPattern = normalizePath(pattern?.trim() ?? '');
+      if (!normalizedPattern) {
+        continue;
+      }
+
+      const canonicalPattern = canonicalizePath(normalizedPattern).path;
+
+      if (picomatch.isMatch(canonical.path, canonicalPattern, { nocase: true, dot: true })) {
+        return true;
+      }
+
+      if (!hasGlobMeta(canonicalPattern) && canonical.path.startsWith(`${canonicalPattern}/`)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private withTiming<A, E, R>(
+    timingLogger: TimingLogger,
+    operationName: string,
+    effect: Effect.Effect<A, E, R>
+  ): Effect.Effect<A, E, R> {
+    return Effect.gen(function* () {
+      const startedAt = Date.now();
+      const result = yield* effect;
+
+      timingLogger.debug(operationName, {
+        durationMs: Date.now() - startedAt
+      });
+
+      return result;
+    });
   }
 }
 
