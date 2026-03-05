@@ -1,5 +1,4 @@
 import { Option } from 'effect';
-import { normalizePath } from 'obsidian';
 import { BehaviorSubject } from 'rxjs';
 
 import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
@@ -39,12 +38,13 @@ class ObsidianSettingsStore {
     lastLoginError: null,
     lastRefreshAt: null,
     sessionExpiresAt: null,
-    latestEventId: null,
-    vaultRootNodeUid: null,
+    latestEventId: Option.none(),
+    vaultRootNodeUid: Option.none(),
     enableFileLogging: false,
     logLevel: LogLevel.info,
     ignoredPaths: [],
-    remoteVaultRootPath: ''
+    remoteVaultRootPath: '',
+    confirmSyncOperations: true
   });
   public readonly settings$ = this.settingsSubject.asObservable();
 
@@ -67,11 +67,14 @@ class ObsidianSettingsStore {
         lastRefreshAt: loaded.lastRefreshAt ? new Date(loaded.lastRefreshAt) : null,
         sessionExpiresAt: loaded.sessionExpiresAt ? new Date(loaded.sessionExpiresAt) : null,
         lastLoginError: loaded.lastLoginError,
-        latestEventId: loaded.latestEventId ? new ProtonEventId(loaded.latestEventId) : null,
-        vaultRootNodeUid: loaded.vaultRootNodeUid ? new ProtonFolderId(loaded.vaultRootNodeUid) : null,
+        latestEventId: loaded.latestEventId ? Option.some(new ProtonEventId(loaded.latestEventId)) : Option.none(),
+        vaultRootNodeUid: loaded.vaultRootNodeUid
+          ? Option.some(new ProtonFolderId(loaded.vaultRootNodeUid))
+          : Option.none(),
         enableFileLogging: loaded.enableFileLogging,
         logLevel: loaded.logLevel ?? LogLevel.info,
         ignoredPaths: loaded.ignoredPaths ?? [],
+        confirmSyncOperations: loaded.confirmSyncOperations ?? true,
         remoteVaultRootPath:
           !loaded.remoteVaultRootPath || loaded.remoteVaultRootPath === ''
             ? this.defaultRemoteVaultRootPath
@@ -92,83 +95,14 @@ class ObsidianSettingsStore {
         lastRefreshAt: settings.lastRefreshAt ? settings.lastRefreshAt.getTime() : null,
         sessionExpiresAt: settings.sessionExpiresAt ? settings.sessionExpiresAt.getTime() : null,
         lastLoginError: settings.lastLoginError,
-        latestEventId: settings.latestEventId?.eventId || null,
-        vaultRootNodeUid: settings.vaultRootNodeUid?.uid || null,
+        latestEventId: Option.isSome(settings.latestEventId) ? settings.latestEventId.value.eventId : null,
+        vaultRootNodeUid: Option.isSome(settings.vaultRootNodeUid) ? settings.vaultRootNodeUid.value.uid : null,
         enableFileLogging: settings.enableFileLogging,
         logLevel: settings.logLevel,
         ignoredPaths: settings.ignoredPaths,
-        remoteVaultRootPath: settings.remoteVaultRootPath ?? null
+        remoteVaultRootPath: settings.remoteVaultRootPath ?? null,
+        confirmSyncOperations: settings.confirmSyncOperations
       });
-    });
-  }
-
-  public getLogLevel(): LogLevel {
-    return this.settingsSubject.getValue().logLevel;
-  }
-
-  public setLogLevel(level: LogLevel): void {
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
-      logLevel: level
-    });
-  }
-
-  public getIgnoredPaths(): string[] {
-    return this.settingsSubject.getValue().ignoredPaths;
-  }
-
-  public setIgnoredPaths(patterns: string[]): void {
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
-      ignoredPaths: sanitizeIgnoredPaths(patterns)
-    });
-  }
-
-  public setRemoteVaultRootPath(path: string): void {
-    if (!path || path.trim() === '') {
-      path = this.defaultRemoteVaultRootPath;
-    } else {
-      path = normalizePath(path);
-    }
-
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
-      remoteVaultRootPath: path
-    });
-  }
-
-  public getVaultRootNodeUid(): Option.Option<ProtonFolderId> {
-    const settings = this.settingsSubject.getValue();
-    if (settings.vaultRootNodeUid) {
-      return Option.some(settings.vaultRootNodeUid);
-    } else {
-      return Option.none();
-    }
-  }
-
-  public setVaultRootNodeUid(vaultRootNodeUid: ProtonFolderId | null): void {
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
-      vaultRootNodeUid: vaultRootNodeUid
-    });
-  }
-
-  public setAccountEmail(email: string): void {
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
-      accountEmail: email
-    });
-  }
-
-  public getLatestProtonEventId(): string | null {
-    const settings = this.settingsSubject.getValue();
-    return settings.latestEventId?.eventId || null;
-  }
-
-  public setLatestProtonEventId(eventId: ProtonEventId | null): void {
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
-      latestEventId: eventId
     });
   }
 
@@ -192,6 +126,17 @@ class ObsidianSettingsStore {
     });
   }
 
+  public get<K extends keyof PluginSettings>(key: K): PluginSettings[K] {
+    return this.settingsSubject.getValue()[key];
+  }
+
+  public set<K extends keyof PluginSettings>(key: K, value: PluginSettings[K]): void {
+    this.settingsSubject.next({
+      ...this.settingsSubject.getValue(),
+      [key]: value
+    });
+  }
+
   public reset() {
     this.settingsSubject.next({
       ...this.settingsSubject.getValue(),
@@ -201,7 +146,7 @@ class ObsidianSettingsStore {
       lastLoginError: null,
       lastRefreshAt: null,
       sessionExpiresAt: null,
-      latestEventId: null
+      latestEventId: Option.none()
     });
   }
 }
@@ -219,6 +164,7 @@ interface PluginSettingsStorageModel {
   logLevel: LogLevel;
   ignoredPaths?: string[];
   remoteVaultRootPath: string | null;
+  confirmSyncOperations: boolean;
 }
 
 export interface PluginSettings {
@@ -228,12 +174,13 @@ export interface PluginSettings {
   lastRefreshAt: Date | null;
   sessionExpiresAt: Date | null;
   lastLoginError: string | null;
-  latestEventId: ProtonEventId | null;
-  vaultRootNodeUid: ProtonFolderId | null;
+  latestEventId: Option.Option<ProtonEventId>;
+  vaultRootNodeUid: Option.Option<ProtonFolderId>;
   enableFileLogging: boolean;
   logLevel: LogLevel;
   ignoredPaths: string[];
   remoteVaultRootPath: string;
+  confirmSyncOperations: boolean;
 }
 
 export enum LogLevel {
@@ -241,25 +188,4 @@ export enum LogLevel {
   info = 'info',
   warn = 'warn',
   error = 'error'
-}
-
-function sanitizeIgnoredPaths(patterns: string[]): string[] {
-  const sanitized: string[] = [];
-  const seen = new Set<string>();
-
-  for (const pattern of patterns) {
-    const trimmed = pattern.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    if (seen.has(trimmed)) {
-      continue;
-    }
-
-    seen.add(trimmed);
-    sanitized.push(trimmed);
-  }
-
-  return sanitized;
 }

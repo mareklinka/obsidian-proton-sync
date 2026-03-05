@@ -78,7 +78,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             .onClick(() => {
               const modal = new ProtonDriveLoginModal(this.app);
               modal.login$.pipe(take(1)).subscribe(credentials => {
-                settingsStore.setAccountEmail(credentials.email);
+                settingsStore.set('accountEmail', credentials.email);
 
                 this.loginSubject.next(credentials);
 
@@ -106,12 +106,12 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         .setDesc('One glob pattern per line. Paths are relative to vault root and ignored by both push and pull.')
         .addTextArea(text => {
           const commit = (value: string) => {
-            const nextPatterns = parseIgnoredPathsInput(value);
-            if (isSameStringArray(nextPatterns, settingsStore.getIgnoredPaths())) {
+            const newPatterns = parseIgnoredPathsInput(value);
+            if (isSameStringArray(newPatterns, settingsStore.get('ignoredPaths'))) {
               return;
             }
 
-            settingsStore.setIgnoredPaths(nextPatterns);
+            settingsStore.set('ignoredPaths', sanitizeIgnoredPaths(newPatterns));
           };
 
           text
@@ -127,6 +127,16 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
+        .setName('Show sync warnings')
+        .setDesc('Show "destructive operation" warnings before performing sync operations.')
+        .addToggle(toggle => {
+          toggle.setValue(settings.confirmSyncOperations);
+          toggle.onChange(value => {
+            settingsStore.set('confirmSyncOperations', value);
+          });
+        });
+
+      new Setting(containerEl)
         .setName('Log level')
         .setDesc('Minimum log severity to write to the developer console.')
         .addDropdown(dropdown => {
@@ -138,7 +148,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             .setValue(settings.logLevel)
             .onChange(value => {
               const logLevel = value as LogLevel;
-              settingsStore.setLogLevel(logLevel);
+              settingsStore.set('logLevel', logLevel);
               this.loggingChangedSubject.next({ isEnabled: true, minLevel: logLevel });
             });
         });
@@ -147,7 +157,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
   public hide() {
     // vault root is only updated on tab hide to avoid having to create the folders in Proton on every change
-    getObsidianSettingsStore().setRemoteVaultRootPath(this.remoteVaultRootPath);
+    getObsidianSettingsStore().set('remoteVaultRootPath', this.remoteVaultRootPath);
     this.stateSub?.unsubscribe();
     this.stateSub = undefined;
     super.hide();
@@ -221,4 +231,25 @@ function isSameStringArray(a: string[], b: string[]): boolean {
   }
 
   return true;
+}
+
+function sanitizeIgnoredPaths(patterns: string[]): string[] {
+  const sanitized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const pattern of patterns) {
+    const trimmed = pattern.trim();
+    if (!trimmed) {
+      continue;
+    }
+
+    if (seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    sanitized.push(trimmed);
+  }
+
+  return sanitized;
 }

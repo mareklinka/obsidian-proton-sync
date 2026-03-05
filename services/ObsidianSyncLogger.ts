@@ -68,7 +68,7 @@ class ObsidianSyncLogger {
 
   private getCurrentLevel(): LogLevel {
     try {
-      return getObsidianSettingsStore().getLogLevel();
+      return getObsidianSettingsStore().get('logLevel');
     } catch {
       return 'info';
     }

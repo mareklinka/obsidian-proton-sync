@@ -130,29 +130,26 @@ class SyncService {
     return this.stateSubject.value;
   }
 
-  public push() {
+  public push(pruneRemoteOrphans: boolean) {
     return Effect.gen(this, function* () {
       if (this.stateSubject.value.state !== 'idle') {
         yield* new SyncAlreadyInProgressError();
       }
 
-      yield* this.pushImpl().pipe(
-        Effect.catchAll(error =>
-          Effect.gen(this, function* () {
-            this.stateSubject.next({ state: 'idle' });
-            yield* error;
-          })
-        )
+      const idleEffect = Effect.sync(() => this.stateSubject.next({ state: 'idle' }));
+
+      yield* this.pushImpl(pruneRemoteOrphans).pipe(
+        Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect })
       );
     });
   }
 
-  private pushImpl() {
+  private pushImpl(pruneRemoteOrphans: boolean) {
     return Effect.gen(this, function* () {
       const logger = this.logger.withScope('push');
       logger.info('Starting config push');
 
-      const vaultRootNodeId = getObsidianSettingsStore().getVaultRootNodeUid();
+      const vaultRootNodeId = getObsidianSettingsStore().get('vaultRootNodeUid');
 
       if (Option.isNone(vaultRootNodeId)) {
         return yield* new VaultRootIdNotAvailableError();
@@ -253,36 +250,38 @@ class SyncService {
         }
       }
 
-      const pruneQ: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [
-        { local: localRoot, remote: remoteRoot }
-      ];
-      while (pruneQ.length > 0) {
-        const item = pruneQ.shift();
-        if (!item) {
-          continue;
-        }
-
-        for (const remoteChild of item.remote.children) {
-          if (remoteChild._tag === 'folder') {
-            const localFolder = item.local.children.find(
-              child => child._type === 'folder' && child.name === remoteChild.name
-            ) as VaultFolder | undefined;
-
-            if (!localFolder) {
-              syncOps.push({ type: 'deleteFolder', details: { id: remoteChild.id } });
-              continue;
-            }
-
-            pruneQ.push({ local: localFolder, remote: remoteChild });
+      if (pruneRemoteOrphans) {
+        const pruneQ: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [
+          { local: localRoot, remote: remoteRoot }
+        ];
+        while (pruneQ.length > 0) {
+          const item = pruneQ.shift();
+          if (!item) {
             continue;
           }
 
-          const localFile = item.local.children.find(
-            child => child._type === 'file' && child.name === remoteChild.name
-          );
+          for (const remoteChild of item.remote.children) {
+            if (remoteChild._tag === 'folder') {
+              const localFolder = item.local.children.find(
+                child => child._type === 'folder' && child.name === remoteChild.name
+              ) as VaultFolder | undefined;
 
-          if (!localFile) {
-            syncOps.push({ type: 'deleteFile', details: { id: remoteChild.id } });
+              if (!localFolder) {
+                syncOps.push({ type: 'deleteFolder', details: { id: remoteChild.id } });
+                continue;
+              }
+
+              pruneQ.push({ local: localFolder, remote: remoteChild });
+              continue;
+            } else {
+              const localFile = item.local.children.find(
+                child => child._type === 'file' && child.name === remoteChild.name
+              );
+
+              if (!localFile) {
+                syncOps.push({ type: 'deleteFile', details: { id: remoteChild.id } });
+              }
+            }
           }
         }
       }
@@ -373,13 +372,10 @@ class SyncService {
         yield* new SyncAlreadyInProgressError();
       }
 
+      const idleEffect = Effect.sync(() => this.stateSubject.next({ state: 'idle' }));
+
       yield* this.pullImpl(deleteLocalOrphans).pipe(
-        Effect.catchAll(error =>
-          Effect.gen(this, function* () {
-            this.stateSubject.next({ state: 'idle' });
-            yield* error;
-          })
-        )
+        Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect })
       );
     });
   }
@@ -389,7 +385,7 @@ class SyncService {
       const logger = this.logger.withScope('pull');
       logger.info('Starting config pull', { deleteLocalOrphans });
 
-      const vaultRootNodeId = getObsidianSettingsStore().getVaultRootNodeUid();
+      const vaultRootNodeId = getObsidianSettingsStore().get('vaultRootNodeUid');
 
       if (Option.isNone(vaultRootNodeId)) {
         return yield* new VaultRootIdNotAvailableError();
@@ -710,7 +706,7 @@ class SyncService {
       return true;
     }
 
-    const ignoredPaths = getObsidianSettingsStore().getIgnoredPaths();
+    const ignoredPaths = getObsidianSettingsStore().get('ignoredPaths');
     for (const pattern of ignoredPaths) {
       const normalizedPattern = normalizePath(pattern?.trim() ?? '');
       if (!normalizedPattern) {

@@ -1,8 +1,9 @@
-import { Effect } from 'effect';
+import { Effect, Option } from 'effect';
 import { Subject } from 'rxjs';
 
+import { getObsidianSettingsStore } from './ObsidianSettingsStore';
 import { getLogger } from './ObsidianSyncLogger';
-import { TreeEventSubscriptionFailed } from './proton-drive-types';
+import { ProtonEventId, TreeEventSubscriptionFailed } from './proton-drive-types';
 import { getProtonDriveClient } from '../proton/drive/ProtonDriveClient';
 
 import type { TreeEventScopeId } from './proton-drive-types';
@@ -40,6 +41,7 @@ class ProtonCloudObserver {
       try: async () => {
         this.subscription = await this.client.subscribeToTreeEvents(nodeId.treeEventScopeId, async cloudEvent => {
           this.logger.info(`Received cloud event for node ${nodeId.treeEventScopeId}`, cloudEvent);
+          getObsidianSettingsStore().set('latestEventId', Option.some(new ProtonEventId(cloudEvent.eventId)));
           this.cloudEventSubject.next();
         });
       },

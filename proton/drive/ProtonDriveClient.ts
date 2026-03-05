@@ -1,4 +1,5 @@
 import { MemoryCache, ProtonDriveClient, type ProtonDriveClientContructorParameters } from '@protontech/drive-sdk';
+import { Option } from 'effect';
 
 import { getProtonHttpClient } from './ObsidianHttpClient';
 import { getProtonAccount } from './ProtonAccount';
@@ -22,7 +23,10 @@ export const { init: initProtonDriveClient, get: getProtonDriveClient } = (funct
         srpModule: new PlaceholderSrpModule(),
         latestEventIdProvider: {
           getLatestEventId: (): string | null => {
-            return getObsidianSettingsStore().getLatestProtonEventId();
+            return Option.match(getObsidianSettingsStore().get('latestEventId'), {
+              onSome: latestEventId => latestEventId.eventId,
+              onNone: () => null
+            });
           }
         }
       }));

@@ -1,6 +1,7 @@
 import { Effect, Option } from 'effect';
 import { Notice } from 'obsidian';
 
+import { getObsidianSettingsStore } from './services/ObsidianSettingsStore';
 import { getLogger } from './services/ObsidianSyncLogger';
 import { getSyncService, SyncAlreadyInProgressError } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
@@ -32,7 +33,7 @@ export async function pushVault(app: App, confirm: boolean): Promise<void> {
         return;
       }
 
-      yield* syncService.push().pipe(
+      yield* syncService.push(false).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             progressModal.markCompleted();
@@ -126,6 +127,10 @@ export async function pullVault(app: App, confirm: boolean): Promise<void> {
 }
 
 async function confirmDestructiveAction(app: App, action: 'push' | 'pull'): Promise<boolean> {
+  if (!getObsidianSettingsStore().get('confirmSyncOperations')) {
+    return true;
+  }
+
   const confirmButtonLabel = action === 'push' ? 'Yes, push to Proton Drive' : 'Yes, pull from Proton Drive';
   const title = action === 'push' ? 'Proton Drive Sync - Push' : 'Proton Drive Sync - Pull';
   const confirmation = await Effect.runPromise(

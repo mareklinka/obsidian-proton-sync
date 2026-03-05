@@ -90,7 +90,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
           if (authState === 'connected') {
             const vaultRoot = yield* this.ensureVaultRootFolder(remoteVaultRootPath);
-            getObsidianSettingsStore().setVaultRootNodeUid(vaultRoot.id);
+            getObsidianSettingsStore().set('vaultRootNodeUid', Option.some(vaultRoot.id));
             yield* getProtonCloudObserver().subscribeToTreeChanges(vaultRoot.treeEventScopeId);
           } else if (authState === 'disconnected') {
             getProtonCloudObserver().unsubscribeFromTreeChanges();
@@ -99,7 +99,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
           Effect.catchAll(error => {
             return Effect.gen(this, function* () {
               this.logger.error('Error in vault root setup', error);
-              getObsidianSettingsStore().setVaultRootNodeUid(null);
+              getObsidianSettingsStore().set('vaultRootNodeUid', Option.none());
 
               return yield* error;
             });
@@ -200,7 +200,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.logger.info('Disconnecting from Proton Drive');
 
     await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
-    getObsidianSettingsStore().setVaultRootNodeUid(null);
+    getObsidianSettingsStore().set('vaultRootNodeUid', Option.none());
     new Notice('Disconnected from Proton Drive.');
   }
 
