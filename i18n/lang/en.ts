@@ -1,10 +1,6 @@
 export const en = {
   common: {
-    pluginName: 'Proton Drive Sync',
-    cancel: 'Cancel',
-    submit: 'Submit',
-    connect: 'Connect',
-    disconnect: 'Disconnect'
+    cancel: 'Cancel'
   },
   commands: {
     pushVault: 'Push vault to Proton Drive',
@@ -54,7 +50,6 @@ export const en = {
     confirmation: {
       pushTitle: 'Proton Drive Sync - Push',
       pullTitle: 'Proton Drive Sync - Pull',
-      message: 'This is a potentially destructive operation. Do you wish to proceed?',
       pushLabel: 'Push',
       pullLabel: 'Pull',
       pruneRemoteLabel: 'Prune remote vault',
