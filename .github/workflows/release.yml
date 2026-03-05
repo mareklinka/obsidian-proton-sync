@@ -99,6 +99,8 @@ jobs:
           gh release create "$tag" \
             --title="$tag" \
             --draft \
+            --generate-notes \
+            --prerelease \
             main.js manifest.json styles.css
 
       - name: Create and tag release
@@ -131,4 +133,5 @@ jobs:
           gh release create "$tag" \
             --title="$tag" \
             --draft \
+            --generate-notes \
             main.js manifest.json styles.css
