@@ -1,7 +1,6 @@
 import { Effect, Option } from 'effect';
 import { Notice } from 'obsidian';
 
-import { getObsidianSettingsStore } from './services/ObsidianSettingsStore';
 import { getLogger } from './services/ObsidianSyncLogger';
 import { getSyncService, SyncAlreadyInProgressError } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
@@ -10,8 +9,10 @@ import { getSyncProgressModal } from './ui/modals/sync-progress-modal';
 
 import type { App } from 'obsidian';
 
-export async function pushVault(app: App, confirm: boolean): Promise<void> {
-  if (confirm && !(await confirmDestructiveAction(app, 'push'))) {
+export async function pushVault(app: App): Promise<void> {
+  const confirmation = await confirmPrune(app, 'push');
+
+  if (!confirmation || !confirmation.confirmed) {
     return;
   }
 
@@ -33,7 +34,7 @@ export async function pushVault(app: App, confirm: boolean): Promise<void> {
         return;
       }
 
-      yield* syncService.push(false).pipe(
+      yield* syncService.push(confirmation.prune).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             progressModal.markCompleted();
@@ -71,8 +72,9 @@ export async function pushVault(app: App, confirm: boolean): Promise<void> {
   );
 }
 
-export async function pullVault(app: App, confirm: boolean): Promise<void> {
-  if (confirm && !(await confirmDestructiveAction(app, 'pull'))) {
+export async function pullVault(app: App): Promise<void> {
+  const confirmation = await confirmPrune(app, 'pull');
+  if (!confirmation || !confirmation.confirmed) {
     return;
   }
 
@@ -94,7 +96,7 @@ export async function pullVault(app: App, confirm: boolean): Promise<void> {
         return;
       }
 
-      yield* syncService.pull(false).pipe(
+      yield* syncService.pull(confirmation.prune).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             progressModal.markCompleted();
@@ -126,23 +128,22 @@ export async function pullVault(app: App, confirm: boolean): Promise<void> {
   );
 }
 
-async function confirmDestructiveAction(app: App, action: 'push' | 'pull'): Promise<boolean> {
-  if (!getObsidianSettingsStore().get('confirmSyncOperations')) {
-    return true;
-  }
+async function confirmPrune(
+  app: App,
+  action: 'push' | 'pull'
+): Promise<{ confirmed: boolean; prune: boolean } | false> {
+  const title = action === 'push' ? 'Push vault to Proton Drive' : 'Pull vault from Proton Drive';
+  const toggleLabel = action === 'push' ? 'Prune remote vault' : 'Prune local vault';
+  const toggleDescription =
+    action === 'push'
+      ? 'This will remove all remote files not present locally.'
+      : 'This will remove all local files not present in Proton Drive.';
+  const confirmButtonLabel = action === 'push' ? 'Push' : 'Pull';
 
-  const confirmButtonLabel = action === 'push' ? 'Yes, push to Proton Drive' : 'Yes, pull from Proton Drive';
-  const title = action === 'push' ? 'Proton Drive Sync - Push' : 'Proton Drive Sync - Pull';
   const confirmation = await Effect.runPromise(
     promptFromModal(
       app,
-      app =>
-        new ProtonDriveConfirmModal(
-          app,
-          title,
-          'This is a potentially destructive operation. Do you wish to proceed?',
-          confirmButtonLabel
-        )
+      app => new ProtonDriveConfirmModal(app, title, confirmButtonLabel, toggleLabel, toggleDescription)
     )
   );
 
@@ -150,5 +151,5 @@ async function confirmDestructiveAction(app: App, action: 'push' | 'pull'): Prom
     return false;
   }
 
-  return true;
+  return { confirmed: confirmation.value.confirmed, prune: confirmation.value.toggleValue };
 }

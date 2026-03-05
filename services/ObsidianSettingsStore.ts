@@ -43,8 +43,7 @@ class ObsidianSettingsStore {
     enableFileLogging: false,
     logLevel: LogLevel.info,
     ignoredPaths: [],
-    remoteVaultRootPath: '',
-    confirmSyncOperations: true
+    remoteVaultRootPath: ''
   });
   public readonly settings$ = this.settingsSubject.asObservable();
 
@@ -74,7 +73,6 @@ class ObsidianSettingsStore {
         enableFileLogging: loaded.enableFileLogging,
         logLevel: loaded.logLevel ?? LogLevel.info,
         ignoredPaths: loaded.ignoredPaths ?? [],
-        confirmSyncOperations: loaded.confirmSyncOperations ?? true,
         remoteVaultRootPath:
           !loaded.remoteVaultRootPath || loaded.remoteVaultRootPath === ''
             ? this.defaultRemoteVaultRootPath
@@ -100,8 +98,7 @@ class ObsidianSettingsStore {
         enableFileLogging: settings.enableFileLogging,
         logLevel: settings.logLevel,
         ignoredPaths: settings.ignoredPaths,
-        remoteVaultRootPath: settings.remoteVaultRootPath ?? null,
-        confirmSyncOperations: settings.confirmSyncOperations
+        remoteVaultRootPath: settings.remoteVaultRootPath ?? null
       });
     });
   }
@@ -164,7 +161,6 @@ interface PluginSettingsStorageModel {
   logLevel: LogLevel;
   ignoredPaths?: string[];
   remoteVaultRootPath: string | null;
-  confirmSyncOperations: boolean;
 }
 
 export interface PluginSettings {
@@ -180,7 +176,6 @@ export interface PluginSettings {
   logLevel: LogLevel;
   ignoredPaths: string[];
   remoteVaultRootPath: string;
-  confirmSyncOperations: boolean;
 }
 
 export enum LogLevel {

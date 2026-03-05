@@ -127,16 +127,6 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
-        .setName('Show sync warnings')
-        .setDesc('Show "destructive operation" warnings before performing sync operations.')
-        .addToggle(toggle => {
-          toggle.setValue(settings.confirmSyncOperations);
-          toggle.onChange(value => {
-            settingsStore.set('confirmSyncOperations', value);
-          });
-        });
-
-      new Setting(containerEl)
         .setName('Log level')
         .setDesc('Minimum log severity to write to the developer console.')
         .addDropdown(dropdown => {

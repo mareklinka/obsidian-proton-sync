@@ -130,7 +130,7 @@ class SyncService {
     return this.stateSubject.value;
   }
 
-  public push(pruneRemoteOrphans: boolean) {
+  public push(prune: boolean) {
     return Effect.gen(this, function* () {
       if (this.stateSubject.value.state !== 'idle') {
         yield* new SyncAlreadyInProgressError();
@@ -138,13 +138,11 @@ class SyncService {
 
       const idleEffect = Effect.sync(() => this.stateSubject.next({ state: 'idle' }));
 
-      yield* this.pushImpl(pruneRemoteOrphans).pipe(
-        Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect })
-      );
+      yield* this.pushImpl(prune).pipe(Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect }));
     });
   }
 
-  private pushImpl(pruneRemoteOrphans: boolean) {
+  private pushImpl(prune: boolean) {
     return Effect.gen(this, function* () {
       const logger = this.logger.withScope('push');
       logger.info('Starting config push');
@@ -250,7 +248,7 @@ class SyncService {
         }
       }
 
-      if (pruneRemoteOrphans) {
+      if (prune) {
         const pruneQ: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [
           { local: localRoot, remote: remoteRoot }
         ];
@@ -366,7 +364,7 @@ class SyncService {
     });
   }
 
-  public pull(deleteLocalOrphans = false) {
+  public pull(prune = false) {
     return Effect.gen(this, function* () {
       if (this.stateSubject.value.state !== 'idle') {
         yield* new SyncAlreadyInProgressError();
@@ -374,16 +372,14 @@ class SyncService {
 
       const idleEffect = Effect.sync(() => this.stateSubject.next({ state: 'idle' }));
 
-      yield* this.pullImpl(deleteLocalOrphans).pipe(
-        Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect })
-      );
+      yield* this.pullImpl(prune).pipe(Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect }));
     });
   }
 
-  private pullImpl(deleteLocalOrphans: boolean) {
+  private pullImpl(prune: boolean) {
     return Effect.gen(this, function* () {
       const logger = this.logger.withScope('pull');
-      logger.info('Starting config pull', { deleteLocalOrphans });
+      logger.info('Starting config pull', { deleteLocalOrphans: prune });
 
       const vaultRootNodeId = getObsidianSettingsStore().get('vaultRootNodeUid');
 
@@ -499,7 +495,7 @@ class SyncService {
           }
         }
 
-        if (deleteLocalOrphans) {
+        if (prune) {
           for (const localChild of localChildren) {
             const remoteMatch = item.remote.children.find(
               remoteChild =>

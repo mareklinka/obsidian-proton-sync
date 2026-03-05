@@ -136,7 +136,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       name: 'Push vault to Proton Drive',
       icon: 'cloud-upload',
       callback: () => {
-        void pushVault(this.app, true);
+        void pushVault(this.app);
       }
     });
 
@@ -145,7 +145,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       name: 'Pull vault from Proton Drive',
       icon: 'cloud-download',
       callback: () => {
-        void pullVault(this.app, true);
+        void pullVault(this.app);
       }
     });
 
@@ -246,9 +246,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   private async executeRegisteredSyncAction(action: ConfigSyncAction): Promise<void> {
     if (action === 'push') {
-      await pushVault(this.app, false);
+      await pushVault(this.app);
     } else if (action === 'pull') {
-      await pullVault(this.app, false);
+      await pullVault(this.app);
     }
   }
 
