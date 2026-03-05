@@ -1,5 +1,5 @@
 import { Effect, Option } from 'effect';
-import { normalizePath, getLanguage, Notice, Plugin } from 'obsidian';
+import { getLanguage, normalizePath, Notice, Plugin } from 'obsidian';
 import { combineLatest, distinctUntilChanged, map, type Subscription } from 'rxjs';
 
 import { pullVault, pushVault } from './actions';
@@ -12,9 +12,9 @@ import { getLogger } from './services/ConsoleLogger';
 import { initObsidianFileApi } from './services/ObsidianFileApi';
 import { initObsidianSecretStore } from './services/ObsidianSecretStore';
 import {
+  DEFAULT_SYNC_CONTAINER_NAME,
   getObsidianSettingsStore,
-  initObsidianSettingsStore,
-  DEFAULT_SYNC_CONTAINER_NAME
+  initObsidianSettingsStore
 } from './services/ObsidianSettingsStore';
 import { getProtonCloudObserver, initProtonCloudObserver } from './services/ProtonCloudObserver';
 import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
@@ -22,7 +22,7 @@ import { getSyncService, initSyncService } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
-import { ProtonDriveSyncActionModal, type ConfigSyncAction } from './ui/modals/sync-action-modal';
+import { type ConfigSyncAction, ProtonDriveSyncActionModal } from './ui/modals/sync-action-modal';
 import { initSyncProgressModal } from './ui/modals/sync-progress-modal';
 import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
 import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
@@ -106,16 +106,16 @@ export default class ProtonDriveSyncPlugin extends Plugin {
               this.logger.error('Error in vault root setup', error);
               getObsidianSettingsStore().set('vaultRootNodeUid', Option.none());
 
-            return yield* error;
-          });
-        }),
-        Effect.catchTags({
-          InvalidName: () => Effect.succeed(new Notice(t.main.notices.invalidFolderName)),
-          ItemAlreadyExists: () => Effect.succeed(new Notice(t.main.notices.folderAlreadyExists)),
-          MyFilesRootFilesNotFound: () => Effect.succeed(new Notice(t.main.notices.myFilesRootNotFound)),
-          GenericProtonDriveError: () => Effect.succeed(new Notice(t.main.notices.setupVaultRootFailed))
-        })
-      );
+              return yield* error;
+            });
+          }),
+          Effect.catchTags({
+            InvalidName: () => Effect.succeed(new Notice(t.main.notices.invalidFolderName)),
+            ItemAlreadyExists: () => Effect.succeed(new Notice(t.main.notices.folderAlreadyExists)),
+            MyFilesRootFilesNotFound: () => Effect.succeed(new Notice(t.main.notices.myFilesRootNotFound)),
+            GenericProtonDriveError: () => Effect.succeed(new Notice(t.main.notices.setupVaultRootFailed))
+          })
+        );
 
         await Effect.runPromise(effect);
       }

@@ -1,13 +1,12 @@
+import type { CachedCryptoMaterial } from '@protontech/drive-sdk';
 import { MemoryCache, ProtonDriveClient, type ProtonDriveClientContructorParameters } from '@protontech/drive-sdk';
 import { Option } from 'effect';
 
+import { getObsidianSettingsStore } from '../../services/ObsidianSettingsStore';
+import { buildSrpProofsFromParams } from '../auth/ProtonSrp';
 import { getProtonHttpClient } from './ObsidianHttpClient';
 import { getProtonAccount } from './ProtonAccount';
 import { createOpenPgpCrypto } from './ProtonOpenPgp';
-import { getObsidianSettingsStore } from '../../services/ObsidianSettingsStore';
-import { buildSrpProofsFromParams } from '../auth/ProtonSrp';
-
-import type { CachedCryptoMaterial } from '@protontech/drive-sdk';
 
 export const { init: initProtonDriveClient, get: getProtonDriveClient } = (function () {
   let instance: ProtonDriveClient | null = null;

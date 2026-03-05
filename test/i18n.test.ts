@@ -6,8 +6,8 @@ describe('i18n fallback resolution', () => {
   it('falls back from region locale to base locale and English', () => {
     const service = initI18n('fr-CA');
 
-    expect(service.t.commands.pushVault).toBe('Envoyer le coffre vers Proton Drive');
-    expect(service.t.actions.notices.pushCompleted).toBe('Envoi terminé.');
+    expect(service.t.commands.pushVault).toBe('Push vault to Proton Drive');
+    expect(service.t.actions.notices.pushCompleted).toBe('Push completed.');
     expect(service.t.settings.title).toBe('Proton Drive Sync');
   });
 

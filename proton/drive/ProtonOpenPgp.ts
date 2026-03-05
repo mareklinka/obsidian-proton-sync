@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { OpenPGPCryptoWithCryptoProxy, type OpenPGPCrypto, type OpenPGPCryptoProxy } from '@protontech/drive-sdk';
+import { type OpenPGPCrypto, type OpenPGPCryptoProxy, OpenPGPCryptoWithCryptoProxy } from '@protontech/drive-sdk';
 import {
-  VERIFICATION_STATUS,
   type PrivateKey,
   type PublicKey,
-  type SessionKey
+  type SessionKey,
+  VERIFICATION_STATUS
 } from '@protontech/drive-sdk/dist/crypto';
 import * as openpgp from 'openpgp';
 

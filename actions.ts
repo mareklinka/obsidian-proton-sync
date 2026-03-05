@@ -1,4 +1,5 @@
 import { Effect, Option } from 'effect';
+import type { App } from 'obsidian';
 import { Notice } from 'obsidian';
 
 import { getI18n } from './i18n';
@@ -7,8 +8,6 @@ import { getSyncService, SyncAlreadyInProgressError } from './services/SyncServi
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
 import { getSyncProgressModal } from './ui/modals/sync-progress-modal';
-
-import type { App } from 'obsidian';
 
 export async function pushVault(app: App): Promise<void> {
   const { t } = getI18n();

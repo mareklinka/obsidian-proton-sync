@@ -1,11 +1,10 @@
+import type { App } from 'obsidian';
 import { Modal, Setting } from 'obsidian';
 import { type Subscription } from 'rxjs';
 
 import { getI18n } from '../../i18n';
 import { getSyncService } from '../../services/SyncService';
 import { toConfigSyncProgressViewState } from '../config-sync-progress-state';
-
-import type { App } from 'obsidian';
 
 export const { init: initSyncProgressModal, get: getSyncProgressModal } = (function () {
   let instance: SyncProgressModal | null = null;

@@ -1,9 +1,8 @@
+import type { App, ButtonComponent } from 'obsidian';
 import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
 import { getI18n } from '../../i18n';
-
-import type { App, ButtonComponent } from 'obsidian';
 
 export class ProtonDriveConfirmModal extends Modal {
   private readonly submittedSubject = new Subject<{ confirmed: boolean; toggleValue: boolean }>();

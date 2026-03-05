@@ -3,13 +3,12 @@ import { Platform, requestUrl, type RequestUrlResponse } from 'obsidian';
 import { BehaviorSubject, distinctUntilChanged } from 'rxjs';
 
 import { getObsidianSecretStore } from '../../services/ObsidianSecretStore';
+import type { CaptchaVerification } from '../../ui/modals/captcha-modal';
 import { PROTON_BASE_URL } from '../Constants';
 import { deleteJson, getJson, postJson } from '../ProtonApiClient';
-import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64 } from './ProtonSrp';
-
 import type { ProtonSession } from './ProtonSession';
 import type { ProtonAuthInfo, ProtonSrpProofs } from './ProtonSrp';
-import type { CaptchaVerification } from '../../ui/modals/captcha-modal';
+import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64 } from './ProtonSrp';
 const AUTH_SCOPE = 'full locked';
 const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
 const SALTED_PASSPHRASES_SECRET_KEY = 'proton-drive-sync-salted-passphrases';

@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { toConfigSyncProgressViewState } from '../ui/config-sync-progress-state';
-
 import type { SyncState } from '../services/SyncService';
+import { toConfigSyncProgressViewState } from '../ui/config-sync-progress-state';
 
 describe('toConfigSyncProgressViewState', () => {
   it('returns indeterminate progress for local tree build', () => {

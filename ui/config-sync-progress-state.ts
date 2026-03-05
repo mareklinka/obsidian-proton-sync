@@ -1,5 +1,4 @@
 import { getI18n } from '../i18n';
-
 import type { SyncState } from '../services/SyncService';
 
 export interface ConfigSyncProgressViewState {

@@ -1,10 +1,9 @@
 import { Option } from 'effect';
 import { BehaviorSubject } from 'rxjs';
 
-import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
-
 import type { ProtonSession } from '../proton/auth/ProtonSession';
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
 
 export const DEFAULT_SYNC_CONTAINER_NAME = 'obsidian-notes';
 

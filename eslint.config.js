@@ -1,8 +1,8 @@
 import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 import prettierConfig from 'eslint-config-prettier';
-import importPlugin from 'eslint-plugin-import';
 import noOnlyTests from 'eslint-plugin-no-only-tests';
+import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -20,22 +20,13 @@ export default defineConfig(
       sourceType: 'module'
     },
     plugins: {
-      import: importPlugin,
-      'no-only-tests': noOnlyTests
+      'no-only-tests': noOnlyTests,
+      'simple-import-sort': simpleImportSort
     },
     rules: {
       'no-only-tests/no-only-tests': 'error',
-      'import/order': [
-        'error',
-        {
-          groups: ['builtin', 'external', 'internal', ['parent', 'sibling', 'index'], 'type'],
-          'newlines-between': 'always',
-          alphabetize: {
-            order: 'asc',
-            caseInsensitive: true
-          }
-        }
-      ]
+      'simple-import-sort/imports': 'error',
+      'simple-import-sort/exports': 'error'
     }
   },
   {

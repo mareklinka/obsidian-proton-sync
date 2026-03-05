@@ -1,7 +1,10 @@
+import type { MaybeNode, ProtonDriveClient, UploadMetadata } from '@protontech/drive-sdk';
 import { NodeType, ValidationError } from '@protontech/drive-sdk';
 import { APICodeError } from '@protontech/drive-sdk/dist/internal/apiService';
 import { Effect, Option } from 'effect';
 
+import { getProtonDriveClient } from '../proton/drive/ProtonDriveClient';
+import type { NotAFolderError } from './proton-drive-types';
 import {
   FileUploadError,
   GenericProtonDriveError,
@@ -13,10 +16,6 @@ import {
   ProtonFolderId,
   TreeEventScopeId
 } from './proton-drive-types';
-import { getProtonDriveClient } from '../proton/drive/ProtonDriveClient';
-
-import type { NotAFolderError } from './proton-drive-types';
-import type { MaybeNode, ProtonDriveClient, UploadMetadata } from '@protontech/drive-sdk';
 
 export interface ProtonFolder {
   _tag: 'folder';

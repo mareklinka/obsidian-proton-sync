@@ -1,12 +1,11 @@
+import type { Plugin } from 'obsidian';
 import { combineLatest, map, type Observable } from 'rxjs';
 
 import { getI18n } from '../i18n';
-import { toLoginIcon, toLoginLabel } from './ui-helpers';
+import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 import { type SyncState } from '../services/SyncService';
 import { getSyncProgressModal } from './modals/sync-progress-modal';
-
-import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
-import type { Plugin } from 'obsidian';
+import { toLoginIcon, toLoginLabel } from './ui-helpers';
 
 export interface SyncStatusBarController {
   dispose(): void;

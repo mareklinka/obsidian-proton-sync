@@ -5,12 +5,9 @@ import picomatch from 'picomatch';
 import { BehaviorSubject } from 'rxjs';
 
 import { getLogger } from './ConsoleLogger';
+import type { VaultFolder } from './ObsidianFileApi';
 import { canonicalizePath, getObsidianFileApi } from './ObsidianFileApi';
 import { getObsidianSettingsStore } from './ObsidianSettingsStore';
-import { ProtonFolderId, TreeEventScopeId } from './proton-drive-types';
-import { getProtonDriveApi } from './ProtonDriveApi';
-
-import type { VaultFolder } from './ObsidianFileApi';
 import type {
   GenericProtonDriveError,
   InvalidNameError,
@@ -18,7 +15,9 @@ import type {
   ProtonApiError,
   ProtonFileId
 } from './proton-drive-types';
+import { ProtonFolderId, TreeEventScopeId } from './proton-drive-types';
 import type { ProtonFile, ProtonFolder } from './ProtonDriveApi';
+import { getProtonDriveApi } from './ProtonDriveApi';
 
 const EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH = '/plugins/proton-drive-sync';
 
@@ -357,7 +356,6 @@ class SyncService {
         });
 
         yield* driveApi.trashNodes(deleteNodeIds);
-        processedOps += deleteNodeIds.length;
       }
 
       this.stateSubject.next({ state: 'idle' });

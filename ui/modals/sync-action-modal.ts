@@ -1,9 +1,8 @@
+import type { App } from 'obsidian';
 import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
 import { getI18n } from '../../i18n';
-
-import type { App } from 'obsidian';
 
 export type ConfigSyncAction = 'push' | 'pull';
 

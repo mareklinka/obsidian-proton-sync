@@ -1,5 +1,4 @@
 import { getI18n } from '../i18n';
-
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 
 export function toLoginLabel(state: ProtonAuthStatus): string {

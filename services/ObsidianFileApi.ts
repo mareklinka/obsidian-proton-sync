@@ -1,10 +1,9 @@
 import { sha1 } from '@noble/hashes/legacy.js';
 import { Effect } from 'effect';
+import type { Vault } from 'obsidian';
 import { normalizePath } from 'obsidian';
 
 import { getLogger } from './ConsoleLogger';
-
-import type { Vault } from 'obsidian';
 
 export const { init: initObsidianFileApi, get: getObsidianFileApi } = (function () {
   let instance: ObsidianFileApi | null = null;
