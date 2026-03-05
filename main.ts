@@ -7,6 +7,7 @@ import { getProtonSessionService, initProtonSessionService } from './proton/auth
 import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
 import { initProtonAccount } from './proton/drive/ProtonAccount';
 import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
+import { getLogger } from './services/ConsoleLogger';
 import { initObsidianFileApi } from './services/ObsidianFileApi';
 import { initObsidianSecretStore } from './services/ObsidianSecretStore';
 import {
@@ -14,7 +15,6 @@ import {
   initObsidianSettingsStore,
   DEFAULT_SYNC_CONTAINER_NAME
 } from './services/ObsidianSettingsStore';
-import { getLogger } from './services/ObsidianSyncLogger';
 import { getProtonCloudObserver, initProtonCloudObserver } from './services/ProtonCloudObserver';
 import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
 import { getSyncService, initSyncService } from './services/SyncService';

@@ -2,7 +2,7 @@ import { sha1 } from '@noble/hashes/legacy.js';
 import { Effect } from 'effect';
 import { normalizePath } from 'obsidian';
 
-import { getLogger } from './ObsidianSyncLogger';
+import { getLogger } from './ConsoleLogger';
 
 import type { Vault } from 'obsidian';
 

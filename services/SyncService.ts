@@ -4,9 +4,9 @@ import { normalizePath, type Vault } from 'obsidian';
 import picomatch from 'picomatch';
 import { BehaviorSubject } from 'rxjs';
 
+import { getLogger } from './ConsoleLogger';
 import { canonicalizePath, getObsidianFileApi } from './ObsidianFileApi';
 import { getObsidianSettingsStore } from './ObsidianSettingsStore';
-import { getLogger } from './ObsidianSyncLogger';
 import { ProtonFolderId, TreeEventScopeId } from './proton-drive-types';
 import { getProtonDriveApi } from './ProtonDriveApi';
 

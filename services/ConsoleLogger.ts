@@ -10,16 +10,16 @@ const LOG_SEVERITY: Record<LogLevel, number> = {
 };
 
 export const getLogger = (function () {
-  return function (scope: string): ObsidianSyncLogger {
-    return new ObsidianSyncLogger(scope);
+  return function (scope: string): ConsoleLogger {
+    return new ConsoleLogger(scope);
   };
 })();
 
-class ObsidianSyncLogger {
+class ConsoleLogger {
   public constructor(private readonly scope: string | undefined = undefined) {}
 
-  public withScope(scope: string): ObsidianSyncLogger {
-    return new ObsidianSyncLogger(this.scope ? `${this.scope}:${scope}` : scope);
+  public withScope(scope: string): ConsoleLogger {
+    return new ConsoleLogger(this.scope ? `${this.scope}:${scope}` : scope);
   }
 
   public debug(message: string, ...data: unknown[]): void {

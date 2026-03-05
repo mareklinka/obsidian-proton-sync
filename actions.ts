@@ -1,7 +1,7 @@
 import { Effect, Option } from 'effect';
 import { Notice } from 'obsidian';
 
-import { getLogger } from './services/ObsidianSyncLogger';
+import { getLogger } from './services/ConsoleLogger';
 import { getSyncService, SyncAlreadyInProgressError } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';

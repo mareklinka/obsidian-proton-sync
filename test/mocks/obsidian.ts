@@ -11,3 +11,10 @@ export class Notice {
 export class PluginSettingTab {}
 export class Setting {}
 export class TFolder {}
+
+export function normalizePath(path: string): string {
+  return path
+    .replace(/\\+/g, '/')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+|\/+$/g, '');
+}

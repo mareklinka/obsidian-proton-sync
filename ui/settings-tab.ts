@@ -3,8 +3,8 @@ import { combineLatest, Subject, take } from 'rxjs';
 
 import { ProtonDriveLoginModal } from './modals/login-modal';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
+import { getLogger } from '../services/ConsoleLogger';
 import { getObsidianSettingsStore, LogLevel } from '../services/ObsidianSettingsStore';
-import { getLogger } from '../services/ObsidianSyncLogger';
 
 import type ProtonDriveSyncPlugin from '../main';
 import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';

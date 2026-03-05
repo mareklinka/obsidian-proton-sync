@@ -27,15 +27,6 @@ export class ProtonDriveSyncActionModal extends Modal {
       text: 'Choose whether to push your local vault data to Proton Drive, or pull remote data to local. This operation synchronizes both notes and vault configuration.'
     });
 
-    const warningEl = contentEl.createDiv({ cls: 'proton-sync-disclosure' });
-    warningEl.createEl('p', {
-      cls: 'proton-sync-disclosure__title',
-      text: '⚠️ Potentially destructive operation'
-    });
-    warningEl.createEl('p', {
-      text: 'Sync may overwrite existing content when conflicts are detected. Please ensure your vault is backed up before proceeding.'
-    });
-
     new Setting(contentEl)
       .addButton(button =>
         button

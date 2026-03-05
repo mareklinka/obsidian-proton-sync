@@ -19,7 +19,15 @@ const CAPTCHA_FALLBACK_APPVERSION = 'Other';
 
 export const SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-export interface ProtonAuthResponse {
+export type ProtonAuthStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export type ProtonSignInDelegates = {
+  requestTwoFactorCode: () => Effect.Effect<Option.Option<string>, never>;
+  requestMailboxPassword: () => Effect.Effect<Option.Option<string>, never>;
+  requestCaptchaChallenge: (captchaUrl: string) => Effect.Effect<Option.Option<CaptchaVerification>, never>;
+};
+
+interface ProtonAuthResponse {
   UserID: string;
   UID: string;
   ExpiresIn: number;
@@ -34,7 +42,7 @@ export interface ProtonAuthResponse {
   PasswordMode?: number;
 }
 
-export type ProtonSessionState =
+type ProtonSessionState =
   | {
       state: 'ok';
       session: ProtonSession;
@@ -42,14 +50,6 @@ export type ProtonSessionState =
   | { state: 'error'; message: string }
   | { state: 'disconnected' }
   | { state: 'logged-out' };
-
-export type ProtonAuthStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
-
-export type ProtonSignInDelegates = {
-  requestTwoFactorCode: () => Effect.Effect<Option.Option<string>, never>;
-  requestMailboxPassword: () => Effect.Effect<Option.Option<string>, never>;
-  requestCaptchaChallenge: (captchaUrl: string) => Effect.Effect<Option.Option<CaptchaVerification>, never>;
-};
 
 interface ProtonApiError<T> {
   Code: number;

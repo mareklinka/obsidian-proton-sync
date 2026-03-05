@@ -1,8 +1,8 @@
 import { Effect, Option } from 'effect';
 import { Subject } from 'rxjs';
 
+import { getLogger } from './ConsoleLogger';
 import { getObsidianSettingsStore } from './ObsidianSettingsStore';
-import { getLogger } from './ObsidianSyncLogger';
 import { ProtonEventId, TreeEventSubscriptionFailed } from './proton-drive-types';
 import { getProtonDriveClient } from '../proton/drive/ProtonDriveClient';
 
