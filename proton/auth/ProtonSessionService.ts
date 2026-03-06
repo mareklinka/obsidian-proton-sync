@@ -3,6 +3,7 @@ import { Platform, requestUrl, type RequestUrlResponse } from 'obsidian';
 import { BehaviorSubject, distinctUntilChanged } from 'rxjs';
 
 import { getObsidianSecretStore } from '../../services/ObsidianSecretStore';
+import { getObsidianSettingsStore } from '../../services/ObsidianSettingsStore';
 import type { CaptchaVerification } from '../../ui/modals/captcha-modal';
 import { PROTON_BASE_URL } from '../Constants';
 import { deleteJson, getJson, postJson } from '../ProtonApiClient';
@@ -250,6 +251,7 @@ class ProtonSessionService {
 
       this.session = { state: 'logged-out' };
       this.authStatusSubject.next('disconnected');
+      getObsidianSettingsStore().set('accountEmail', '');
 
       yield* this.destroySession(session.session);
     });
