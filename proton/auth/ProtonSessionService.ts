@@ -287,7 +287,7 @@ class ProtonSessionService {
       this.secretStore.clear(SESSION_STORAGE_KEY);
 
       try {
-        await deleteJson<ProtonKeySaltsResponse>('/auth/v4', session, this.appVersionHeader);
+        await deleteJson('/auth/v4', session, this.appVersionHeader);
       } catch {
         // session deletion is best-effort, we ignore any errors here
       }
