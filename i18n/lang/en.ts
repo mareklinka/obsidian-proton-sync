@@ -17,6 +17,8 @@ export const en = {
         captchaRequired: 'Captcha is required to login. Login aborted.',
         twoFactorRequired: 'Two-factor code is required to login. Login aborted.',
         mailboxPasswordRequired: 'Mailbox password is required to login. Login aborted.',
+        masterPasswordRequired: 'Master password is required to protect your session. Login aborted.',
+        secureStorageFailed: 'Failed to securely persist encrypted credentials. Login aborted.',
         protonApiCommunicationFailed: (message: string) =>
           `Failed to communicate with Proton API: ${message}. Login aborted.`
       },
@@ -42,6 +44,9 @@ export const en = {
       pullCompleted: 'Pull completed.',
       signInRequired: 'Please sign in to Proton Drive before syncing.',
       sessionActivationFailed: 'Saved session could not be activated. Please sign in again.',
+      sessionDataInvalid: 'Saved session data is invalid and has been cleared. Please sign in again.',
+      masterPasswordRequired: 'Master password is required to activate the saved session.',
+      masterPasswordInvalid: 'Master password is invalid or saved encrypted data is corrupted.',
       syncCancelled: 'Sync cancelled.',
       syncAlreadyInProgress: 'A sync is already in progress. Please wait for it to complete.',
       vaultRootUnavailable: 'Vault root ID is not available. Please ensure your Proton account is connected correctly.',
@@ -146,6 +151,16 @@ export const en = {
       passwordName: 'Mailbox password',
       passwordDescription: 'Required for Proton accounts that use a separate mailbox password.',
       submit: 'Submit'
+    },
+    masterPassword: {
+      unlockTitle: 'Unlock Proton Drive session',
+      setupTitle: 'Set up master password',
+      description: 'A master password is used to protect your Proton Drive session data. Never stored or logged.',
+      passwordName: 'Master password',
+      passwordDescription:
+        'This can be your regular Proton account password or a separate password used only for this purpose.',
+      unlockButton: 'Unlock',
+      setupButton: 'Continue'
     },
     captcha: {
       title: 'CAPTCHA verification required',

@@ -17,6 +17,7 @@ import { initSyncService } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
+import { ProtonDriveMasterPasswordModal } from './ui/modals/master-password-modal';
 import { type ConfigSyncAction, ProtonDriveSyncActionModal } from './ui/modals/sync-action-modal';
 import { initSyncProgressModal } from './ui/modals/sync-progress-modal';
 import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
@@ -103,36 +104,36 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     const app = this.app;
 
     await Effect.runPromise(
-      Effect.gen(
-        (this,
-        function* () {
-          yield* getProtonSessionService().signIn(credentials.email.trim(), credentials.password, {
-            requestTwoFactorCode: () => promptFromModal(app, app => new ProtonDriveTwoFactorModal(app)),
-            requestMailboxPassword: () => promptFromModal(app, app => new ProtonDriveMailboxPasswordModal(app)),
-            requestCaptchaChallenge: (captchaUrl: string) =>
-              promptFromModal(app, app => new ProtonDriveCaptchaModal(app, captchaUrl))
-          });
+      Effect.gen(function* () {
+        yield* getProtonSessionService().signIn(credentials.email.trim(), credentials.password, {
+          requestTwoFactorCode: () => promptFromModal(app, app => new ProtonDriveTwoFactorModal(app)),
+          requestMailboxPassword: () => promptFromModal(app, app => new ProtonDriveMailboxPasswordModal(app)),
+          requestCaptchaChallenge: (captchaUrl: string) =>
+            promptFromModal(app, app => new ProtonDriveCaptchaModal(app, captchaUrl)),
+          requestMasterPassword: () => promptFromModal(app, app => new ProtonDriveMasterPasswordModal(app, 'setup'))
+        });
 
-          const sessionService = getProtonSessionService();
-          const currentSession = sessionService.getCurrentSession();
+        const sessionService = getProtonSessionService();
+        const currentSession = sessionService.getCurrentSession();
 
-          if (Option.isSome(currentSession)) {
-            const settingsStore = getObsidianSettingsStore();
-            settingsStore.set('lastLoginAt', new Date());
-            settingsStore.set('lastRefreshAt', new Date());
-            settingsStore.set('sessionExpiresAt', currentSession.value.expiresAt);
-          }
-
-          yield* sessionService.deactivateSession();
-        })
-      ).pipe(
+        if (Option.isSome(currentSession)) {
+          const settingsStore = getObsidianSettingsStore();
+          settingsStore.set('lastLoginAt', new Date());
+          settingsStore.set('lastRefreshAt', new Date());
+          settingsStore.set('sessionExpiresAt', currentSession.value.expiresAt);
+        }
+      }).pipe(
         Effect.catchTags({
           CaptchaDataNotProvidedError: () => Effect.succeed(new Notice(t.main.notices.login.captchaDataNotProvided)),
           CaptchaRequiredError: () => Effect.succeed(new Notice(t.main.notices.login.captchaRequired)),
           TwoFactorCodeRequiredError: () => Effect.succeed(new Notice(t.main.notices.login.twoFactorRequired)),
           EncryptionPasswordRequiredError: () =>
             Effect.succeed(new Notice(t.main.notices.login.mailboxPasswordRequired)),
+          MasterPasswordRequiredError: () => Effect.succeed(new Notice(t.main.notices.login.masterPasswordRequired)),
+          SecretEncryptionFailedError: () => Effect.succeed(new Notice(t.main.notices.login.secureStorageFailed)),
           ProtonApiCommunicationError: error =>
+            Effect.succeed(new Notice(t.main.notices.login.protonApiCommunicationFailed(error.message))),
+          CryptographyError: error =>
             Effect.succeed(new Notice(t.main.notices.login.protonApiCommunicationFailed(error.message)))
         })
       )

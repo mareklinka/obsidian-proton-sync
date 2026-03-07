@@ -2,7 +2,12 @@ import { Data, Effect, Option } from 'effect';
 import { Platform, requestUrl, type RequestUrlResponse } from 'obsidian';
 import { BehaviorSubject, distinctUntilChanged } from 'rxjs';
 
-import { getObsidianSecretStore } from '../../services/ObsidianSecretStore';
+import type {
+  PersistedSecretsInvalidFormatError,
+  SecretDecryptionFailedError,
+  SecretEncryptionFailedError
+} from '../../services/EncryptedSecretStore';
+import { getEncryptedSecretStore } from '../../services/EncryptedSecretStore';
 import { getObsidianSettingsStore } from '../../services/ObsidianSettingsStore';
 import type { CaptchaVerification } from '../../ui/modals/captcha-modal';
 import { PROTON_BASE_URL } from '../Constants';
@@ -11,13 +16,11 @@ import type { ProtonSession } from './ProtonSession';
 import type { ProtonAuthInfo, ProtonSrpProofs } from './ProtonSrp';
 import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64 } from './ProtonSrp';
 const AUTH_SCOPE = 'full locked';
-const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
-const SALTED_PASSPHRASES_SECRET_KEY = 'proton-drive-sync-salted-passphrases';
 
 // this is only used on Mobile where the CSP policy for frame-ancestors prevents us from properly displaying the captcha challenge
 const CAPTCHA_FALLBACK_APPVERSION = 'Other';
 
-export const SESSION_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+export { POST_SYNC_MEMORY_CLEAR_DELAY_MS } from '../../services/EncryptedSecretStore';
 
 export type ProtonAuthStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -25,6 +28,7 @@ export type ProtonSignInDelegates = {
   requestTwoFactorCode: () => Effect.Effect<Option.Option<string>, never>;
   requestMailboxPassword: () => Effect.Effect<Option.Option<string>, never>;
   requestCaptchaChallenge: (captchaUrl: string) => Effect.Effect<Option.Option<CaptchaVerification>, never>;
+  requestMasterPassword: () => Effect.Effect<Option.Option<string>, never>;
 };
 
 interface ProtonAuthResponse {
@@ -41,15 +45,6 @@ interface ProtonAuthResponse {
   };
   PasswordMode?: number;
 }
-
-type ProtonSessionState =
-  | {
-      state: 'ok';
-      session: ProtonSession;
-    }
-  | { state: 'error'; message: string }
-  | { state: 'disconnected' }
-  | { state: 'logged-out' };
 
 interface ProtonApiError<T> {
   Code: number;
@@ -87,27 +82,11 @@ class ProtonSessionService {
   private readonly authStatusSubject = new BehaviorSubject<ProtonAuthStatus>('disconnected');
   public readonly authState$ = this.authStatusSubject.pipe(distinctUntilChanged());
 
-  private refreshIntervalId: ReturnType<typeof globalThis.setInterval> | null = null;
+  private readonly encryptedSecretStore = getEncryptedSecretStore();
 
-  private session: ProtonSessionState = { state: 'disconnected' };
-  private saltedKeyPasswords: Record<string, string> = {};
+  constructor(public readonly appVersionHeader: string) {}
 
-  private secretStore: ReturnType<typeof getObsidianSecretStore>;
-
-  constructor(public readonly appVersionHeader: string) {
-    this.secretStore = getObsidianSecretStore();
-  }
-
-  public hasPersistedSession(): boolean {
-    const stored = this.secretStore.get(SESSION_STORAGE_KEY);
-    return Boolean(stored && stored.trim() !== '');
-  }
-
-  public signIn(
-    email: string,
-    password: string,
-    delegates: ProtonSignInDelegates
-  ): Effect.Effect<void, ProtonSessionError> {
+  public signIn(email: string, password: string, delegates: ProtonSignInDelegates) {
     let authResponse: ProtonAuthResponse | null = null;
 
     return Effect.gen(this, function* () {
@@ -137,29 +116,25 @@ class ProtonSessionService {
         accessToken: authResponse.AccessToken
       });
 
-      this.saltedKeyPasswords = keyPasswords;
-      this.secretStore.set(SALTED_PASSPHRASES_SECRET_KEY, JSON.stringify(keyPasswords));
-
-      this.session = {
-        state: 'ok',
-        session: {
-          uid: authResponse.UID,
-          userId: authResponse.UserID || null,
-          accessToken: authResponse.AccessToken,
-          refreshToken: authResponse.RefreshToken,
-          scope: authResponse.Scope || null,
-          createdAt: now,
-          updatedAt: now,
-          expiresAt: new Date(now.getTime() + authResponse.ExpiresIn * 1000),
-          lastRefreshAt: now
-        }
+      const session: ProtonSession = {
+        uid: authResponse.UID,
+        userId: authResponse.UserID || null,
+        accessToken: authResponse.AccessToken,
+        refreshToken: authResponse.RefreshToken,
+        scope: authResponse.Scope || null,
+        createdAt: now,
+        updatedAt: now,
+        expiresAt: new Date(now.getTime() + authResponse.ExpiresIn * 1000),
+        lastRefreshAt: now
       };
 
-      this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(this.session.session));
+      const masterPassword = yield* this.resolveMasterPassword(delegates.requestMasterPassword());
+
+      yield* this.persistEncryptedSessionData(session, keyPasswords, masterPassword);
+
+      yield* this.encryptedSecretStore.cancelScheduledUnlockedDataClear();
 
       this.authStatusSubject.next('connected');
-
-      this.startAutoRefresh();
     }).pipe(
       Effect.catchAll(e =>
         Effect.gen(this, function* () {
@@ -178,15 +153,21 @@ class ProtonSessionService {
   }
 
   public getCurrentSession(): Option.Option<ProtonSession> {
-    if (this.session.state === 'ok') {
-      return Option.some(this.session.session);
+    const unlocked = this.encryptedSecretStore.getUnlockedSessionData();
+    if (Option.isSome(unlocked)) {
+      return Option.some(unlocked.value.session);
     }
 
     return Option.none();
   }
 
-  public getSaltedKeyPasswords(): Record<string, string> {
-    return this.saltedKeyPasswords;
+  public getSaltedKeyPasswords(): Option.Option<Record<string, string>> {
+    const unlocked = this.encryptedSecretStore.getUnlockedSessionData();
+    if (Option.isSome(unlocked)) {
+      return Option.some(unlocked.value.saltedPassphrases);
+    }
+
+    return Option.none();
   }
 
   private authenticateWithCaptcha(
@@ -242,19 +223,15 @@ class ProtonSessionService {
 
   public signOut(): Effect.Effect<void> {
     return Effect.gen(this, function* () {
-      const session = this.session;
+      const currentSession = this.getCurrentSession();
 
-      this.stopAutoRefresh();
-      this.secretStore.clear(SESSION_STORAGE_KEY);
-      this.secretStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
-      this.saltedKeyPasswords = {};
-
-      this.session = { state: 'logged-out' };
+      yield* this.encryptedSecretStore.cancelScheduledUnlockedDataClear();
+      yield* this.encryptedSecretStore.clearSessionData();
       this.authStatusSubject.next('disconnected');
       getObsidianSettingsStore().set('accountEmail', '');
 
-      if (session && session.state === 'ok') {
-        yield* this.destroySession(session.session);
+      if (Option.isSome(currentSession)) {
+        yield* this.destroySession(currentSession.value);
       }
     });
   }
@@ -265,97 +242,51 @@ class ProtonSessionService {
     });
   }
 
-  public activatePersistedSession(): Effect.Effect<void, ProtonApiCommunicationError | PersistedSessionNotFoundError> {
+  public activatePersistedSession(
+    requestMasterPassword: Effect.Effect<Option.Option<string>, never>
+  ): Effect.Effect<
+    void,
+    | PersistedSessionNotFoundError
+    | PersistedSecretsInvalidFormatError
+    | MasterPasswordRequiredError
+    | SecretDecryptionFailedError
+  > {
     return Effect.gen(this, function* () {
       this.authStatusSubject.next('connecting');
+      yield* this.encryptedSecretStore.cancelScheduledUnlockedDataClear();
 
-      const stored = this.secretStore.get(SESSION_STORAGE_KEY);
-      const saltedPasswordsJson = this.secretStore.get(SALTED_PASSPHRASES_SECRET_KEY);
-      const saltedPasswords = JSON.parse(saltedPasswordsJson ? saltedPasswordsJson : '{}') as Record<string, string>;
-
-      if (!stored || stored.trim() === '' || Object.keys(saltedPasswords).length === 0) {
+      if (!this.encryptedSecretStore.hasPersistedSessionData()) {
         this.authStatusSubject.next('disconnected');
         return yield* new PersistedSessionNotFoundError();
       }
 
-      const persistedSession = JSON.parse(stored) as ProtonSession;
+      const unlocked = this.encryptedSecretStore.getUnlockedSessionData();
 
-      yield* this.refreshSession(persistedSession).pipe(
-        Effect.catchTag('ProtonApiCommunicationError', error =>
-          Effect.gen(this, function* () {
-            this.secretStore.clear(SESSION_STORAGE_KEY);
-            this.secretStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
-            this.saltedKeyPasswords = {};
-            this.session = { state: 'disconnected' };
-            this.authStatusSubject.next('error');
+      if (Option.isNone(unlocked)) {
+        const masterPassword = yield* this.resolveMasterPassword(requestMasterPassword);
 
-            return yield* error;
-          })
-        )
-      );
+        yield* this.encryptedSecretStore.loadSessionData(masterPassword);
+      }
 
-      this.saltedKeyPasswords = saltedPasswords;
-      this.startAutoRefresh();
+      this.authStatusSubject.next('connected');
     });
   }
 
   public deactivateSession(): Effect.Effect<void> {
-    return Effect.sync(() => {
-      this.stopAutoRefresh();
-      this.saltedKeyPasswords = {};
-      this.session = { state: 'disconnected' };
+    return Effect.gen(this, function* () {
+      yield* this.encryptedSecretStore.cancelScheduledUnlockedDataClear();
+      yield* this.encryptedSecretStore.clearUnlockedSessionData();
       this.authStatusSubject.next('disconnected');
     });
   }
 
   private destroySession(session: { uid: string; accessToken: string }): Effect.Effect<void, never> {
     return Effect.promise(async () => {
-      this.secretStore.clear(SESSION_STORAGE_KEY);
-
       try {
         await deleteJson('/auth/v4', session, this.appVersionHeader);
       } catch {
         // session deletion is best-effort, we ignore any errors here
       }
-    });
-  }
-
-  private refreshSession(session: ProtonSession): Effect.Effect<void, ProtonApiCommunicationError> {
-    return Effect.gen(this, function* () {
-      const state = encodeBase64(this.randomToken(32));
-      const body = {
-        UID: session.uid,
-        RefreshToken: session.refreshToken,
-        ResponseType: 'token',
-        GrantType: 'refresh_token',
-        RedirectURI: 'https://protonmail.ch',
-        State: state,
-        AccessToken: session.accessToken,
-        Scope: session.scope
-      };
-
-      const response = yield* this.request<ProtonAuthResponse>('/auth/v4/refresh', body, {
-        'x-pm-uid': session.uid,
-        authorization: `Bearer ${session.accessToken}`
-      });
-
-      const refreshedAt = new Date();
-
-      this.session = {
-        state: 'ok',
-        session: {
-          ...session,
-          uid: response.UID || session.uid,
-          accessToken: response.AccessToken,
-          refreshToken: response.RefreshToken,
-          scope: response.Scope || session.scope,
-          updatedAt: refreshedAt,
-          expiresAt: new Date(refreshedAt.getTime() + response.ExpiresIn * 1000),
-          lastRefreshAt: refreshedAt
-        }
-      };
-      this.secretStore.set(SESSION_STORAGE_KEY, JSON.stringify(this.session.session));
-      this.authStatusSubject.next('connected');
     });
   }
 
@@ -473,6 +404,19 @@ class ProtonSessionService {
     });
   }
 
+  private resolveMasterPassword(
+    requestMasterPassword: Effect.Effect<Option.Option<string>, never>
+  ): Effect.Effect<string, MasterPasswordRequiredError> {
+    return Effect.gen(function* () {
+      const password = yield* requestMasterPassword;
+      if (Option.isNone(password) || !password.value.trim()) {
+        return yield* new MasterPasswordRequiredError();
+      }
+
+      return password.value;
+    });
+  }
+
   private buildSrpProofs(
     authInfo: ProtonAuthInfo,
     email: string,
@@ -572,47 +516,18 @@ class ProtonSessionService {
     });
   }
 
-  private startAutoRefresh(): void {
-    if (this.refreshIntervalId !== null) {
-      return;
-    }
-
-    this.refreshIntervalId = globalThis.setInterval(async () => {
-      await Effect.runPromise(this.refreshSessionIfNeeded());
-    }, SESSION_REFRESH_INTERVAL_MS);
-  }
-
-  private stopAutoRefresh(): void {
-    if (this.refreshIntervalId === null) {
-      return;
-    }
-
-    globalThis.clearInterval(this.refreshIntervalId);
-    this.refreshIntervalId = null;
-  }
-
-  private refreshSessionIfNeeded(): Effect.Effect<void, ProtonApiCommunicationError> {
-    return Effect.gen(this, function* () {
-      const session = this.session;
-      if (!session || session.state !== 'ok') {
-        return;
-      }
-
-      const expiresAt = new Date(session.session.expiresAt).getTime();
-      const timeToExpiry = expiresAt - new Date().getTime();
-
-      if (timeToExpiry > SESSION_REFRESH_INTERVAL_MS) {
-        return;
-      }
-
-      yield* this.refreshSession(session.session);
-    });
-  }
-
-  private randomToken(byteLength: number): Uint8Array {
-    const bytes = new Uint8Array(byteLength);
-    globalThis.crypto.getRandomValues(bytes);
-    return bytes;
+  private persistEncryptedSessionData(
+    session: ProtonSession,
+    saltedPassphrases: Record<string, string>,
+    masterPassword: string
+  ): Effect.Effect<void, SecretEncryptionFailedError> {
+    return this.encryptedSecretStore.persistSessionData(
+      {
+        session,
+        saltedPassphrases
+      },
+      masterPassword
+    );
   }
 }
 
@@ -630,14 +545,19 @@ export type ProtonSessionError =
   | CryptographyError
   | TwoFactorCodeRequiredError
   | EncryptionPasswordRequiredError
+  | MasterPasswordRequiredError
   | CaptchaRequiredError
   | CaptchaDataNotProvidedError
-  | PersistedSessionNotFoundError;
+  | PersistedSessionNotFoundError
+  | PersistedSecretsInvalidFormatError
+  | SecretEncryptionFailedError
+  | SecretDecryptionFailedError;
 
 export class ProtonApiCommunicationError extends Data.TaggedError('ProtonApiCommunicationError') {}
 export class CryptographyError extends Data.TaggedError('CryptographyError') {}
 export class TwoFactorCodeRequiredError extends Data.TaggedError('TwoFactorCodeRequiredError') {}
 export class EncryptionPasswordRequiredError extends Data.TaggedError('EncryptionPasswordRequiredError') {}
+export class MasterPasswordRequiredError extends Data.TaggedError('MasterPasswordRequiredError') {}
 export class CaptchaRequiredError extends Data.TaggedError('CaptchaRequiredError') {}
 export class CaptchaDataNotProvidedError extends Data.TaggedError('CaptchaDataNotProvidedError') {}
 export class PersistedSessionNotFoundError extends Data.TaggedError('PersistedSessionNotFoundError') {}

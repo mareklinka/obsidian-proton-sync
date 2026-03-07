@@ -4,8 +4,9 @@ import { combineLatest, Subject, take } from 'rxjs';
 
 import { getI18n } from '../i18n';
 import type ProtonDriveSyncPlugin from '../main';
-import { getProtonSessionService, type ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import { type ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 import { getLogger } from '../services/ConsoleLogger';
+import { getEncryptedSecretStore } from '../services/EncryptedSecretStore';
 import type { PluginSettings } from '../services/ObsidianSettingsStore';
 import { getObsidianSettingsStore, LogLevel } from '../services/ObsidianSettingsStore';
 import { ProtonDriveLoginModal } from './modals/login-modal';
@@ -41,7 +42,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     this.stateSub?.unsubscribe();
     this.stateSub = combineLatest([this.authState, settingsStore.settings$]).subscribe(([authStatus, settings]) => {
       const { t } = getI18n();
-      const hasPersistedSession = getProtonSessionService().hasPersistedSession();
+      const hasPersistedSession = getEncryptedSecretStore().hasPersistedSessionData();
 
       containerEl.empty();
 

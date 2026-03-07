@@ -24,11 +24,11 @@ class ObsidianSecretStore {
   }
 
   set(key: ObsidianSecretKey, value: string): void {
-    void this.store.setSecret(key, value);
+    this.store.setSecret(key, value);
   }
 
   clear(key: ObsidianSecretKey): void {
-    void this.store.setSecret(key, '');
+    this.store.setSecret(key, '');
   }
 }
 

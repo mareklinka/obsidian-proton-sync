@@ -23,6 +23,7 @@ vi.mock('../services/ObsidianSettingsStore', () => ({
 describe('ProtonSessionService', () => {
   const SESSION_STORAGE_KEY = 'proton-drive-sync-session';
   const SALTED_PASSPHRASES_SECRET_KEY = 'proton-drive-sync-salted-passphrases';
+  const MASTER_PASSWORD = 'correct-horse-battery-staple';
 
   const secretData = new Map<string, string>();
 
@@ -48,9 +49,17 @@ describe('ProtonSessionService', () => {
       set: (key: string, value: string) => {
         secretData.set(key, value);
       },
+      setEffect: (key: string, value: string) =>
+        Effect.sync(() => {
+          secretData.set(key, value);
+        }),
       clear: (key: string) => {
         secretData.set(key, '');
-      }
+      },
+      clearEffect: (key: string) =>
+        Effect.sync(() => {
+          secretData.set(key, '');
+        })
     });
 
     getObsidianSettingsStoreMock.mockReturnValue({
@@ -69,24 +78,30 @@ describe('ProtonSessionService', () => {
     });
   });
 
-  it('reports whether a persisted session exists', async () => {
-    const mod = await import('../proton/auth/ProtonSessionService');
+  async function persistEncryptedSessionData(session: ProtonSession, salted: Record<string, string>): Promise<void> {
+    const encryptedStoreModule = await import('../services/EncryptedSecretStore');
+    const encryptedStore = encryptedStoreModule.getEncryptedSecretStore();
 
-    secretData.set(SESSION_STORAGE_KEY, JSON.stringify(storedSession));
+    await Effect.runPromise(
+      encryptedStore.persistSessionData(
+        {
+          session,
+          saltedPassphrases: salted
+        },
+        MASTER_PASSWORD
+      )
+    );
 
-    const service = mod.initProtonSessionService('test-app-version');
-
-    expect(service.hasPersistedSession()).toBe(true);
-
-    secretData.set(SESSION_STORAGE_KEY, '');
-    expect(service.hasPersistedSession()).toBe(false);
-  });
+    await Effect.runPromise(encryptedStore.clearUnlockedSessionData());
+  }
 
   it('fails activation when persisted session is missing', async () => {
     const mod = await import('../proton/auth/ProtonSessionService');
     const service = mod.initProtonSessionService('test-app-version');
 
-    const result = await Effect.runPromise(Effect.either(service.activatePersistedSession()));
+    const result = await Effect.runPromise(
+      Effect.either(service.activatePersistedSession(Effect.succeed(Option.some(MASTER_PASSWORD))))
+    );
 
     expect(result._tag).toBe('Left');
     if (result._tag === 'Left') {
@@ -96,47 +111,90 @@ describe('ProtonSessionService', () => {
     expect(Option.isNone(service.getCurrentSession())).toBe(true);
   });
 
-  it('activates persisted session and hydrates salted passphrases into memory', async () => {
+  it('activates encrypted persisted session and hydrates salted passphrases into memory', async () => {
     const mod = await import('../proton/auth/ProtonSessionService');
 
-    secretData.set(SESSION_STORAGE_KEY, JSON.stringify(storedSession));
-    secretData.set(
-      SALTED_PASSPHRASES_SECRET_KEY,
-      JSON.stringify({ keyA: 'salted-passphrase-a', keyB: 'salted-passphrase-b' })
-    );
+    await persistEncryptedSessionData(storedSession, {
+      keyA: 'salted-passphrase-a',
+      keyB: 'salted-passphrase-b'
+    });
 
     const service = mod.initProtonSessionService('test-app-version');
 
-    await Effect.runPromise(service.activatePersistedSession());
+    await Effect.runPromise(service.activatePersistedSession(Effect.succeed(Option.some(MASTER_PASSWORD))));
 
     const session = service.getCurrentSession();
     expect(Option.isSome(session)).toBe(true);
     if (Option.isSome(session)) {
-      expect(session.value.accessToken).toBe('access-refreshed');
-      expect(session.value.refreshToken).toBe('refresh-refreshed');
+      expect(session.value.accessToken).toBe('access-123');
+      expect(session.value.refreshToken).toBe('refresh-123');
     }
 
-    expect(service.getSaltedKeyPasswords()).toEqual({
-      keyA: 'salted-passphrase-a',
-      keyB: 'salted-passphrase-b'
+    expect(service.getSaltedKeyPasswords()).toEqual(
+      Option.some({
+        keyA: 'salted-passphrase-a',
+        keyB: 'salted-passphrase-b'
+      })
+    );
+  });
+
+  it('clears plaintext persisted data and fails activation when encrypted envelope is missing', async () => {
+    const mod = await import('../proton/auth/ProtonSessionService');
+    const service = mod.initProtonSessionService('test-app-version');
+
+    secretData.set(SESSION_STORAGE_KEY, JSON.stringify(storedSession));
+    secretData.set(SALTED_PASSPHRASES_SECRET_KEY, JSON.stringify({ keyA: 'salted-passphrase-a' }));
+
+    const result = await Effect.runPromise(
+      Effect.either(service.activatePersistedSession(Effect.succeed(Option.some(MASTER_PASSWORD))))
+    );
+
+    expect(result._tag).toBe('Left');
+    if (result._tag === 'Left') {
+      expect(result.left).toMatchObject({ _tag: 'PersistedSecretsInvalidFormatError' });
+    }
+
+    expect(secretData.get(SESSION_STORAGE_KEY)).toBe('');
+    expect(secretData.get(SALTED_PASSPHRASES_SECRET_KEY)).toBe('');
+    expect(Option.isNone(service.getCurrentSession())).toBe(true);
+  });
+
+  it('requires master password to activate persisted session', async () => {
+    const mod = await import('../proton/auth/ProtonSessionService');
+
+    await persistEncryptedSessionData(storedSession, {
+      keyA: 'salted-passphrase-a'
     });
+
+    const service = mod.initProtonSessionService('test-app-version');
+
+    const result = await Effect.runPromise(
+      Effect.either(service.activatePersistedSession(Effect.succeed(Option.none())))
+    );
+
+    expect(result._tag).toBe('Left');
+    if (result._tag === 'Left') {
+      expect(result.left).toMatchObject({ _tag: 'MasterPasswordRequiredError' });
+    }
   });
 
   it('deactivates current session and clears in-memory salted passphrases only', async () => {
     const mod = await import('../proton/auth/ProtonSessionService');
 
-    secretData.set(SESSION_STORAGE_KEY, JSON.stringify(storedSession));
-    secretData.set(SALTED_PASSPHRASES_SECRET_KEY, JSON.stringify({ keyA: 'salted-passphrase-a' }));
+    await persistEncryptedSessionData(storedSession, { keyA: 'salted-passphrase-a' });
 
     const service = mod.initProtonSessionService('test-app-version');
 
-    await Effect.runPromise(service.activatePersistedSession());
+    await Effect.runPromise(service.activatePersistedSession(Effect.succeed(Option.some(MASTER_PASSWORD))));
     await Effect.runPromise(service.deactivateSession());
 
     expect(Option.isNone(service.getCurrentSession())).toBe(true);
     expect(service.getSaltedKeyPasswords()).toEqual({});
 
     // persisted session should still exist so the user remains logically signed in
-    expect(service.hasPersistedSession()).toBe(true);
+    const encryptedStoreModule = await import('../services/EncryptedSecretStore');
+    const encryptedStore = encryptedStoreModule.getEncryptedSecretStore();
+    expect(encryptedStore.hasPersistedSessionData()).toBe(true);
+    expect(encryptedStore.getUnlockedSessionData()).toBe(Option.none());
   });
 });

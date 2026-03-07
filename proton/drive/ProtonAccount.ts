@@ -94,7 +94,7 @@ class ProtonAccount implements ProtonDriveAccount {
 
     const currentSession = this.sessionService.getCurrentSession();
     if (Option.isNone(currentSession)) {
-      throw new Error('No Proton addresses found for this account.');
+      return [];
     }
 
     const response = await getJson<ProtonAddressesResponse>(
@@ -105,12 +105,17 @@ class ProtonAccount implements ProtonDriveAccount {
 
     const addresses = response.Addresses ?? [];
     if (!addresses.length) {
-      throw new Error('No Proton addresses returned from API.');
+      return [];
     }
 
     const user = await this.getUser();
 
-    const userKey = await resolveUserKey(user.Keys ?? [], this.sessionService.getSaltedKeyPasswords());
+    const saltedPassphrases = this.sessionService.getSaltedKeyPasswords();
+    if (Option.isNone(saltedPassphrases)) {
+      return [];
+    }
+
+    const userKey = await resolveUserKey(user.Keys ?? [], saltedPassphrases.value);
 
     const mapped = await Promise.all(addresses.map(address => mapAddress(address, userKey!)));
 

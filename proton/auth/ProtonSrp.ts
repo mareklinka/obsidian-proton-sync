@@ -1,8 +1,9 @@
 import { md5 } from '@noble/hashes/legacy.js';
 import { sha512 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import bcrypt from 'bcryptjs';
 import * as openpgp from 'openpgp';
+
+import { bcryptBase64Encode, bcryptHashWithSalt } from '../../services/CryptoHelpers';
 
 export interface ProtonAuthInfo {
   Version: number;
@@ -41,8 +42,6 @@ hcTpUY8mAhsMAAD/XQD8DxNI6E78meodQI+wLsrKLeHn32iLvUqJbVDhfWSU
 WO4BAMcm1u02t4VKw++ttECPt+HUgPUq5pqQWe5Q2cW4TMsE
 =Y4Mw
 -----END PGP PUBLIC KEY BLOCK-----`;
-
-const BCRYPT_BASE64_ALPHABET = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 
 export async function buildSrpProofs(
   authInfo: ProtonAuthInfo,
@@ -97,7 +96,7 @@ export function decodeBase64(data: string): Uint8Array {
 export function computeKeyPasswordFromSalt(password: string, keySalt: string): string {
   const saltBytes = decodeBase64(keySalt);
   const encodedSalt = bcryptBase64Encode(saltBytes);
-  const hashed = bcryptHashWithSalt(password, encodedSalt);
+  const hashed = bcryptHashWithSalt(password, encodedSalt, 10);
   const hashedBytes = Buffer.from(hashed, 'utf8');
   const tail = hashedBytes.slice(-31);
   return Buffer.from(tail).toString('utf8');
@@ -128,7 +127,7 @@ function hashPassword(
 function hashPasswordVersion3(password: string, salt: Uint8Array, modulus: Uint8Array): Uint8Array {
   const saltWithPepper = Buffer.concat([Buffer.from(salt), Buffer.from('proton')]);
   const encodedSalt = bcryptBase64Encode(saltWithPepper);
-  const bcryptHash = bcryptHashWithSalt(password, encodedSalt);
+  const bcryptHash = bcryptHashWithSalt(password, encodedSalt, 10);
   return expandHash(Buffer.concat([Buffer.from(bcryptHash), Buffer.from(modulus)]));
 }
 
@@ -138,7 +137,7 @@ function hashPasswordVersion2(password: string, username: string, modulus: Uint8
 
 function hashPasswordVersion1(password: string, username: string, modulus: Uint8Array): Uint8Array {
   const md5Hash = bytesToHex(md5(new TextEncoder().encode(username.toLowerCase())));
-  const bcryptHash = bcryptHashWithSalt(password, md5Hash);
+  const bcryptHash = bcryptHashWithSalt(password, md5Hash, 10);
   return expandHash(Buffer.concat([Buffer.from(bcryptHash), Buffer.from(modulus)]));
 }
 
@@ -159,47 +158,6 @@ function expandHash(data: Buffer): Uint8Array {
   const part2 = sha512(Buffer.concat([data, Buffer.from([2])]));
   const part3 = sha512(Buffer.concat([data, Buffer.from([3])]));
   return Uint8Array.from(Buffer.concat([part0, part1, part2, part3]));
-}
-
-function bcryptBase64Encode(input: Uint8Array): string {
-  let output = '';
-  let index = 0;
-
-  while (index < input.length) {
-    let c1 = input[index++];
-    output += BCRYPT_BASE64_ALPHABET[(c1 >> 2) & 0x3f];
-    c1 = (c1 & 0x03) << 4;
-
-    if (index >= input.length) {
-      output += BCRYPT_BASE64_ALPHABET[c1 & 0x3f];
-      break;
-    }
-
-    const c2 = input[index++];
-    c1 |= (c2 >> 4) & 0x0f;
-    output += BCRYPT_BASE64_ALPHABET[c1 & 0x3f];
-    c1 = (c2 & 0x0f) << 2;
-
-    if (index >= input.length) {
-      output += BCRYPT_BASE64_ALPHABET[c1 & 0x3f];
-      break;
-    }
-
-    const c3 = input[index++];
-    c1 |= (c3 >> 6) & 0x03;
-    output += BCRYPT_BASE64_ALPHABET[c1 & 0x3f];
-    output += BCRYPT_BASE64_ALPHABET[c3 & 0x3f];
-  }
-
-  return output;
-}
-
-function bcryptHashWithSalt(password: string, salt: string): string {
-  try {
-    return bcrypt.hashSync(password, `$2y$10$${salt}`);
-  } catch {
-    return bcrypt.hashSync(password, `$2b$10$${salt}`);
-  }
 }
 
 async function verifyAndDecodeModulus(signedModulus: string): Promise<Uint8Array> {

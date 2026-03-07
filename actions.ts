@@ -3,11 +3,16 @@ import type { App } from 'obsidian';
 import { normalizePath, Notice } from 'obsidian';
 
 import { getI18n } from './i18n';
-import { getProtonSessionService, PersistedSessionNotFoundError } from './proton/auth/ProtonSessionService';
+import {
+  getProtonSessionService,
+  MasterPasswordRequiredError,
+  PersistedSessionNotFoundError
+} from './proton/auth/ProtonSessionService';
 import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
 import { initProtonAccount } from './proton/drive/ProtonAccount';
 import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { getLogger } from './services/ConsoleLogger';
+import { getEncryptedSecretStore } from './services/EncryptedSecretStore';
 import { getObsidianSettingsStore } from './services/ObsidianSettingsStore';
 import type { ProtonFolder } from './services/ProtonDriveApi';
 import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
@@ -15,6 +20,7 @@ import { beginSyncOperationCancellation, clearSyncOperationCancellation } from '
 import { getSyncService, SyncAlreadyInProgressError, SyncCancelledError } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
+import { ProtonDriveMasterPasswordModal } from './ui/modals/master-password-modal';
 import { getSyncProgressModal } from './ui/modals/sync-progress-modal';
 
 export function pushVault(app: App): Effect.Effect<void, never, never> {
@@ -43,7 +49,7 @@ export function pushVault(app: App): Effect.Effect<void, never, never> {
 
     progressModal.open();
 
-    const ready = yield* prepareSyncOperation(operationController.signal);
+    const ready = yield* prepareSyncOperation(app, operationController.signal);
     if (!ready) {
       return;
     }
@@ -59,7 +65,7 @@ export function pushVault(app: App): Effect.Effect<void, never, never> {
       )
     );
   }).pipe(
-    Effect.tapBoth({ onSuccess: teardownAfterSync, onFailure: teardownAfterSync }),
+    Effect.tapBoth({ onSuccess: finalizeSync, onFailure: finalizeSync }),
     Effect.catchTag('SyncAlreadyInProgressError', () =>
       Effect.sync(() => {
         progressModal.close();
@@ -126,7 +132,7 @@ export function pullVault(app: App): Effect.Effect<void, never, never> {
 
     progressModal.open();
 
-    const ready = yield* prepareSyncOperation(operationController.signal);
+    const ready = yield* prepareSyncOperation(app, operationController.signal);
     if (!ready) {
       return;
     }
@@ -142,7 +148,7 @@ export function pullVault(app: App): Effect.Effect<void, never, never> {
       )
     );
   }).pipe(
-    Effect.tapBoth({ onSuccess: teardownAfterSync, onFailure: teardownAfterSync }),
+    Effect.tapBoth({ onSuccess: finalizeSync, onFailure: finalizeSync }),
     Effect.catchTag('SyncAlreadyInProgressError', () =>
       Effect.sync(() => {
         progressModal.close();
@@ -198,21 +204,42 @@ function confirmOperation(
   });
 }
 
-function prepareSyncOperation(signal: AbortSignal) {
+function prepareSyncOperation(app: App, signal: AbortSignal) {
   const { t } = getI18n();
   return Effect.gen(function* () {
     getSyncService().setAuthenticationState();
     yield* ensureNotCancelled(signal);
 
     const settingsStore = getObsidianSettingsStore();
-    const sessionService = getProtonSessionService();
+    const secretStore = getEncryptedSecretStore();
 
-    if (!sessionService.hasPersistedSession()) {
-      return yield* new PersistedSessionNotFoundError();
+    const unlockedSessionData = secretStore.getUnlockedSessionData();
+
+    if (Option.isNone(unlockedSessionData)) {
+      if (!secretStore.hasPersistedSessionData()) {
+        return yield* new PersistedSessionNotFoundError();
+      }
+
+      const masterPassword = yield* promptFromModal(app, app => new ProtonDriveMasterPasswordModal(app, 'unlock'));
+
+      if (Option.isNone(masterPassword)) {
+        return yield* new MasterPasswordRequiredError();
+      }
+
+      yield* secretStore.loadSessionData(masterPassword.value);
     }
 
+    const sessionService = getProtonSessionService();
+
     yield* ensureNotCancelled(signal);
-    yield* sessionService.activatePersistedSession();
+    const currentSessionBeforeActivation = sessionService.getCurrentSession();
+
+    if (Option.isNone(currentSessionBeforeActivation)) {
+      yield* sessionService.activatePersistedSession(
+        promptFromModal(app, app => new ProtonDriveMasterPasswordModal(app, 'unlock'))
+      );
+    }
+
     yield* ensureNotCancelled(signal);
 
     const currentSession = sessionService.getCurrentSession();
@@ -243,8 +270,14 @@ function prepareSyncOperation(signal: AbortSignal) {
           case 'PersistedSessionNotFoundError':
             new Notice(t.actions.notices.signInRequired);
             break;
-          case 'ProtonApiCommunicationError':
-            new Notice(t.actions.notices.sessionActivationFailed);
+          case 'PersistedSecretsInvalidFormatError':
+            new Notice(t.actions.notices.sessionDataInvalid);
+            break;
+          case 'MasterPasswordRequiredError':
+            new Notice(t.actions.notices.masterPasswordRequired);
+            break;
+          case 'SecretDecryptionFailedError':
+            new Notice(t.actions.notices.masterPasswordInvalid);
             break;
           case 'InvalidName':
             new Notice(t.main.notices.invalidFolderName);
@@ -275,6 +308,7 @@ function prepareSyncOperation(signal: AbortSignal) {
             break;
         }
 
+        getSyncProgressModal().close();
         getSyncService().setIdleState();
 
         return false;
@@ -283,11 +317,9 @@ function prepareSyncOperation(signal: AbortSignal) {
   );
 }
 
-function teardownAfterSync() {
-  return Effect.gen(function* () {
-    getLogger('SyncActions').warn('Cleaning up after sync operation');
-    const sessionService = getProtonSessionService();
-    yield* sessionService.deactivateSession();
+function finalizeSync() {
+  return Effect.sync(() => {
+    getEncryptedSecretStore().scheduleMemoryClear();
     clearSyncOperationCancellation();
   });
 }
