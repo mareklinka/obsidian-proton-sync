@@ -5,6 +5,7 @@ import { Subject } from 'rxjs';
 
 import { getProtonDriveClient } from '../proton/drive/ProtonDriveClient';
 import { getLogger } from './ConsoleLogger';
+import { getEncryptedSecretStore } from './EncryptedSecretStore';
 import { getObsidianSettingsStore } from './ObsidianSettingsStore';
 import type { TreeEventScopeId } from './proton-drive-types';
 import { ProtonEventId, TreeEventSubscriptionFailed } from './proton-drive-types';
@@ -33,7 +34,12 @@ class ProtonCloudObserver {
 
   #subscription: EventSubscription | null = null;
 
-  public constructor(private readonly client: ProtonDriveClient) {}
+  public constructor(private readonly client: ProtonDriveClient) {
+    getEncryptedSecretStore().sessionLocked$.subscribe(() => {
+      this.#logger.info('Session locked, unsubscribing from tree changes');
+      this.unsubscribeFromTreeChanges();
+    });
+  }
 
   public subscribeToTreeChanges(nodeId: TreeEventScopeId): Effect.Effect<void, TreeEventSubscriptionFailed> {
     return Effect.tryPromise({

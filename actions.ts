@@ -14,6 +14,7 @@ import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { getLogger } from './services/ConsoleLogger';
 import { getEncryptedSecretStore } from './services/EncryptedSecretStore';
 import { getObsidianSettingsStore } from './services/ObsidianSettingsStore';
+import { initProtonCloudObserver } from './services/ProtonCloudObserver';
 import type { ProtonFolder } from './services/ProtonDriveApi';
 import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
 import { beginSyncOperationCancellation, clearSyncOperationCancellation } from './services/SyncOperationCancellation';
@@ -258,6 +259,10 @@ function prepareSyncOperation(app: App, signal: AbortSignal) {
     const vaultRoot = yield* ensureVaultRootFolder(settingsStore.get('remoteVaultRootPath'), signal);
     settingsStore.set('vaultRootNodeUid', Option.some(vaultRoot.id));
 
+    const observer = initProtonCloudObserver();
+    observer.unsubscribeFromTreeChanges();
+    observer.subscribeToTreeChanges(vaultRoot.treeEventScopeId);
+
     return true;
   }).pipe(
     Effect.catchAll(e =>
@@ -318,7 +323,7 @@ function prepareSyncOperation(app: App, signal: AbortSignal) {
 
 function finalizeSync() {
   return Effect.sync(() => {
-    getEncryptedSecretStore().scheduleMemoryClear();
+    getEncryptedSecretStore().scheduleLock();
     clearSyncOperationCancellation();
   });
 }

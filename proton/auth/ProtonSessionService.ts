@@ -134,7 +134,7 @@ class ProtonSessionService {
 
       yield* this.#persistEncryptedSessionData(session, keyPasswords, masterPassword);
 
-      yield* this.#encryptedSecretStore.cancelScheduledUnlockedDataClear();
+      this.#encryptedSecretStore.cancelScheduledLock();
 
       this.#authStatusSubject.next('connected');
     }).pipe(
@@ -228,7 +228,6 @@ class ProtonSessionService {
     return Effect.gen(this, function* () {
       const currentSession = this.getCurrentSession();
 
-      yield* this.#encryptedSecretStore.cancelScheduledUnlockedDataClear();
       yield* this.#encryptedSecretStore.clearSessionData();
       this.#authStatusSubject.next('disconnected');
       getObsidianSettingsStore().set('accountEmail', '');
@@ -239,10 +238,9 @@ class ProtonSessionService {
     });
   }
 
-  public dispose(): Effect.Effect<void> {
-    return Effect.gen(this, function* () {
-      yield* this.deactivateSession();
-    });
+  public dispose() {
+    this.#encryptedSecretStore.lockSession();
+    this.#authStatusSubject.next('disconnected');
   }
 
   public activatePersistedSession(
@@ -256,7 +254,7 @@ class ProtonSessionService {
   > {
     return Effect.gen(this, function* () {
       this.#authStatusSubject.next('connecting');
-      yield* this.#encryptedSecretStore.cancelScheduledUnlockedDataClear();
+      this.#encryptedSecretStore.cancelScheduledLock();
 
       if (!this.#encryptedSecretStore.hasPersistedSessionData()) {
         this.#authStatusSubject.next('disconnected');
@@ -272,14 +270,6 @@ class ProtonSessionService {
       }
 
       this.#authStatusSubject.next('connected');
-    });
-  }
-
-  public deactivateSession(): Effect.Effect<void> {
-    return Effect.gen(this, function* () {
-      yield* this.#encryptedSecretStore.cancelScheduledUnlockedDataClear();
-      yield* this.#encryptedSecretStore.clearUnlockedSessionData();
-      this.#authStatusSubject.next('disconnected');
     });
   }
 

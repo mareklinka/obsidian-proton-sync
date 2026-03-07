@@ -98,7 +98,7 @@ describe('ProtonSessionService', () => {
       )
     );
 
-    await Effect.runPromise(encryptedStore.clearUnlockedSessionData());
+    encryptedStore.lockSession();
   }
 
   it('fails activation when persisted session is missing', async () => {
@@ -182,25 +182,5 @@ describe('ProtonSessionService', () => {
     if (result._tag === 'Left') {
       expect(result.left).toMatchObject({ _tag: 'MasterPasswordRequiredError' });
     }
-  });
-
-  it('deactivates current session and clears in-memory salted passphrases only', async () => {
-    const mod = await import('../proton/auth/ProtonSessionService');
-
-    await persistEncryptedSessionData(storedSession, { keyA: 'salted-passphrase-a' });
-
-    const service = mod.initProtonSessionService('test-app-version');
-
-    await Effect.runPromise(service.activatePersistedSession(Effect.succeed(Option.some(MASTER_PASSWORD))));
-    await Effect.runPromise(service.deactivateSession());
-
-    expect(Option.isNone(service.getCurrentSession())).toBe(true);
-    expect(service.getSaltedKeyPasswords()).toEqual({});
-
-    // persisted session should still exist so the user remains logically signed in
-    const encryptedStoreModule = await import('../services/EncryptedSecretStore');
-    const encryptedStore = encryptedStoreModule.getEncryptedSecretStore();
-    expect(encryptedStore.hasPersistedSessionData()).toBe(true);
-    expect(encryptedStore.getUnlockedSessionData()).toBe(Option.none());
   });
 });

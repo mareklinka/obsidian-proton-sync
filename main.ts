@@ -89,7 +89,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.#subscriptions.length = 0;
     this.#statusBarController?.dispose();
     this.#statusBarController = null;
-    await Effect.runPromise(getProtonSessionService().dispose());
+    getProtonSessionService().dispose();
   }
 
   public async signIn(credentials: { email: string; password: string }): Promise<void> {

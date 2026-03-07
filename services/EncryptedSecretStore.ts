@@ -1,6 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { Data, Effect, Option } from 'effect';
 import { Platform } from 'obsidian';
+import { Subject } from 'rxjs';
 
 import type { ProtonSession } from '../proton/auth/ProtonSession';
 import { getLogger } from './ConsoleLogger';
@@ -66,6 +67,9 @@ class EncryptedSecretStore {
   #memoryClearTimeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
   readonly #logger = getLogger('EncryptedSecretStore');
 
+  readonly #sessionLockedSubject = new Subject<void>();
+  public readonly sessionLocked$ = this.#sessionLockedSubject.asObservable();
+
   public constructor(private readonly baseStore: ReturnType<typeof getObsidianSecretStore>) {}
 
   public hasPersistedSessionData(): boolean {
@@ -104,7 +108,7 @@ class EncryptedSecretStore {
       this.baseStore.set(SALTED_PASSPHRASES_SECRET_KEY, encryptedPassphrases);
 
       this.#unlockedSessionData = Option.some(data);
-      this.scheduleMemoryClear();
+      this.scheduleLock();
     });
   }
 
@@ -208,7 +212,7 @@ class EncryptedSecretStore {
 
       const data = { session, saltedPassphrases };
       this.#unlockedSessionData = Option.some(data);
-      this.#cancelScheduledMemoryClearInternal();
+      this.cancelScheduledLock();
 
       return data;
     });
@@ -218,46 +222,36 @@ class EncryptedSecretStore {
     return this.#unlockedSessionData;
   }
 
-  public clearUnlockedSessionData(): Effect.Effect<void> {
-    return Effect.sync(() => {
-      this.#cancelScheduledMemoryClearInternal();
-      this.#unlockedSessionData = Option.none();
-    });
+  public lockSession() {
+    this.cancelScheduledLock();
+    this.#unlockedSessionData = Option.none();
+    this.#sessionLockedSubject.next();
   }
 
-  public cancelScheduledUnlockedDataClear(): Effect.Effect<void> {
-    return Effect.sync(() => {
-      this.#cancelScheduledMemoryClearInternal();
-    });
-  }
-
-  public clearSessionData() {
-    return Effect.sync(() => {
-      this.baseStore.clear(SESSION_STORAGE_KEY);
-      this.baseStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
-      this.#cancelScheduledMemoryClearInternal();
-      this.#unlockedSessionData = Option.none();
-    });
-  }
-
-  public scheduleMemoryClear(): void {
-    this.#logger.info('Scheduling in-memory session data clear in %d ms', POST_SYNC_MEMORY_CLEAR_DELAY_MS);
-    this.#cancelScheduledMemoryClearInternal();
-
-    this.#memoryClearTimeoutId = globalThis.setTimeout(() => {
-      this.#logger.debug('Clearing in-memory session data after scheduled delay');
-      this.#unlockedSessionData = Option.none();
-      this.#memoryClearTimeoutId = null;
-    }, POST_SYNC_MEMORY_CLEAR_DELAY_MS);
-  }
-
-  #cancelScheduledMemoryClearInternal(): void {
+  public cancelScheduledLock() {
     if (this.#memoryClearTimeoutId === null) {
       return;
     }
 
     globalThis.clearTimeout(this.#memoryClearTimeoutId);
     this.#memoryClearTimeoutId = null;
+  }
+
+  public clearSessionData() {
+    return Effect.sync(() => {
+      this.lockSession();
+      this.baseStore.clear(SESSION_STORAGE_KEY);
+      this.baseStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
+    });
+  }
+
+  public scheduleLock() {
+    this.cancelScheduledLock();
+
+    this.#memoryClearTimeoutId = globalThis.setTimeout(() => {
+      this.lockSession();
+      this.#memoryClearTimeoutId = null;
+    }, POST_SYNC_MEMORY_CLEAR_DELAY_MS);
   }
 
   #encryptSecretJson(

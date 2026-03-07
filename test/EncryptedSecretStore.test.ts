@@ -64,17 +64,17 @@ describe('EncryptedSecretStore', () => {
       )
     );
 
-    await Effect.runPromise(store.clearUnlockedSessionData());
+    store.lockSession();
 
     await Effect.runPromise(store.changeMasterPassword(OLD_MASTER_PASSWORD, NEW_MASTER_PASSWORD));
-    await Effect.runPromise(store.clearUnlockedSessionData());
+    store.lockSession();
 
     const loadedWithNewPassword = await Effect.runPromise(store.loadSessionData(NEW_MASTER_PASSWORD));
 
     expect(loadedWithNewPassword.session.accessToken).toBe('access-123');
     expect(loadedWithNewPassword.saltedPassphrases).toEqual({ keyA: 'salted-a' });
 
-    await Effect.runPromise(store.clearUnlockedSessionData());
+    store.lockSession();
 
     const loadWithOldPassword = await Effect.runPromise(Effect.either(store.loadSessionData(OLD_MASTER_PASSWORD)));
     expect(loadWithOldPassword._tag).toBe('Left');
@@ -99,7 +99,7 @@ describe('EncryptedSecretStore', () => {
       )
     );
 
-    await Effect.runPromise(store.clearUnlockedSessionData());
+    store.lockSession();
 
     const rotateResult = await Effect.runPromise(
       Effect.either(store.changeMasterPassword('wrong-current-password', NEW_MASTER_PASSWORD))
@@ -109,7 +109,7 @@ describe('EncryptedSecretStore', () => {
       expect(rotateResult.left).toMatchObject({ _tag: 'SecretDecryptionFailedError' });
     }
 
-    await Effect.runPromise(store.clearUnlockedSessionData());
+    store.lockSession();
 
     const loadedWithOldPassword = await Effect.runPromise(store.loadSessionData(OLD_MASTER_PASSWORD));
 

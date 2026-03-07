@@ -1,4 +1,5 @@
 import { Effect, Option } from 'effect';
+import { Subject } from 'rxjs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TreeEventScopeId } from '../services/proton-drive-types';
@@ -6,6 +7,7 @@ import { TreeEventScopeId } from '../services/proton-drive-types';
 const subscribeToTreeEventsMock = vi.hoisted(() => vi.fn());
 const getProtonDriveClientMock = vi.hoisted(() => vi.fn());
 const getObsidianSettingsStoreMock = vi.hoisted(() => vi.fn());
+const getEncryptedSecretStoreMock = vi.hoisted(() => vi.fn());
 const settingsSetMock = vi.hoisted(() => vi.fn());
 const loggerInfoMock = vi.hoisted(() => vi.fn());
 
@@ -17,8 +19,12 @@ vi.mock('../services/ObsidianSettingsStore', () => ({
   getObsidianSettingsStore: getObsidianSettingsStoreMock
 }));
 
+vi.mock('../services/EncryptedSecretStore', () => ({
+  getEncryptedSecretStore: getEncryptedSecretStoreMock
+}));
+
 vi.mock('../services/ConsoleLogger', () => ({
-  getLogger: () => ({
+  getLogger: (): { info: typeof loggerInfoMock } => ({
     info: loggerInfoMock
   })
 }));
@@ -34,6 +40,10 @@ describe('ProtonCloudObserver', () => {
 
     getObsidianSettingsStoreMock.mockReturnValue({
       set: settingsSetMock
+    });
+
+    getEncryptedSecretStoreMock.mockReturnValue({
+      sessionLocked$: new Subject<void>().asObservable()
     });
   });
 
