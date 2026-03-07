@@ -1,7 +1,7 @@
 {
   "id": "proton-drive-sync",
   "name": "Proton Drive Sync",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "minAppVersion": "1.5.0",
   "description": "Sync Obsidian vaults with Proton Drive",
   "author": "mareklinka",
