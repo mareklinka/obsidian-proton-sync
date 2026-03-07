@@ -14,13 +14,13 @@ import {
   getObsidianSettingsStore,
   initObsidianSettingsStore
 } from './services/ObsidianSettingsStore';
-import { initSyncService } from './services/SyncService';
+import { getSyncService, initSyncService } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
 import { ProtonDriveMasterPasswordModal } from './ui/modals/master-password-modal';
 import { type ConfigSyncAction, ProtonDriveSyncActionModal } from './ui/modals/sync-action-modal';
-import { initSyncProgressModal } from './ui/modals/sync-progress-modal';
+import { getSyncProgressModal, initSyncProgressModal } from './ui/modals/sync-progress-modal';
 import { ProtonDriveTwoFactorModal } from './ui/modals/two-factor-modal';
 import { ProtonDriveSyncSettingTab } from './ui/settings-tab';
 import { createSyncStatusBar, type SyncStatusBarController } from './ui/status-bar';
@@ -180,6 +180,13 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   async #openSyncActionDialog(): Promise<void> {
+    const syncService = getSyncService();
+
+    if (syncService.getState().state !== 'idle') {
+      getSyncProgressModal().open();
+      return;
+    }
+
     const action = await Effect.runPromise(promptFromModal(this.app, app => new ProtonDriveSyncActionModal(app)));
     if (Option.isNone(action)) {
       return;
