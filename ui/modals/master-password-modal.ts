@@ -53,6 +53,7 @@ export class ProtonDriveMasterPasswordModal extends Modal {
         .setCta()
         .onClick(() => {
           this.#didResolve = true;
+          button.setButtonText(t.modals.masterPassword.processingButton).setDisabled(true);
           this.#submittedSubject.next(this.#masterPassword);
           this.#clearSensitiveInputs();
           this.close();

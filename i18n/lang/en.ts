@@ -34,7 +34,14 @@ export const en = {
       invalidSharedPath: 'The specified shared folder path is invalid.',
       treeSubscriptionFailed:
         'Failed to subscribe to remote file tree updates. Remote changes may not be detected until you restart Obsidian.',
-      disconnected: 'Disconnected from Proton Drive.'
+      disconnected: 'Disconnected from Proton Drive.',
+      changeMasterPassword: {
+        noPersistedSession: 'No saved encrypted session data found.',
+        currentPasswordInvalid: 'Current master password is invalid.',
+        persistedDataInvalid: 'Saved session data is invalid. Please sign in again.',
+        updateFailed: 'Failed to update master password. Please try again.',
+        success: 'Master password updated successfully.'
+      }
     }
   },
   actions: {
@@ -94,7 +101,8 @@ export const en = {
       name: 'Connection status',
       connectButton: 'Connect',
       connectingButton: 'Connecting...',
-      disconnectButton: 'Disconnect'
+      disconnectButton: 'Disconnect',
+      changeMasterPasswordButton: 'Change master password'
     },
     remoteVaultRoot: {
       name: 'Remote vault root',
@@ -161,7 +169,22 @@ export const en = {
       passwordDescription:
         'This can be your regular Proton account password or a separate password used only for this purpose.',
       unlockButton: 'Unlock',
-      setupButton: 'Continue'
+      setupButton: 'Continue',
+      processingButton: 'Processing...'
+    },
+    changeMasterPassword: {
+      title: 'Change master password',
+      description: 'Re-encrypts your saved Proton session locally with a new master password. No re-login required.',
+      currentPasswordName: 'Current master password',
+      newPasswordName: 'New master password',
+      newPasswordDescription:
+        'Use a strong password. This password protects your saved session data on this device only.',
+      confirmPasswordName: 'Confirm new master password',
+      submitButton: 'Change password',
+      processingButton: 'Updating...',
+      validationRequired: 'Please fill in all password fields.',
+      validationMismatch: 'New password and confirmation do not match.',
+      validationSamePassword: 'New password must be different from current password.'
     },
     captcha: {
       title: 'CAPTCHA verification required',

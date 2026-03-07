@@ -6,6 +6,7 @@ import { pullVault, pushVault } from './actions';
 import { getI18n, initI18n } from './i18n';
 import { getProtonSessionService, initProtonSessionService } from './proton/auth/ProtonSessionService';
 import { getLogger } from './services/ConsoleLogger';
+import { getEncryptedSecretStore } from './services/EncryptedSecretStore';
 import { initObsidianFileApi } from './services/ObsidianFileApi';
 import { initObsidianSecretStore } from './services/ObsidianSecretStore';
 import {
@@ -154,6 +155,30 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     new Notice(t.main.notices.disconnected);
   }
 
+  public async changeMasterPassword(credentials: { currentPassword: string; newPassword: string }): Promise<void> {
+    const { t } = getI18n();
+    const encryptedSecretStore = getEncryptedSecretStore();
+
+    if (!encryptedSecretStore.hasPersistedSessionData()) {
+      new Notice(t.main.notices.changeMasterPassword.noPersistedSession);
+      return;
+    }
+
+    await Effect.runPromise(
+      encryptedSecretStore.changeMasterPassword(credentials.currentPassword.trim(), credentials.newPassword).pipe(
+        Effect.tap(() => Effect.sync(() => new Notice(t.main.notices.changeMasterPassword.success))),
+        Effect.catchTags({
+          PersistedSecretsInvalidFormatError: () =>
+            Effect.sync(() => new Notice(t.main.notices.changeMasterPassword.persistedDataInvalid)),
+          SecretDecryptionFailedError: () =>
+            Effect.sync(() => new Notice(t.main.notices.changeMasterPassword.currentPasswordInvalid)),
+          SecretEncryptionFailedError: () =>
+            Effect.sync(() => new Notice(t.main.notices.changeMasterPassword.updateFailed))
+        })
+      )
+    );
+  }
+
   async #openSyncActionDialog(): Promise<void> {
     const action = await Effect.runPromise(promptFromModal(this.app, app => new ProtonDriveSyncActionModal(app)));
     if (Option.isNone(action)) {
@@ -181,6 +206,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       }),
       settingTab.login$.subscribe(credentials => {
         this.signIn(credentials);
+      }),
+      settingTab.changeMasterPassword$.subscribe(credentials => {
+        this.changeMasterPassword(credentials);
       })
     );
 

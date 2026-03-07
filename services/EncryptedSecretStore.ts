@@ -1,5 +1,6 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { Data, Effect, Option } from 'effect';
+import { Platform } from 'obsidian';
 
 import type { ProtonSession } from '../proton/auth/ProtonSession';
 import { getLogger } from './ConsoleLogger';
@@ -103,7 +104,62 @@ class EncryptedSecretStore {
       this.baseStore.set(SALTED_PASSPHRASES_SECRET_KEY, encryptedPassphrases);
 
       this.#unlockedSessionData = Option.some(data);
-      this.#cancelScheduledMemoryClearInternal();
+      this.scheduleMemoryClear();
+    });
+  }
+
+  public changeMasterPassword(
+    currentMasterPassword: string,
+    newMasterPassword: string
+  ): Effect.Effect<
+    void,
+    PersistedSecretsInvalidFormatError | SecretDecryptionFailedError | SecretEncryptionFailedError
+  > {
+    return Effect.gen(this, function* () {
+      this.#logger.info('Changing master password for persisted session data');
+
+      const storedSession = this.baseStore.get(SESSION_STORAGE_KEY);
+      const storedSaltedPassphrases = this.baseStore.get(SALTED_PASSPHRASES_SECRET_KEY);
+
+      if (
+        !storedSession ||
+        storedSession.trim() === '' ||
+        !storedSaltedPassphrases ||
+        storedSaltedPassphrases.trim() === ''
+      ) {
+        return yield* new PersistedSecretsInvalidFormatError();
+      }
+
+      if (!this.#isEncryptedEnvelopeJson(storedSession) || !this.#isEncryptedEnvelopeJson(storedSaltedPassphrases)) {
+        yield* this.clearSessionData();
+        return yield* new PersistedSecretsInvalidFormatError();
+      }
+
+      const decryptedSession = yield* this.#decryptSecretJson('session', storedSession, currentMasterPassword);
+      const decryptedSaltedPassphrases = yield* this.#decryptSecretJson(
+        'salted-passphrases',
+        storedSaltedPassphrases,
+        currentMasterPassword
+      );
+
+      const parsedSession = yield* parseSessionJson(decryptedSession);
+      const parsedSaltedPassphrases = yield* parseSaltedPassphrasesJson(decryptedSaltedPassphrases);
+
+      const session: ProtonSession = {
+        ...parsedSession,
+        createdAt: new Date(parsedSession.createdAt),
+        updatedAt: new Date(parsedSession.updatedAt),
+        expiresAt: new Date(parsedSession.expiresAt),
+        lastRefreshAt: new Date(parsedSession.lastRefreshAt)
+      };
+
+      yield* this.persistSessionData(
+        {
+          session,
+          saltedPassphrases: parsedSaltedPassphrases
+        },
+        newMasterPassword
+      );
     });
   }
 
@@ -376,7 +432,7 @@ function isEnvelopeRecord(value: unknown): value is EncryptedEnvelope {
 
 async function deriveAesKey(masterPassword: string, saltBytes: Uint8Array): Promise<CryptoKey> {
   const bcryptSalt = bcryptBase64Encode(saltBytes, 22);
-  const bcryptOutput = bcryptHashWithSalt(masterPassword, bcryptSalt, 12);
+  const bcryptOutput = bcryptHashWithSalt(masterPassword, bcryptSalt, Platform.isMobile ? 10 : 12);
   const rawKey = Uint8Array.from(sha256(new TextEncoder().encode(bcryptOutput)));
 
   return globalThis.crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);

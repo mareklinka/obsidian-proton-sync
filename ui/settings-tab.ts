@@ -9,6 +9,10 @@ import { getLogger } from '../services/ConsoleLogger';
 import { getEncryptedSecretStore } from '../services/EncryptedSecretStore';
 import type { PluginSettings } from '../services/ObsidianSettingsStore';
 import { getObsidianSettingsStore, LogLevel } from '../services/ObsidianSettingsStore';
+import {
+  type ChangeMasterPasswordPayload,
+  ProtonDriveChangeMasterPasswordModal
+} from './modals/change-master-password-modal';
 import { ProtonDriveLoginModal } from './modals/login-modal';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 
@@ -24,6 +28,9 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
   readonly #loggingChangedSubject = new Subject<{ isEnabled: boolean; minLevel: LogLevel }>();
   public readonly loggingChanged$ = this.#loggingChangedSubject.asObservable();
+
+  readonly #changeMasterPasswordSubject = new Subject<ChangeMasterPasswordPayload>();
+  public readonly changeMasterPassword$ = this.#changeMasterPasswordSubject.asObservable();
 
   #stateSub: Subscription | undefined = undefined;
   #remoteVaultRootPath = '';
@@ -98,6 +105,21 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
               modal.open();
             })
         );
+      }
+
+      if (hasPersistedSession) {
+        new Setting(containerEl)
+          .setName(t.settings.connectionStatus.changeMasterPasswordButton)
+          .setDesc(t.modals.changeMasterPassword.description)
+          .addButton(button =>
+            button.setButtonText(t.modals.changeMasterPassword.submitButton).onClick(() => {
+              const modal = new ProtonDriveChangeMasterPasswordModal(this.app);
+              modal.submitted$.pipe(take(1)).subscribe(payload => {
+                this.#changeMasterPasswordSubject.next(payload);
+              });
+              modal.open();
+            })
+          );
       }
 
       this.#remoteVaultRootPath = settings.remoteVaultRootPath ?? '';
