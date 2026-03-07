@@ -5,23 +5,23 @@ import { Subject } from 'rxjs';
 import { getI18n } from '../../i18n';
 
 export class ProtonDriveMasterPasswordModal extends Modal {
-  private readonly submittedSubject = new Subject<string>();
-  public readonly submitted$ = this.submittedSubject.asObservable();
+  readonly #submittedSubject = new Subject<string>();
+  public readonly submitted$ = this.#submittedSubject.asObservable();
 
-  private readonly canceledSubject = new Subject<void>();
-  public readonly canceled$ = this.canceledSubject.asObservable();
+  readonly #canceledSubject = new Subject<void>();
+  public readonly canceled$ = this.#canceledSubject.asObservable();
 
-  private masterPassword = '';
-  private didResolve = false;
+  #masterPassword = '';
+  #didResolve = false;
 
-  constructor(
+  public constructor(
     app: App,
     private readonly mode: 'setup' | 'unlock'
   ) {
     super(app);
   }
 
-  onOpen(): void {
+  public onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
 
@@ -41,7 +41,7 @@ export class ProtonDriveMasterPasswordModal extends Modal {
       .addText(text => {
         text.inputEl.type = 'password';
         text.onChange(value => {
-          this.masterPassword = value;
+          this.#masterPassword = value;
         });
       });
 
@@ -52,23 +52,23 @@ export class ProtonDriveMasterPasswordModal extends Modal {
         )
         .setCta()
         .onClick(() => {
-          this.didResolve = true;
-          this.submittedSubject.next(this.masterPassword);
-          this.clearSensitiveInputs();
+          this.#didResolve = true;
+          this.#submittedSubject.next(this.#masterPassword);
+          this.#clearSensitiveInputs();
           this.close();
         })
     );
   }
 
-  onClose(): void {
-    if (!this.didResolve) {
-      this.canceledSubject.next();
+  public onClose(): void {
+    if (!this.#didResolve) {
+      this.#canceledSubject.next();
     }
 
-    this.clearSensitiveInputs();
+    this.#clearSensitiveInputs();
   }
 
-  private clearSensitiveInputs(): void {
-    this.masterPassword = '';
+  #clearSensitiveInputs(): void {
+    this.#masterPassword = '';
   }
 }

@@ -4,10 +4,10 @@ export const { init: initObsidianSecretStore, get: getObsidianSecretStore } = (f
   let instance: ObsidianSecretStore | null = null;
 
   return {
-    init: function getObsidianSecretStore(store: SecretStorage): ObsidianSecretStore {
+    init: function (this: void, store: SecretStorage): ObsidianSecretStore {
       return (instance ??= new ObsidianSecretStore(store));
     },
-    get: function getObsidianSecretStoreInstance(): ObsidianSecretStore {
+    get: function (this: void): ObsidianSecretStore {
       if (!instance) {
         throw new Error('ObsidianSecretStore has not been initialized. Please call initObsidianSecretStore first.');
       }
@@ -19,15 +19,15 @@ export const { init: initObsidianSecretStore, get: getObsidianSecretStore } = (f
 class ObsidianSecretStore {
   public constructor(private readonly store: SecretStorage) {}
 
-  get(key: ObsidianSecretKey): string | null {
+  public get(key: ObsidianSecretKey): string | null {
     return this.store.getSecret(key);
   }
 
-  set(key: ObsidianSecretKey, value: string): void {
+  public set(key: ObsidianSecretKey, value: string): void {
     this.store.setSecret(key, value);
   }
 
-  clear(key: ObsidianSecretKey): void {
+  public clear(key: ObsidianSecretKey): void {
     this.store.setSecret(key, '');
   }
 }

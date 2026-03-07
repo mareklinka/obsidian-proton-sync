@@ -26,7 +26,7 @@ const SYNC_TIMING_SCOPE = 'timing-metrics';
 type TimingLogger = Pick<ReturnType<typeof getLogger>, 'debug'>;
 
 type ProtonRecursiveFolder = ProtonFolder & {
-  children: (ProtonRecursiveFolder | ProtonFile)[];
+  children: Array<ProtonRecursiveFolder | ProtonFile>;
 };
 
 export type SyncSubstate = 'localTreeBuild' | 'remoteTreeBuild' | 'diffComputation' | 'applyingChanges';
@@ -51,10 +51,10 @@ export const { init: initSyncService, get: getSyncService } = (function () {
   let instance: SyncService | null = null;
 
   return {
-    init: function initSyncService(vault: Vault): SyncService {
+    init: function (this: void, vault: Vault): SyncService {
       return (instance ??= new SyncService(vault));
     },
-    get: function getSyncService(): SyncService {
+    get: function (this: void): SyncService {
       if (!instance) {
         throw new Error('SyncService has not been initialized. Please call initSyncService first.');
       }
@@ -124,27 +124,27 @@ type PullSyncOperation =
   | { type: 'deleteLocalFolder'; details: LocalFolderDelete };
 
 class SyncService {
-  private readonly logger = getLogger('SyncService');
-  private readonly stateSubject = new BehaviorSubject<SyncState>({ state: 'idle' });
-  public readonly state$ = this.stateSubject.asObservable();
+  readonly #logger = getLogger('SyncService');
+  readonly #stateSubject = new BehaviorSubject<SyncState>({ state: 'idle' });
+  public readonly state$ = this.#stateSubject.asObservable();
 
-  constructor(private readonly vault: Vault) {}
+  public constructor(private readonly vault: Vault) {}
 
   public getState(): SyncState {
-    return this.stateSubject.value;
+    return this.#stateSubject.value;
   }
 
   public setAuthenticationState() {
-    this.stateSubject.next({ state: 'auth' });
+    this.#stateSubject.next({ state: 'auth' });
   }
 
   public setIdleState() {
-    this.stateSubject.next({ state: 'idle' });
+    this.#stateSubject.next({ state: 'idle' });
   }
 
   public push(prune: boolean, signal: AbortSignal) {
     return Effect.gen(this, function* () {
-      if (this.stateSubject.value.state !== 'idle' && this.stateSubject.value.state !== 'auth') {
+      if (this.#stateSubject.value.state !== 'idle' && this.#stateSubject.value.state !== 'auth') {
         yield* new SyncAlreadyInProgressError();
       }
 
@@ -152,7 +152,7 @@ class SyncService {
         this.setIdleState();
       });
 
-      yield* this.pushImpl(prune, signal).pipe(
+      yield* this.#pushImpl(prune, signal).pipe(
         Effect.catchTag('ProtonRequestCancelledError', error =>
           Effect.fail(new SyncCancelledError({ reason: error.reason }))
         ),
@@ -163,7 +163,7 @@ class SyncService {
 
   public pull(prune: boolean, signal: AbortSignal) {
     return Effect.gen(this, function* () {
-      if (this.stateSubject.value.state !== 'idle' && this.stateSubject.value.state !== 'auth') {
+      if (this.#stateSubject.value.state !== 'idle' && this.#stateSubject.value.state !== 'auth') {
         yield* new SyncAlreadyInProgressError();
       }
 
@@ -171,7 +171,7 @@ class SyncService {
         this.setIdleState();
       });
 
-      yield* this.pullImpl(prune, signal).pipe(
+      yield* this.#pullImpl(prune, signal).pipe(
         Effect.catchTag('ProtonRequestCancelledError', error =>
           Effect.fail(new SyncCancelledError({ reason: error.reason }))
         ),
@@ -180,13 +180,13 @@ class SyncService {
     });
   }
 
-  private pushImpl(prune: boolean, signal: AbortSignal) {
+  #pushImpl(prune: boolean, signal: AbortSignal) {
     return Effect.gen(this, function* () {
-      const logger = this.logger.withScope('push');
+      const logger = this.#logger.withScope('push');
       const timingLogger = logger.withScope(SYNC_TIMING_SCOPE);
       logger.info('Starting config push');
 
-      yield* this.ensureNotCancelled(signal);
+      yield* this.#ensureNotCancelled(signal);
 
       const vaultRootNodeId = getObsidianSettingsStore().get('vaultRootNodeUid');
 
@@ -194,65 +194,63 @@ class SyncService {
         return yield* new VaultRootIdNotAvailableError();
       }
 
-      this.stateSubject.next({ state: 'pushing', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });
+      this.#stateSubject.next({ state: 'pushing', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });
 
       const fileApi = getObsidianFileApi();
-      const localRoot = yield* this.withTiming(timingLogger, 'Computed local file tree', fileApi.getFileTree());
-      yield* this.ensureNotCancelled(signal);
+      const localRoot = yield* this.#withTiming(timingLogger, 'Computed local file tree', fileApi.getFileTree());
+      yield* this.#ensureNotCancelled(signal);
 
-      this.stateSubject.next({ state: 'pushing', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
+      this.#stateSubject.next({ state: 'pushing', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
 
       const driveApi = getProtonDriveApi();
 
-      const remoteRoot = yield* this.withTiming(
+      const remoteRoot = yield* this.#withTiming(
         timingLogger,
         'Computed remote file tree',
         Effect.gen(this, function* () {
-          const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value, signal);
-          return yield* this.buildRemoteTree(remoteConfigRootFolder, signal);
+          const remoteConfigRootFolder = yield* this.#getOrCreateRemoteRoot('/', vaultRootNodeId.value, signal);
+          return yield* this.#buildRemoteTree(remoteConfigRootFolder, signal);
         })
       );
-      yield* this.ensureNotCancelled(signal);
+      yield* this.#ensureNotCancelled(signal);
 
-      this.stateSubject.next({ state: 'pushing', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
+      this.#stateSubject.next({ state: 'pushing', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
 
-      const syncOps = yield* this.withTiming(
+      const syncOps = yield* this.#withTiming(
         timingLogger,
         'Computed push creation operations',
-        Effect.sync(() => {
-          return this.computePushCreationOperations(localRoot, remoteRoot, logger);
-        })
+        Effect.sync(() => this.#computePushCreationOperations(localRoot, remoteRoot, logger))
       );
-      yield* this.ensureNotCancelled(signal);
+      yield* this.#ensureNotCancelled(signal);
 
       if (prune) {
-        yield* this.withTiming(
+        yield* this.#withTiming(
           timingLogger,
           'Computed push prune operations',
           Effect.sync(() => {
-            syncOps.push(...this.computePushPruneOperations(localRoot, remoteRoot));
+            syncOps.push(...this.#computePushPruneOperations(localRoot, remoteRoot));
           })
         );
-        yield* this.ensureNotCancelled(signal);
+        yield* this.#ensureNotCancelled(signal);
       }
 
-      yield* this.withTiming(
+      yield* this.#withTiming(
         timingLogger,
         'Applied operations',
-        this.applyPushOperations(syncOps, logger, driveApi, fileApi, signal)
+        this.#applyPushOperations(syncOps, logger, driveApi, fileApi, signal)
       );
 
       this.setIdleState();
     });
   }
 
-  private pullImpl(prune: boolean, signal: AbortSignal) {
+  #pullImpl(prune: boolean, signal: AbortSignal) {
     return Effect.gen(this, function* () {
-      const logger = this.logger.withScope('pull');
+      const logger = this.#logger.withScope('pull');
       const timingLogger = logger.withScope(SYNC_TIMING_SCOPE);
       logger.info('Starting config pull', { deleteLocalOrphans: prune });
 
-      yield* this.ensureNotCancelled(signal);
+      yield* this.#ensureNotCancelled(signal);
 
       const vaultRootNodeId = getObsidianSettingsStore().get('vaultRootNodeUid');
 
@@ -260,40 +258,40 @@ class SyncService {
         return yield* new VaultRootIdNotAvailableError();
       }
 
-      this.stateSubject.next({ state: 'pulling', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });
+      this.#stateSubject.next({ state: 'pulling', subState: 'localTreeBuild', totalItems: 0, processedItems: 0 });
       const fileApi = getObsidianFileApi();
-      const localRoot = yield* this.withTiming(timingLogger, 'Computed local file tree', fileApi.getFileTree());
-      yield* this.ensureNotCancelled(signal);
+      const localRoot = yield* this.#withTiming(timingLogger, 'Computed local file tree', fileApi.getFileTree());
+      yield* this.#ensureNotCancelled(signal);
 
-      this.stateSubject.next({ state: 'pulling', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
+      this.#stateSubject.next({ state: 'pulling', subState: 'remoteTreeBuild', totalItems: 0, processedItems: 0 });
 
-      const remoteRoot = yield* this.withTiming(
+      const remoteRoot = yield* this.#withTiming(
         timingLogger,
         'Computed remote file tree',
         Effect.gen(this, function* () {
-          const remoteConfigRootFolder = yield* this.getOrCreateRemoteRoot('/', vaultRootNodeId.value, signal);
-          return yield* this.buildRemoteTree(remoteConfigRootFolder, signal);
+          const remoteConfigRootFolder = yield* this.#getOrCreateRemoteRoot('/', vaultRootNodeId.value, signal);
+          return yield* this.#buildRemoteTree(remoteConfigRootFolder, signal);
         })
       );
-      yield* this.ensureNotCancelled(signal);
+      yield* this.#ensureNotCancelled(signal);
 
-      this.stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
+      this.#stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
 
-      const { localFolderCreatePaths, localFileWrites } = yield* this.withTiming(
+      const { localFolderCreatePaths, localFileWrites } = yield* this.#withTiming(
         timingLogger,
         'Computed pull creation operations',
-        Effect.sync(() => this.computePullCreationOperations(localRoot, remoteRoot, logger))
+        Effect.sync(() => this.#computePullCreationOperations(localRoot, remoteRoot, logger))
       );
-      yield* this.ensureNotCancelled(signal);
+      yield* this.#ensureNotCancelled(signal);
 
-      const { localFileDeletePaths, localFolderDeletePaths } = yield* this.withTiming(
+      const { localFileDeletePaths, localFolderDeletePaths } = yield* this.#withTiming(
         timingLogger,
         'Computed pull prune operations',
-        Effect.sync(() => this.computePullPruneOperations(localRoot, remoteRoot, prune))
+        Effect.sync(() => this.#computePullPruneOperations(localRoot, remoteRoot, prune))
       );
-      yield* this.ensureNotCancelled(signal);
+      yield* this.#ensureNotCancelled(signal);
 
-      const keptFolderDeletes: string[] = [];
+      const keptFolderDeletes: Array<string> = [];
       for (const folderPath of Array.from(localFolderDeletePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
         if (
           !keptFolderDeletes.some(parentPath => folderPath === parentPath || folderPath.startsWith(`${parentPath}/`))
@@ -307,7 +305,7 @@ class SyncService {
           !keptFolderDeletes.some(folderPath => filePath === folderPath || filePath.startsWith(`${folderPath}/`))
       );
 
-      const pullOps: PullSyncOperation[] = [];
+      const pullOps: Array<PullSyncOperation> = [];
 
       for (const folderPath of Array.from(localFolderCreatePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
         pullOps.push({ type: 'createLocalFolder', details: { rawPath: folderPath } });
@@ -325,18 +323,18 @@ class SyncService {
         pullOps.push({ type: 'deleteLocalFolder', details: { rawPath: folderPath } });
       }
 
-      yield* this.withTiming(
+      yield* this.#withTiming(
         timingLogger,
         'Applied operations',
-        this.applyPullOperations(pullOps, logger, getProtonDriveApi(), fileApi, signal)
+        this.#applyPullOperations(pullOps, logger, getProtonDriveApi(), fileApi, signal)
       );
 
       this.setIdleState();
     });
   }
 
-  private applyPullOperations(
-    pullOps: PullSyncOperation[],
+  #applyPullOperations(
+    pullOps: Array<PullSyncOperation>,
     logger: ReturnType<typeof getLogger>,
     driveApi: ReturnType<typeof getProtonDriveApi>,
     fileApi: ReturnType<typeof getObsidianFileApi>,
@@ -347,9 +345,9 @@ class SyncService {
       let processedOps = 0;
 
       for (const op of pullOps) {
-        yield* this.ensureNotCancelled(signal);
+        yield* this.#ensureNotCancelled(signal);
 
-        this.stateSubject.next({
+        this.#stateSubject.next({
           state: 'pulling',
           subState: 'applyingChanges',
           totalItems: totalOps,
@@ -397,8 +395,8 @@ class SyncService {
     });
   }
 
-  private applyPushOperations(
-    syncOps: PushSyncOperation[],
+  #applyPushOperations(
+    syncOps: Array<PushSyncOperation>,
     logger: ReturnType<typeof getLogger>,
     driveApi: ReturnType<typeof getProtonDriveApi>,
     fileApi: ReturnType<typeof getObsidianFileApi>,
@@ -410,7 +408,7 @@ class SyncService {
       const deleteNodeIds: Array<ProtonFileId | ProtonFolderId> = [];
 
       while (syncOps.length > 0) {
-        yield* this.ensureNotCancelled(signal);
+        yield* this.#ensureNotCancelled(signal);
 
         const op = syncOps.shift();
         if (!op) {
@@ -422,7 +420,7 @@ class SyncService {
           continue;
         }
 
-        this.stateSubject.next({
+        this.#stateSubject.next({
           state: 'pushing',
           subState: 'applyingChanges',
           totalItems: totalOps,
@@ -445,7 +443,7 @@ class SyncService {
             {
               logger.debug('Uploading file', { path: op.details.rawPath, modifiedAt: op.details.modifiedAt });
               const data = yield* fileApi.readFileContent(op.details.rawPath);
-              const metadata = this.buildUploadMetadata(
+              const metadata = this.#buildUploadMetadata(
                 op.details.rawPath,
                 op.details.modifiedAt.getTime(),
                 data.byteLength,
@@ -459,7 +457,7 @@ class SyncService {
             {
               logger.debug('Updating file', { path: op.details.rawPath, modifiedAt: op.details.modifiedAt });
               const data = yield* fileApi.readFileContent(op.details.rawPath);
-              const metadata = this.buildUploadMetadata(
+              const metadata = this.#buildUploadMetadata(
                 op.details.rawPath,
                 op.details.modifiedAt.getTime(),
                 data.byteLength,
@@ -472,9 +470,9 @@ class SyncService {
       }
 
       if (deleteNodeIds.length > 0) {
-        yield* this.ensureNotCancelled(signal);
+        yield* this.#ensureNotCancelled(signal);
 
-        this.stateSubject.next({
+        this.#stateSubject.next({
           state: 'pushing',
           subState: 'applyingChanges',
           totalItems: totalOps,
@@ -486,10 +484,10 @@ class SyncService {
     });
   }
 
-  private computePushPruneOperations(localRoot: VaultFolder, remoteRoot: ProtonRecursiveFolder): PushSyncOperation[] {
-    const syncOps: PushSyncOperation[] = [];
+  #computePushPruneOperations(localRoot: VaultFolder, remoteRoot: ProtonRecursiveFolder): Array<PushSyncOperation> {
+    const syncOps: Array<PushSyncOperation> = [];
 
-    const q: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [{ local: localRoot, remote: remoteRoot }];
+    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder }> = [{ local: localRoot, remote: remoteRoot }];
     while (q.length > 0) {
       const item = q.shift();
       if (!item) {
@@ -524,14 +522,14 @@ class SyncService {
     return syncOps;
   }
 
-  private computePushCreationOperations(
+  #computePushCreationOperations(
     localRoot: VaultFolder,
     remoteRoot: ProtonRecursiveFolder,
     logger: ReturnType<typeof getLogger>
-  ): PushSyncOperation[] {
-    const syncOps: PushSyncOperation[] = [];
+  ): Array<PushSyncOperation> {
+    const syncOps: Array<PushSyncOperation> = [];
 
-    const q: { local: VaultFolder; remote: ProtonRecursiveFolder }[] = [{ local: localRoot, remote: remoteRoot }];
+    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder }> = [{ local: localRoot, remote: remoteRoot }];
     while (q.length > 0) {
       const item = q.shift();
 
@@ -540,7 +538,7 @@ class SyncService {
       }
 
       for (const child of item.local.children) {
-        if (this.isExcluded(child.rawPath)) {
+        if (this.#isExcluded(child.rawPath)) {
           continue;
         }
 
@@ -619,7 +617,7 @@ class SyncService {
     return syncOps;
   }
 
-  private computePullCreationOperations(
+  #computePullCreationOperations(
     localRoot: VaultFolder,
     remoteRoot: ProtonRecursiveFolder,
     logger: ReturnType<typeof getLogger>
@@ -627,7 +625,7 @@ class SyncService {
     const localFolderCreatePaths = new Set<string>();
     const localFileWrites = new Map<string, LocalFileWrite>();
 
-    const q: { local: VaultFolder; remote: ProtonRecursiveFolder; relativePath: string }[] = [
+    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder; relativePath: string }> = [
       { local: localRoot, remote: remoteRoot, relativePath: '' }
     ];
 
@@ -637,7 +635,7 @@ class SyncService {
         continue;
       }
 
-      const localChildren = item.local.children.filter(child => !this.isExcluded(child.rawPath));
+      const localChildren = item.local.children.filter(child => !this.#isExcluded(child.rawPath));
       const localFoldersByName = new Map<string, VaultFolder>();
       const localFilesByName = new Map<string, (typeof localChildren)[number]>();
 
@@ -713,7 +711,7 @@ class SyncService {
     return { localFolderCreatePaths, localFileWrites };
   }
 
-  private computePullPruneOperations(localRoot: VaultFolder, remoteRoot: ProtonRecursiveFolder, prune: boolean) {
+  #computePullPruneOperations(localRoot: VaultFolder, remoteRoot: ProtonRecursiveFolder, prune: boolean) {
     const localFileDeletePaths = new Set<string>();
     const localFolderDeletePaths = new Set<string>();
 
@@ -729,7 +727,7 @@ class SyncService {
         continue;
       }
 
-      const localChildren = item.local.children.filter(child => !this.isExcluded(child.rawPath));
+      const localChildren = item.local.children.filter(child => !this.#isExcluded(child.rawPath));
       const localFoldersByName = new Map<string, VaultFolder>();
       const localFilesByName = new Map<string, (typeof localChildren)[number]>();
 
@@ -743,15 +741,15 @@ class SyncService {
 
       for (const remoteChild of item.remote.children) {
         if (remoteChild._tag === 'folder') {
-          const localFolder = localFoldersByName.get(remoteChild.name);
+          const matchingLocalFolder = localFoldersByName.get(remoteChild.name);
           const localFile = localFilesByName.get(remoteChild.name);
 
           if (localFile && localFile._type === 'file') {
             localFileDeletePaths.add(localFile.rawPath);
           }
 
-          if (localFolder) {
-            q.push({ local: localFolder, remote: remoteChild });
+          if (matchingLocalFolder) {
+            q.push({ local: matchingLocalFolder, remote: remoteChild });
           }
 
           continue;
@@ -786,7 +784,7 @@ class SyncService {
     return { localFileDeletePaths, localFolderDeletePaths };
   }
 
-  private buildRemoteTree(remoteConfigRoot: ProtonFolder, signal: AbortSignal) {
+  #buildRemoteTree(remoteConfigRoot: ProtonFolder, signal: AbortSignal) {
     return Effect.gen(this, function* () {
       const driveApi = getProtonDriveApi();
 
@@ -800,7 +798,7 @@ class SyncService {
       ];
 
       while (queue.length > 0) {
-        yield* this.ensureNotCancelled(signal);
+        yield* this.#ensureNotCancelled(signal);
 
         const current = queue.shift();
         if (!current) {
@@ -811,7 +809,7 @@ class SyncService {
           const relativePath = normalizePath(
             current.relativePath ? `${current.relativePath}/${child.name}` : child.name
           );
-          if (!relativePath || this.isExcluded(relativePath)) {
+          if (!relativePath || this.#isExcluded(relativePath)) {
             continue;
           }
 
@@ -832,7 +830,7 @@ class SyncService {
     });
   }
 
-  private getOrCreateRemoteRoot(
+  #getOrCreateRemoteRoot(
     configDir: string,
     vaultRootId: ProtonFolderId,
     signal?: AbortSignal
@@ -865,7 +863,7 @@ class SyncService {
     });
   }
 
-  private buildUploadMetadata(
+  #buildUploadMetadata(
     relativePath: string,
     modifiedAt: number,
     expectedSize: number,
@@ -879,7 +877,7 @@ class SyncService {
     };
   }
 
-  private isExcluded(relativePath: string): boolean {
+  #isExcluded(relativePath: string): boolean {
     const normalized = normalizePath(relativePath);
     if (!normalized) {
       return false;
@@ -912,7 +910,7 @@ class SyncService {
     return false;
   }
 
-  private withTiming<A, E, R>(
+  #withTiming<A, E, R>(
     timingLogger: TimingLogger,
     operationName: string,
     effect: Effect.Effect<A, E, R>
@@ -929,7 +927,7 @@ class SyncService {
     });
   }
 
-  private ensureNotCancelled(signal: AbortSignal): Effect.Effect<void, SyncCancelledError> {
+  #ensureNotCancelled(signal: AbortSignal): Effect.Effect<void, SyncCancelledError> {
     if (signal.aborted) {
       return Effect.fail(new SyncCancelledError({ reason: signal.reason }));
     }

@@ -11,10 +11,10 @@ export const { init: initSyncProgressModal, get: getSyncProgressModal } = (funct
   let instance: SyncProgressModal | null = null;
 
   return {
-    init: function initSyncProgressModal(app: App): SyncProgressModal {
+    init: function init(this: void, app: App): SyncProgressModal {
       return (instance ??= new SyncProgressModal(app));
     },
-    get: function getSyncProgressModal(): SyncProgressModal {
+    get: function get(this: void): SyncProgressModal {
       if (!instance) {
         throw new Error('SyncProgressModal has not been initialized. Please call initSyncProgressModalApi first.');
       }
@@ -24,23 +24,23 @@ export const { init: initSyncProgressModal, get: getSyncProgressModal } = (funct
 })();
 
 class SyncProgressModal extends Modal {
-  private stateSubscription: Subscription | null = null;
-  private messageEl: HTMLElement | null = null;
-  private detailsEl: HTMLElement | null = null;
-  private progressBarEl: HTMLElement | null = null;
-  private progressFillEl: HTMLElement | null = null;
-  private autoCloseIntervalId: number | null = null;
-  private autoCloseTimeoutId: number | null = null;
-  private cancelButtonSetting: Setting | null = null;
-  private cancelButtonEl: HTMLButtonElement | null = null;
+  #stateSubscription: Subscription | null = null;
+  #messageEl: HTMLElement | null = null;
+  #detailsEl: HTMLElement | null = null;
+  #progressBarEl: HTMLElement | null = null;
+  #progressFillEl: HTMLElement | null = null;
+  #autoCloseIntervalId: number | null = null;
+  #autoCloseTimeoutId: number | null = null;
+  #cancelButtonSetting: Setting | null = null;
+  #cancelButtonEl: HTMLButtonElement | null = null;
 
-  private terminalState: 'running' | 'completed' | 'failed' | 'cancelled' = 'running';
+  #terminalState: 'running' | 'completed' | 'failed' | 'cancelled' = 'running';
 
-  constructor(app: App) {
+  public constructor(app: App) {
     super(app);
   }
 
-  onOpen(): void {
+  public onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
     contentEl.empty();
@@ -50,31 +50,31 @@ class SyncProgressModal extends Modal {
 
     contentEl.createEl('h2', { text: t.modals.syncProgress.title });
 
-    this.messageEl = contentEl.createEl('p', {
+    this.#messageEl = contentEl.createEl('p', {
       cls: 'proton-sync-progress__message',
       text: t.modals.syncProgress.initialMessage
     });
 
-    this.detailsEl = contentEl.createEl('p', {
+    this.#detailsEl = contentEl.createEl('p', {
       cls: 'proton-sync-progress__details',
       text: t.modals.syncProgress.initialDetails
     });
 
-    this.progressBarEl = contentEl.createDiv({
+    this.#progressBarEl = contentEl.createDiv({
       cls: 'proton-sync-progress__bar proton-sync-progress__bar--determinate'
     });
-    this.progressBarEl.setAttr('role', 'progressbar');
-    this.progressBarEl.setAttr('aria-valuemin', '0');
-    this.progressBarEl.setAttr('aria-valuemax', '100');
-    this.progressBarEl.setAttr('aria-valuenow', '0');
-    this.progressBarEl.style.setProperty('--proton-sync-progress-scale', '0');
+    this.#progressBarEl.setAttr('role', 'progressbar');
+    this.#progressBarEl.setAttr('aria-valuemin', '0');
+    this.#progressBarEl.setAttr('aria-valuemax', '100');
+    this.#progressBarEl.setAttr('aria-valuenow', '0');
+    this.#progressBarEl.style.setProperty('--proton-sync-progress-scale', '0');
 
-    this.progressFillEl = this.progressBarEl.createDiv({
+    this.#progressFillEl = this.#progressBarEl.createDiv({
       cls: 'proton-sync-progress__bar-fill'
     });
 
-    this.cancelButtonSetting = new Setting(contentEl);
-    this.cancelButtonSetting.addButton(button => {
+    this.#cancelButtonSetting = new Setting(contentEl);
+    this.#cancelButtonSetting.addButton(button => {
       button
         .setButtonText(t.common.cancel)
         .setWarning()
@@ -84,125 +84,125 @@ class SyncProgressModal extends Modal {
             return;
           }
 
-          if (this.cancelButtonEl) {
-            this.cancelButtonEl.disabled = true;
+          if (this.#cancelButtonEl) {
+            this.#cancelButtonEl.disabled = true;
           }
 
-          this.render(t.modals.syncProgress.cancellingMessage, t.modals.syncProgress.cancellingDetails, null);
+          this.#render(t.modals.syncProgress.cancellingMessage, t.modals.syncProgress.cancellingDetails, null);
         });
 
-      this.cancelButtonEl = button.buttonEl;
+      this.#cancelButtonEl = button.buttonEl;
     });
 
     const setting = new Setting(contentEl).setDesc(t.modals.syncProgress.closeHint);
-    this.cancelButtonSetting.settingEl.hide();
+    this.#cancelButtonSetting.settingEl.hide();
 
-    this.stateSubscription = getSyncService().state$.subscribe(state => {
+    this.#stateSubscription = getSyncService().state$.subscribe(state => {
       if (state.state === 'idle') {
         setting.descEl.hide();
-        this.progressBarEl?.hide();
-        this.cancelButtonSetting?.settingEl.hide();
+        this.#progressBarEl?.hide();
+        this.#cancelButtonSetting?.settingEl.hide();
       } else {
         setting.descEl.show();
-        this.progressBarEl?.show();
-        this.cancelButtonSetting?.settingEl.show();
+        this.#progressBarEl?.show();
+        this.#cancelButtonSetting?.settingEl.show();
       }
 
-      if (this.terminalState !== 'running') {
+      if (this.#terminalState !== 'running') {
         return;
       }
 
       const viewState = toConfigSyncProgressViewState(state);
-      this.render(viewState.message, viewState.details, viewState.progressPercent);
+      this.#render(viewState.message, viewState.details, viewState.progressPercent);
     });
   }
 
-  onClose(): void {
-    this.stateSubscription?.unsubscribe();
-    this.stateSubscription = null;
-    this.clearAutoCloseTimers();
-    this.messageEl = null;
-    this.detailsEl = null;
-    this.progressBarEl = null;
-    this.progressFillEl = null;
-    this.cancelButtonSetting = null;
-    this.cancelButtonEl = null;
-    this.terminalState = 'running';
+  public onClose(): void {
+    this.#stateSubscription?.unsubscribe();
+    this.#stateSubscription = null;
+    this.#clearAutoCloseTimers();
+    this.#messageEl = null;
+    this.#detailsEl = null;
+    this.#progressBarEl = null;
+    this.#progressFillEl = null;
+    this.#cancelButtonSetting = null;
+    this.#cancelButtonEl = null;
+    this.#terminalState = 'running';
   }
 
-  markCompleted(): void {
+  public markCompleted(): void {
     const { t } = getI18n();
-    this.clearAutoCloseTimers();
-    this.terminalState = 'completed';
+    this.#clearAutoCloseTimers();
+    this.#terminalState = 'completed';
     this.contentEl.removeClass('proton-sync-progress--failed');
     this.contentEl.addClass('proton-sync-progress--completed');
 
     let secondsRemaining = 5;
-    this.render(t.modals.syncProgress.completedMessage, this.toAutoCloseMessage(secondsRemaining), 100);
+    this.#render(t.modals.syncProgress.completedMessage, this.#toAutoCloseMessage(secondsRemaining), 100);
 
-    this.autoCloseIntervalId = window.setInterval(() => {
+    this.#autoCloseIntervalId = window.setInterval(() => {
       secondsRemaining -= 1;
       if (secondsRemaining > 0) {
-        this.render(t.modals.syncProgress.completedMessage, this.toAutoCloseMessage(secondsRemaining), 100);
+        this.#render(t.modals.syncProgress.completedMessage, this.#toAutoCloseMessage(secondsRemaining), 100);
       }
     }, 1000);
 
-    this.autoCloseTimeoutId = window.setTimeout(() => {
-      this.clearAutoCloseTimers();
+    this.#autoCloseTimeoutId = window.setTimeout(() => {
+      this.#clearAutoCloseTimers();
       this.close();
     }, 5000);
   }
 
-  markFailed(message: string): void {
+  public markFailed(message: string): void {
     const { t } = getI18n();
-    this.terminalState = 'failed';
+    this.#terminalState = 'failed';
     this.contentEl.removeClass('proton-sync-progress--completed');
     this.contentEl.addClass('proton-sync-progress--failed');
 
-    this.progressBarEl?.hide();
-    this.cancelButtonSetting?.settingEl.hide();
-    this.render(t.modals.syncProgress.failedMessage, message, null);
+    this.#progressBarEl?.hide();
+    this.#cancelButtonSetting?.settingEl.hide();
+    this.#render(t.modals.syncProgress.failedMessage, message, null);
   }
 
-  markCancelled(): void {
+  public markCancelled(): void {
     this.close();
   }
 
-  private render(message: string, details: string, progressPercent: number | null): void {
-    if (!this.messageEl || !this.detailsEl || !this.progressBarEl || !this.progressFillEl) {
+  #render(message: string, details: string, progressPercent: number | null): void {
+    if (!this.#messageEl || !this.#detailsEl || !this.#progressBarEl || !this.#progressFillEl) {
       return;
     }
 
-    this.messageEl.setText(message);
-    this.detailsEl.setText(details);
+    this.#messageEl.setText(message);
+    this.#detailsEl.setText(details);
 
     if (progressPercent === null) {
-      this.progressBarEl.removeClass('proton-sync-progress__bar--determinate');
-      this.progressBarEl.addClass('proton-sync-progress__bar--indeterminate');
-      this.progressBarEl.removeAttribute('aria-valuenow');
+      this.#progressBarEl.removeClass('proton-sync-progress__bar--determinate');
+      this.#progressBarEl.addClass('proton-sync-progress__bar--indeterminate');
+      this.#progressBarEl.removeAttribute('aria-valuenow');
     } else {
       const clampedProgress = Math.max(0, Math.min(100, progressPercent));
-      this.progressBarEl.removeClass('proton-sync-progress__bar--indeterminate');
-      this.progressBarEl.addClass('proton-sync-progress__bar--determinate');
-      this.progressBarEl.setAttr('aria-valuenow', String(clampedProgress));
-      this.progressBarEl.style.setProperty('--proton-sync-progress-scale', String(clampedProgress / 100));
+      this.#progressBarEl.removeClass('proton-sync-progress__bar--indeterminate');
+      this.#progressBarEl.addClass('proton-sync-progress__bar--determinate');
+      this.#progressBarEl.setAttr('aria-valuenow', String(clampedProgress));
+      this.#progressBarEl.style.setProperty('--proton-sync-progress-scale', String(clampedProgress / 100));
     }
   }
 
-  private toAutoCloseMessage(secondsRemaining: number): string {
+  #toAutoCloseMessage(secondsRemaining: number): string {
     const { t } = getI18n();
     return t.modals.syncProgress.autoCloseMessage(secondsRemaining);
   }
 
-  private clearAutoCloseTimers(): void {
-    if (this.autoCloseIntervalId !== null) {
-      window.clearInterval(this.autoCloseIntervalId);
-      this.autoCloseIntervalId = null;
+  #clearAutoCloseTimers(): void {
+    if (this.#autoCloseIntervalId !== null) {
+      window.clearInterval(this.#autoCloseIntervalId);
+      this.#autoCloseIntervalId = null;
     }
 
-    if (this.autoCloseTimeoutId !== null) {
-      window.clearTimeout(this.autoCloseTimeoutId);
-      this.autoCloseTimeoutId = null;
+    if (this.#autoCloseTimeoutId !== null) {
+      window.clearTimeout(this.#autoCloseTimeoutId);
+      this.#autoCloseTimeoutId = null;
     }
   }
 }

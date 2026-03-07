@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-type SecretStorageMock = {
+interface SecretStorageMock {
   getSecret: ReturnType<typeof vi.fn<(key: string) => string | null>>;
   setSecret: ReturnType<typeof vi.fn<(key: string, value: string) => Promise<void>>>;
-};
+}
 
 function createSecretStorageMock(): SecretStorageMock {
   return {

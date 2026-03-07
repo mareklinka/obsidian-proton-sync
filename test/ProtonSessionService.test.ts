@@ -9,6 +9,7 @@ const getObsidianSettingsStoreMock = vi.hoisted(() => vi.fn());
 
 vi.mock('obsidian', () => ({
   requestUrl: requestUrlMock,
+  // eslint-disable-next-line @typescript-eslint/naming-convention
   Platform: { isMobile: false }
 }));
 
@@ -69,10 +70,15 @@ describe('ProtonSessionService', () => {
     requestUrlMock.mockResolvedValue({
       status: 200,
       json: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         UID: 'uid-123',
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         AccessToken: 'access-refreshed',
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         RefreshToken: 'refresh-refreshed',
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         Scope: 'full locked',
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         ExpiresIn: 3600
       }
     });

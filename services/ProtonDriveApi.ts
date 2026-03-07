@@ -40,10 +40,10 @@ export const { init: initProtonDriveApi, get: getProtonDriveApi } = (function ()
   let instance: ProtonDriveApi | null = null;
 
   return {
-    init: function initProtonDriveApi(): ProtonDriveApi {
+    init: function (this: void): ProtonDriveApi {
       return (instance ??= new ProtonDriveApi(getProtonDriveClient()));
     },
-    get: function getProtonDriveApi(): ProtonDriveApi {
+    get: function (this: void): ProtonDriveApi {
       if (!instance) {
         throw new Error('ProtonCloudApi has not been initialized. Please call initProtonDriveApi first.');
       }
@@ -58,26 +58,22 @@ class ProtonDriveApi {
   public getRootFolder(): Effect.Effect<ProtonFolder, MyFilesRootFilesNotFound | GenericProtonDriveError> {
     return Effect.gen(this, function* () {
       const node = yield* Effect.tryPromise<MaybeNode, GenericProtonDriveError>({
-        try: async () => {
-          return await this.client.getMyFilesRootFolder();
-        },
-        catch: () => {
-          return new GenericProtonDriveError();
-        }
+        try: async () => await this.client.getMyFilesRootFolder(),
+        catch: () => new GenericProtonDriveError()
       });
 
       if (!node.ok) {
         throw new MyFilesRootFilesNotFound();
       }
 
-      return ProtonDriveApi.createFolderFromNode(node.value);
+      return ProtonDriveApi.#createFolderFromNode(node.value);
     });
   }
 
-  public getSharedFolders(): Effect.Effect<ProtonFolder[], MyFilesRootFilesNotFound | GenericProtonDriveError> {
+  public getSharedFolders(): Effect.Effect<Array<ProtonFolder>, MyFilesRootFilesNotFound | GenericProtonDriveError> {
     return Effect.tryPromise({
       try: async () => {
-        const shares: ProtonFolder[] = [];
+        const shares: Array<ProtonFolder> = [];
         for await (const share of this.client.iterateSharedNodesWithMe()) {
           if (!share.ok) {
             continue;
@@ -87,7 +83,7 @@ class ProtonDriveApi {
             continue;
           }
 
-          shares.push(ProtonDriveApi.createFolderFromNode(share.value));
+          shares.push(ProtonDriveApi.#createFolderFromNode(share.value));
         }
 
         return shares;
@@ -100,33 +96,33 @@ class ProtonDriveApi {
     folderId: ProtonFolderId,
     signal?: AbortSignal
   ): Effect.Effect<
-    (ProtonFile | ProtonFolder)[],
+    Array<ProtonFile | ProtonFolder>,
     NotAFolderError | GenericProtonDriveError | ProtonRequestCancelledError
   > {
     return Effect.tryPromise({
       try: async () => {
-        this.throwIfCancelled(signal);
+        this.#throwIfCancelled(signal);
 
-        const children: (ProtonFile | ProtonFolder)[] = [];
+        const children: Array<ProtonFile | ProtonFolder> = [];
         for await (const child of this.client.iterateFolderChildren(folderId.uid, undefined, signal)) {
-          this.throwIfCancelled(signal);
+          this.#throwIfCancelled(signal);
 
           if (!child.ok) {
             continue;
           }
 
           if (child.value.type === NodeType.Folder) {
-            children.push(ProtonDriveApi.createFolderFromNode(child.value));
+            children.push(ProtonDriveApi.#createFolderFromNode(child.value));
           } else if (child.value.type === NodeType.File) {
-            children.push(ProtonDriveApi.createFileFromNode(child.value));
+            children.push(ProtonDriveApi.#createFileFromNode(child.value));
           }
         }
 
         return children;
       },
       catch: error => {
-        if (error instanceof ProtonRequestCancelledError || this.isAbortError(error)) {
-          return this.toCancelledError(error);
+        if (error instanceof ProtonRequestCancelledError || this.#isAbortError(error)) {
+          return this.#toCancelledError(error);
         }
 
         return new GenericProtonDriveError();
@@ -141,25 +137,25 @@ class ProtonDriveApi {
   ): Effect.Effect<Option.Option<ProtonFolder>, GenericProtonDriveError | ProtonRequestCancelledError> {
     return Effect.tryPromise({
       try: async () => {
-        this.throwIfCancelled(signal);
+        this.#throwIfCancelled(signal);
 
         for await (const child of this.client.iterateFolderChildren(parentId.uid, { type: NodeType.Folder }, signal)) {
-          this.throwIfCancelled(signal);
+          this.#throwIfCancelled(signal);
 
           if (!child.ok) {
             continue;
           }
 
           if (child.value.name === name) {
-            return Option.some(ProtonDriveApi.createFolderFromNode(child.value));
+            return Option.some(ProtonDriveApi.#createFolderFromNode(child.value));
           }
         }
 
         return Option.none();
       },
       catch: error => {
-        if (error instanceof ProtonRequestCancelledError || this.isAbortError(error)) {
-          return this.toCancelledError(error);
+        if (error instanceof ProtonRequestCancelledError || this.#isAbortError(error)) {
+          return this.#toCancelledError(error);
         }
 
         return new GenericProtonDriveError();
@@ -177,7 +173,7 @@ class ProtonDriveApi {
   > {
     return Effect.tryPromise({
       try: async () => {
-        this.throwIfCancelled(signal);
+        this.#throwIfCancelled(signal);
 
         const result = await this.client.createFolder(parentId.uid, name, new Date());
 
@@ -185,11 +181,11 @@ class ProtonDriveApi {
           throw new GenericProtonDriveError();
         }
 
-        return ProtonDriveApi.createFolderFromNode(result.value);
+        return ProtonDriveApi.#createFolderFromNode(result.value);
       },
       catch: error => {
-        if (error instanceof ProtonRequestCancelledError || this.isAbortError(error)) {
-          return this.toCancelledError(error);
+        if (error instanceof ProtonRequestCancelledError || this.#isAbortError(error)) {
+          return this.#toCancelledError(error);
         }
 
         if (error instanceof APICodeError) {
@@ -222,13 +218,13 @@ class ProtonDriveApi {
   ) {
     return Effect.tryPromise({
       try: async () => {
-        this.throwIfCancelled(signal);
+        this.#throwIfCancelled(signal);
 
         const result = await this.client.getFileUploader(parentId.uid, name, metadata, signal);
         const stream = new ReadableStream<Uint8Array>({
-          start: controller => {
-            controller.enqueue(new Uint8Array(data));
-            controller.close();
+          start: c => {
+            c.enqueue(new Uint8Array(data));
+            c.close();
           }
         });
 
@@ -236,8 +232,8 @@ class ProtonDriveApi {
         await controller.completion();
       },
       catch: e => {
-        if (e instanceof ProtonRequestCancelledError || this.isAbortError(e)) {
-          return this.toCancelledError(e);
+        if (e instanceof ProtonRequestCancelledError || this.#isAbortError(e)) {
+          return this.#toCancelledError(e);
         }
 
         if (e instanceof ValidationError) {
@@ -254,13 +250,13 @@ class ProtonDriveApi {
   public uploadRevision(id: ProtonFileId, data: ArrayBuffer, metadata: UploadMetadata, signal?: AbortSignal) {
     return Effect.tryPromise({
       try: async () => {
-        this.throwIfCancelled(signal);
+        this.#throwIfCancelled(signal);
 
         const result = await this.client.getFileRevisionUploader(id.uid, metadata, signal);
         const stream = new ReadableStream<Uint8Array>({
-          start: controller => {
-            controller.enqueue(new Uint8Array(data));
-            controller.close();
+          start: c => {
+            c.enqueue(new Uint8Array(data));
+            c.close();
           }
         });
 
@@ -268,8 +264,8 @@ class ProtonDriveApi {
         await controller.completion();
       },
       catch: e => {
-        if (e instanceof ProtonRequestCancelledError || this.isAbortError(e)) {
-          return this.toCancelledError(e);
+        if (e instanceof ProtonRequestCancelledError || this.#isAbortError(e)) {
+          return this.#toCancelledError(e);
         }
 
         if (e instanceof ValidationError) {
@@ -289,10 +285,10 @@ class ProtonDriveApi {
   ): Effect.Effect<ArrayBuffer, GenericProtonDriveError | ProtonRequestCancelledError> {
     return Effect.tryPromise({
       try: async () => {
-        this.throwIfCancelled(signal);
+        this.#throwIfCancelled(signal);
 
         const downloader = await this.client.getFileDownloader(id.uid, signal);
-        const chunks: Uint8Array[] = [];
+        const chunks: Array<Uint8Array> = [];
         let total = 0;
 
         const writable = new WritableStream<Uint8Array>({
@@ -315,8 +311,8 @@ class ProtonDriveApi {
         return merged.buffer;
       },
       catch: error => {
-        if (error instanceof ProtonRequestCancelledError || this.isAbortError(error)) {
-          return this.toCancelledError(error);
+        if (error instanceof ProtonRequestCancelledError || this.#isAbortError(error)) {
+          return this.#toCancelledError(error);
         }
 
         return new GenericProtonDriveError();
@@ -344,14 +340,14 @@ class ProtonDriveApi {
   ): Effect.Effect<void, GenericProtonDriveError | ProtonRequestCancelledError> {
     return Effect.tryPromise({
       try: async () => {
-        this.throwIfCancelled(signal);
+        this.#throwIfCancelled(signal);
 
         if (nodeIds.length === 0) {
           return;
         }
 
         const uids = nodeIds.map(nodeId => nodeId.uid);
-        const results = await this.consumeAllResults(this.client.trashNodes(uids, signal), signal);
+        const results = await this.#consumeAllResults(this.client.trashNodes(uids, signal), signal);
 
         const failed = results.find(result => !result.ok);
         if (failed) {
@@ -359,8 +355,8 @@ class ProtonDriveApi {
         }
       },
       catch: error => {
-        if (error instanceof ProtonRequestCancelledError || this.isAbortError(error)) {
-          return this.toCancelledError(error);
+        if (error instanceof ProtonRequestCancelledError || this.#isAbortError(error)) {
+          return this.#toCancelledError(error);
         }
 
         return new GenericProtonDriveError();
@@ -368,36 +364,34 @@ class ProtonDriveApi {
     });
   }
 
-  private async consumeAllResults(
+  async #consumeAllResults(
     generator: AsyncGenerator<{ uid: string; ok: boolean; error?: string }>,
     signal?: AbortSignal
   ): Promise<Array<{ uid: string; ok: boolean; error?: string }>> {
     const results: Array<{ uid: string; ok: boolean; error?: string }> = [];
 
     while (true) {
-      this.throwIfCancelled(signal);
+      this.#throwIfCancelled(signal);
 
       const next = await generator.next();
       if (next.done) {
         break;
       }
 
-      if (next.value) {
-        results.push(next.value);
-      }
+      results.push(next.value);
     }
 
     await generator.return(undefined);
     return results;
   }
 
-  private throwIfCancelled(signal?: AbortSignal): void {
+  #throwIfCancelled(signal?: AbortSignal): void {
     if (signal?.aborted) {
       throw new ProtonRequestCancelledError({ reason: signal.reason });
     }
   }
 
-  private isAbortError(error: unknown): boolean {
+  #isAbortError(error: unknown): boolean {
     return error instanceof DOMException
       ? error.name === 'AbortError'
       : typeof error === 'object' &&
@@ -406,7 +400,7 @@ class ProtonDriveApi {
           (error as { name?: string }).name === 'AbortError';
   }
 
-  private toCancelledError(error: unknown): ProtonRequestCancelledError {
+  #toCancelledError(error: unknown): ProtonRequestCancelledError {
     if (error instanceof ProtonRequestCancelledError) {
       return error;
     }
@@ -414,7 +408,7 @@ class ProtonDriveApi {
     return new ProtonRequestCancelledError({ reason: error });
   }
 
-  private static createFolderFromNode(node: {
+  static #createFolderFromNode(node: {
     name: string;
     uid: string;
     treeEventScopeId: string;
@@ -429,7 +423,7 @@ class ProtonDriveApi {
     };
   }
 
-  private static createFileFromNode(node: {
+  static #createFileFromNode(node: {
     name: string;
     uid: string;
     treeEventScopeId: string;

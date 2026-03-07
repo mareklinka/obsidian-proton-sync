@@ -22,51 +22,51 @@ class ConsoleLogger {
     return new ConsoleLogger(this.scope ? `${this.scope}:${scope}` : scope);
   }
 
-  public debug(message: string, ...data: unknown[]): void {
-    if (!this.shouldLog('debug')) {
+  public debug(message: string, ...data: Array<unknown>): void {
+    if (!this.#shouldLog('debug')) {
       return;
     }
 
     console.debug(`[ObsidianSync]${this.scope ? ` [${this.scope}]` : ''} ${message}`, ...data);
   }
 
-  public log(message: string, ...data: unknown[]): void {
-    if (!this.shouldLog('info')) {
+  public log(message: string, ...data: Array<unknown>): void {
+    if (!this.#shouldLog('info')) {
       return;
     }
 
     console.log(`[ObsidianSync]${this.scope ? ` [${this.scope}]` : ''} ${message}`, ...data);
   }
 
-  public warn(message: string, ...data: unknown[]): void {
-    if (!this.shouldLog('warn')) {
+  public warn(message: string, ...data: Array<unknown>): void {
+    if (!this.#shouldLog('warn')) {
       return;
     }
 
     console.warn(`[ObsidianSync]${this.scope ? ` [${this.scope}]` : ''} ${message}`, ...data);
   }
 
-  public info(message: string, ...data: unknown[]): void {
-    if (!this.shouldLog('info')) {
+  public info(message: string, ...data: Array<unknown>): void {
+    if (!this.#shouldLog('info')) {
       return;
     }
 
     console.info(`[ObsidianSync]${this.scope ? ` [${this.scope}]` : ''} ${message}`, ...data);
   }
 
-  public error(message: string, ...data: unknown[]): void {
-    if (!this.shouldLog('error')) {
+  public error(message: string, ...data: Array<unknown>): void {
+    if (!this.#shouldLog('error')) {
       return;
     }
 
     console.error(`[ObsidianSync]${this.scope ? ` [${this.scope}]` : ''} ${message}`, ...data);
   }
 
-  private shouldLog(level: LogLevel): boolean {
-    return LOG_SEVERITY[level] >= LOG_SEVERITY[this.getCurrentLevel()];
+  #shouldLog(level: LogLevel): boolean {
+    return LOG_SEVERITY[level] >= LOG_SEVERITY[this.#getCurrentLevel()];
   }
 
-  private getCurrentLevel(): LogLevel {
+  #getCurrentLevel(): LogLevel {
     try {
       return getObsidianSettingsStore().get('logLevel');
     } catch {

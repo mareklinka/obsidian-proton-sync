@@ -15,10 +15,10 @@ export const { init: initProtonHttpClient, get: getProtonHttpClient } = (functio
   let instance: ObsidianHttpClient | null = null;
 
   return {
-    init: function initProtonHttpClient(): ObsidianHttpClient {
+    init: function (this: void): ObsidianHttpClient {
       return (instance ??= new ObsidianHttpClient());
     },
-    get: function getProtonHttpClient(): ObsidianHttpClient {
+    get: function (this: void): ObsidianHttpClient {
       if (!instance) {
         throw new Error('ObsidianHttpClient has not been initialized. Please call initProtonHttpClient first.');
       }
@@ -28,28 +28,28 @@ export const { init: initProtonHttpClient, get: getProtonHttpClient } = (functio
 })();
 
 export class ObsidianHttpClient implements ProtonDriveHTTPClient {
-  private readonly sessionService = getProtonSessionService();
+  readonly #sessionService = getProtonSessionService();
 
-  async fetchJson(request: ProtonDriveHTTPClientJsonRequest): Promise<Response> {
-    return this.fetch(request, true);
+  public async fetchJson(request: ProtonDriveHTTPClientJsonRequest): Promise<Response> {
+    return this.#fetch(request, true);
   }
 
-  async fetchBlob(request: ProtonDriveHTTPClientBlobRequest): Promise<Response> {
-    return this.fetch(request, false);
+  public async fetchBlob(request: ProtonDriveHTTPClientBlobRequest): Promise<Response> {
+    return this.#fetch(request, false);
   }
 
-  private async fetch(
+  async #fetch(
     request: ProtonDriveHTTPClientJsonRequest | ProtonDriveHTTPClientBlobRequest,
     isJson: boolean
   ): Promise<Response> {
-    const currentSession = this.sessionService.getCurrentSession();
+    const currentSession = this.#sessionService.getCurrentSession();
     if (Option.isNone(currentSession)) {
       throw new Error('No Proton session available for SDK requests.');
     }
 
-    const headers = this.buildHeaders(request.headers, currentSession.value);
-    const { body, contentType } = await this.prepareRequestBody(request);
-    const h = this.headersToObject(headers);
+    const headers = this.#buildHeaders(request.headers, currentSession.value);
+    const { body, contentType } = await this.#prepareRequestBody(request);
+    const h = this.#headersToObject(headers);
 
     const r: RequestUrlParam = {
       url: request.url,
@@ -79,9 +79,7 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     }
   }
 
-  private async prepareRequestBody(
-    request: ProtonDriveHTTPClientJsonRequest | ProtonDriveHTTPClientBlobRequest
-  ): Promise<{
+  async #prepareRequestBody(request: ProtonDriveHTTPClientJsonRequest | ProtonDriveHTTPClientBlobRequest): Promise<{
     body: string | ArrayBuffer | undefined;
     contentType: string | undefined;
   }> {
@@ -91,15 +89,11 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     if ('json' in request && request.json) {
       body = JSON.stringify(request.json);
       contentType = 'application/json';
-    } else if ('body' in request && request.body) {
+    } else if ('body' in request && request.body !== undefined && request.body !== null) {
       if (request.body instanceof FormData && request.body.has('Block')) {
         const blockData = (request.body as unknown as FormData).get('Block') as Blob;
 
-        if (!blockData) {
-          throw new Error('Unexpected body type in request');
-        }
-
-        const { data, boundary } = await this.blobToMultipartArrayBuffer(blockData);
+        const { data, boundary } = await this.#blobToMultipartArrayBuffer(blockData);
         body = data;
 
         contentType = `multipart/form-data; boundary=${boundary}`;
@@ -114,17 +108,17 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     return { body, contentType };
   }
 
-  private buildHeaders(baseHeaders: Headers, session: ProtonSession): Headers {
+  #buildHeaders(baseHeaders: Headers, session: ProtonSession): Headers {
     const headers = new Headers(baseHeaders);
 
     headers.set('x-pm-uid', session.uid);
     headers.set('authorization', `Bearer ${session.accessToken}`);
-    headers.set('x-pm-appversion', this.sessionService.appVersionHeader);
+    headers.set('x-pm-appversion', this.#sessionService.appVersionHeader);
 
     return headers;
   }
 
-  private async blobToMultipartArrayBuffer(data: Blob): Promise<{ data: ArrayBuffer; boundary: string }> {
+  async #blobToMultipartArrayBuffer(data: Blob): Promise<{ data: ArrayBuffer; boundary: string }> {
     const N = 16;
     const randomBoundaryString =
       'obsdnsync-' +
@@ -132,6 +126,7 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
         .join((Math.random().toString(36) + '00000000000000000').slice(2, 18))
         .slice(0, N);
 
+    // eslint-disable-next-line max-len
     const pre_string = `------${randomBoundaryString}\r\nContent-Disposition: form-data; name="Block"; filename="blob"\r\nContent-Type: application/octet-stream\r\n\r\n`;
     const post_string = `\r\n------${randomBoundaryString}--`;
 
@@ -143,7 +138,7 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     return { data: concatenated, boundary: `----${randomBoundaryString}` };
   }
 
-  private headersToObject(headers: Headers): Record<string, string> {
+  #headersToObject(headers: Headers): Record<string, string> {
     const output: Record<string, string> = {};
     headers.forEach((value, key) => {
       output[key] = value;

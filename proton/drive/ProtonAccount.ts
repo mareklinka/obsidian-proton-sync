@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 import type { ProtonDriveAccount, ProtonDriveAccountAddress } from '@protontech/drive-sdk';
 import type { PrivateKey, PublicKey } from '@protontech/drive-sdk/dist/crypto';
 import { Option } from 'effect';
@@ -7,51 +8,51 @@ import type { ProtonSession } from '../auth/ProtonSession';
 import { getProtonSessionService } from '../auth/ProtonSessionService';
 import { getJson } from '../ProtonApiClient';
 
-type ProtonAddressKey = {
+interface ProtonAddressKey {
   ID: string;
   PrivateKey: string;
   Primary?: number | boolean;
   Token?: string;
   Signature?: string;
   Active?: number | boolean;
-};
+}
 
-type ProtonAddress = {
+interface ProtonAddress {
   ID: string;
   Email: string;
   Order?: number;
-  Keys?: ProtonAddressKey[];
-};
+  Keys?: Array<ProtonAddressKey>;
+}
 
-type ProtonUser = {
+interface ProtonUser {
   ID: string;
   Name: string;
-  Keys?: ProtonAddressKey[];
-};
+  Keys?: Array<ProtonAddressKey>;
+}
 
-type ProtonUserResponse = {
+interface ProtonUserResponse {
   User?: ProtonUser;
-};
+}
 
-type ProtonAddressesResponse = {
-  Addresses?: ProtonAddress[];
-};
+interface ProtonAddressesResponse {
+  Addresses?: Array<ProtonAddress>;
+}
 
-type ProtonPublicKeyEntry = {
+interface ProtonPublicKeyEntry {
   PublicKey: string;
-};
+}
 
-type ProtonPublicKeysResponse = {
+interface ProtonPublicKeysResponse {
   Address: {
-    Keys?: ProtonPublicKeyEntry[];
+    Keys?: Array<ProtonPublicKeyEntry>;
   };
   IsProtonMail?: number | boolean;
-};
+}
 
-type CachedValue<T> = {
+interface CachedValue<T> {
   fetchedAt: number;
   data: T;
-};
+}
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -59,10 +60,10 @@ export const { init: initProtonAccount, get: getProtonAccount } = (function () {
   let instance: ProtonAccount | null = null;
 
   return {
-    init: function initProtonAccount(): ProtonAccount {
+    init: function (this: void): ProtonAccount {
       return (instance ??= new ProtonAccount());
     },
-    get: function getProtonAccount(): ProtonAccount {
+    get: function (this: void): ProtonAccount {
       if (!instance) {
         throw new Error('ProtonAccount has not been initialized. Please call initProtonAccount first.');
       }
@@ -72,11 +73,11 @@ export const { init: initProtonAccount, get: getProtonAccount } = (function () {
 })();
 
 class ProtonAccount implements ProtonDriveAccount {
-  private addressesCache: CachedValue<ProtonDriveAccountAddress[]> | null = null;
-  private publicKeysCache = new Map<string, CachedValue<PublicKey[]>>();
-  private sessionService = getProtonSessionService();
+  #addressesCache: CachedValue<Array<ProtonDriveAccountAddress>> | null = null;
+  readonly #publicKeysCache = new Map<string, CachedValue<Array<PublicKey>>>();
+  readonly #sessionService = getProtonSessionService();
 
-  async getOwnPrimaryAddress(): Promise<ProtonDriveAccountAddress> {
+  public async getOwnPrimaryAddress(): Promise<ProtonDriveAccountAddress> {
     const addresses = await this.getOwnAddresses();
 
     if (!addresses.length) {
@@ -86,13 +87,13 @@ class ProtonAccount implements ProtonDriveAccount {
     return addresses[0];
   }
 
-  async getOwnAddresses(): Promise<ProtonDriveAccountAddress[]> {
-    const cached = this.getCached(this.addressesCache);
+  public async getOwnAddresses(): Promise<Array<ProtonDriveAccountAddress>> {
+    const cached = this.#getCached(this.#addressesCache);
     if (cached) {
       return cached;
     }
 
-    const currentSession = this.sessionService.getCurrentSession();
+    const currentSession = this.#sessionService.getCurrentSession();
     if (Option.isNone(currentSession)) {
       return [];
     }
@@ -100,7 +101,7 @@ class ProtonAccount implements ProtonDriveAccount {
     const response = await getJson<ProtonAddressesResponse>(
       '/core/v4/addresses',
       currentSession.value,
-      this.sessionService.appVersionHeader
+      this.#sessionService.appVersionHeader
     );
 
     const addresses = response.Addresses ?? [];
@@ -108,20 +109,24 @@ class ProtonAccount implements ProtonDriveAccount {
       return [];
     }
 
-    const user = await this.getUser();
+    const user = await this.#getUser();
 
-    const saltedPassphrases = this.sessionService.getSaltedKeyPasswords();
+    const saltedPassphrases = this.#sessionService.getSaltedKeyPasswords();
     if (Option.isNone(saltedPassphrases)) {
       return [];
     }
 
     const userKey = await resolveUserKey(user.Keys ?? [], saltedPassphrases.value);
 
-    const mapped = await Promise.all(addresses.map(address => mapAddress(address, userKey!)));
+    if (!userKey) {
+      return [];
+    }
+
+    const mapped = await Promise.all(addresses.map(address => mapAddress(address, userKey)));
 
     const sorted = [...mapped].sort((left, right) => left.addressId.localeCompare(right.addressId));
 
-    this.addressesCache = {
+    this.#addressesCache = {
       fetchedAt: Date.now(),
       data: sorted
     };
@@ -129,7 +134,7 @@ class ProtonAccount implements ProtonDriveAccount {
     return sorted;
   }
 
-  async getOwnAddress(emailOrAddressId: string): Promise<ProtonDriveAccountAddress> {
+  public async getOwnAddress(emailOrAddressId: string): Promise<ProtonDriveAccountAddress> {
     const addresses = await this.getOwnAddresses();
     const match = addresses.find(
       address => address.addressId === emailOrAddressId || address.email === emailOrAddressId
@@ -141,29 +146,29 @@ class ProtonAccount implements ProtonDriveAccount {
     return match;
   }
 
-  async hasProtonAccount(email: string): Promise<boolean> {
-    const currentSession = this.sessionService.getCurrentSession();
+  public async hasProtonAccount(email: string): Promise<boolean> {
+    const currentSession = this.#sessionService.getCurrentSession();
     if (Option.isNone(currentSession)) {
       throw new Error('No Proton session available for API request.');
     }
 
-    const response = await this.fetchPublicKeysRaw(email, currentSession.value);
+    const response = await this.#fetchPublicKeysRaw(email, currentSession.value);
 
     return (response.Address?.Keys ?? []).length > 0;
   }
 
-  async getPublicKeys(email: string): Promise<PublicKey[]> {
-    const cached = this.getCached(this.publicKeysCache.get(email) ?? null);
+  public async getPublicKeys(email: string): Promise<Array<PublicKey>> {
+    const cached = this.#getCached(this.#publicKeysCache.get(email) ?? null);
     if (cached) {
       return cached;
     }
 
-    const currentSession = this.sessionService.getCurrentSession();
+    const currentSession = this.#sessionService.getCurrentSession();
     if (Option.isNone(currentSession)) {
       throw new Error('No Proton session available for API request.');
     }
 
-    const response = await this.fetchPublicKeysRaw(email, currentSession.value);
+    const response = await this.#fetchPublicKeysRaw(email, currentSession.value);
     const keys = response?.Address?.Keys ?? [];
 
     const parsed = await Promise.all(
@@ -175,7 +180,7 @@ class ProtonAccount implements ProtonDriveAccount {
       )
     );
 
-    this.publicKeysCache.set(email, {
+    this.#publicKeysCache.set(email, {
       fetchedAt: Date.now(),
       data: parsed
     });
@@ -183,14 +188,14 @@ class ProtonAccount implements ProtonDriveAccount {
     return parsed;
   }
 
-  private async fetchPublicKeysRaw(email: string, session: ProtonSession): Promise<ProtonPublicKeysResponse> {
-    return getJson<ProtonPublicKeysResponse>('/core/v4/keys/all', session, this.sessionService.appVersionHeader, {
+  async #fetchPublicKeysRaw(email: string, session: ProtonSession): Promise<ProtonPublicKeysResponse> {
+    return getJson<ProtonPublicKeysResponse>('/core/v4/keys/all', session, this.#sessionService.appVersionHeader, {
       Email: email
     });
   }
 
-  private async getUser(): Promise<ProtonUser> {
-    const currentSession = this.sessionService.getCurrentSession();
+  async #getUser(): Promise<ProtonUser> {
+    const currentSession = this.#sessionService.getCurrentSession();
     if (Option.isNone(currentSession)) {
       throw new Error('No Proton session available for API request.');
     }
@@ -198,7 +203,7 @@ class ProtonAccount implements ProtonDriveAccount {
     const response = await getJson<ProtonUserResponse>(
       '/core/v4/users',
       currentSession.value,
-      this.sessionService.appVersionHeader
+      this.#sessionService.appVersionHeader
     );
 
     if (!response.User) {
@@ -208,7 +213,7 @@ class ProtonAccount implements ProtonDriveAccount {
     return response.User;
   }
 
-  private getCached<T>(cache: CachedValue<T> | null): T | null {
+  #getCached<T>(cache: CachedValue<T> | null): T | null {
     if (!cache) {
       return null;
     }
@@ -242,7 +247,7 @@ async function mapAddress(address: ProtonAddress, userKey: openpgp.PrivateKey): 
 }
 
 async function resolveUserKey(
-  keys: ProtonAddressKey[],
+  keys: Array<ProtonAddressKey>,
   passphrases: Record<string, string>
 ): Promise<openpgp.PrivateKey | null> {
   const activeKeys = keys.filter(key => key.Active === undefined || key.Active === true || key.Active === 1);

@@ -13,34 +13,34 @@ import { ProtonDriveLoginModal } from './modals/login-modal';
 import { toLoginIcon, toLoginLabel } from './ui-helpers';
 
 export class ProtonDriveSyncSettingTab extends PluginSettingTab {
-  private readonly disconnectSubject = new Subject<void>();
-  public readonly disconnect$ = this.disconnectSubject.asObservable();
+  readonly #disconnectSubject = new Subject<void>();
+  public readonly disconnect$ = this.#disconnectSubject.asObservable();
 
-  private readonly loginSubject = new Subject<{
+  readonly #loginSubject = new Subject<{
     email: string;
     password: string;
   }>();
-  public readonly login$ = this.loginSubject.asObservable();
+  public readonly login$ = this.#loginSubject.asObservable();
 
-  private readonly loggingChangedSubject = new Subject<{ isEnabled: boolean; minLevel: LogLevel }>();
-  public readonly loggingChanged$ = this.loggingChangedSubject.asObservable();
+  readonly #loggingChangedSubject = new Subject<{ isEnabled: boolean; minLevel: LogLevel }>();
+  public readonly loggingChanged$ = this.#loggingChangedSubject.asObservable();
 
-  private stateSub: Subscription | undefined = undefined;
-  private remoteVaultRootPath: string = '';
+  #stateSub: Subscription | undefined = undefined;
+  #remoteVaultRootPath = '';
 
-  constructor(
+  public constructor(
     plugin: ProtonDriveSyncPlugin,
     private readonly authState: Observable<ProtonAuthStatus>
   ) {
     super(plugin.app, plugin);
   }
 
-  async display(): Promise<void> {
+  public async display(): Promise<void> {
     const settingsStore = getObsidianSettingsStore();
     const { containerEl } = this;
 
-    this.stateSub?.unsubscribe();
-    this.stateSub = combineLatest([this.authState, settingsStore.settings$]).subscribe(([authStatus, settings]) => {
+    this.#stateSub?.unsubscribe();
+    this.#stateSub = combineLatest([this.authState, settingsStore.settings$]).subscribe(([authStatus, settings]) => {
       const { t } = getI18n();
       const hasPersistedSession = getEncryptedSecretStore().hasPersistedSessionData();
 
@@ -60,7 +60,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         text: t.settings.disclosureCredentials
       });
 
-      const statusDescription = this.buildStatusDescription(settings, hasPersistedSession);
+      const statusDescription = this.#buildStatusDescription(settings, hasPersistedSession);
       const connectionSetting = new Setting(containerEl)
         .setName(t.settings.connectionStatus.name)
         .setDesc(statusDescription);
@@ -72,7 +72,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             .setButtonText(t.settings.connectionStatus.disconnectButton)
             .setCta()
             .onClick(() => {
-              this.disconnectSubject.next();
+              this.#disconnectSubject.next();
             })
         );
       } else {
@@ -90,9 +90,9 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
               modal.login$.pipe(take(1)).subscribe(credentials => {
                 settingsStore.set('accountEmail', credentials.email);
 
-                this.loginSubject.next(credentials);
+                this.#loginSubject.next(credentials);
 
-                connectionSetting.setDesc(this.buildStatusDescription(settings, hasPersistedSession));
+                connectionSetting.setDesc(this.#buildStatusDescription(settings, hasPersistedSession));
               });
 
               modal.open();
@@ -100,16 +100,16 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         );
       }
 
-      this.remoteVaultRootPath = settings.remoteVaultRootPath ?? '';
+      this.#remoteVaultRootPath = settings.remoteVaultRootPath ?? '';
 
       new Setting(containerEl)
         .setName(t.settings.remoteVaultRoot.name)
-        .setDesc(this.buildRootPathDescriptionFragment())
+        .setDesc(this.#buildRootPathDescriptionFragment())
         .addText(text => {
           text.setPlaceholder(t.settings.remoteVaultRoot.placeholder);
-          text.setValue(this.remoteVaultRootPath);
+          text.setValue(this.#remoteVaultRootPath);
           text.onChange(value => {
-            this.remoteVaultRootPath = value;
+            this.#remoteVaultRootPath = value;
           });
           text.inputEl.classList.add('proton-sync-full-width');
         });
@@ -150,7 +150,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             .onChange(value => {
               const logLevel = value as LogLevel;
               settingsStore.set('logLevel', logLevel);
-              this.loggingChangedSubject.next({ isEnabled: true, minLevel: logLevel });
+              this.#loggingChangedSubject.next({ isEnabled: true, minLevel: logLevel });
             });
         });
     });
@@ -158,13 +158,13 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
   public hide() {
     // vault root is only updated on tab hide to avoid having to create the folders in Proton on every change
-    getObsidianSettingsStore().set('remoteVaultRootPath', this.remoteVaultRootPath);
-    this.stateSub?.unsubscribe();
-    this.stateSub = undefined;
+    getObsidianSettingsStore().set('remoteVaultRootPath', this.#remoteVaultRootPath);
+    this.#stateSub?.unsubscribe();
+    this.#stateSub = undefined;
     super.hide();
   }
 
-  private buildStatusDescription(settings: PluginSettings, hasPersistedSession: boolean): DocumentFragment {
+  #buildStatusDescription(settings: PluginSettings, hasPersistedSession: boolean): DocumentFragment {
     const { t } = getI18n();
     const fragment = document.createDocumentFragment();
     const list = document.createElement('ul');
@@ -206,7 +206,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     return fragment;
   }
 
-  private buildRootPathDescriptionFragment(): DocumentFragment {
+  #buildRootPathDescriptionFragment(): DocumentFragment {
     const { t } = getI18n();
     const fragment = document.createDocumentFragment();
 
@@ -227,9 +227,9 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   }
 }
 
-function parseIgnoredPathsInput(value: string): string[] {
+function parseIgnoredPathsInput(value: string): Array<string> {
   const seen = new Set<string>();
-  const result: string[] = [];
+  const result: Array<string> = [];
 
   for (const line of value.split(/\r?\n/u)) {
     const trimmed = line.trim();
@@ -244,7 +244,7 @@ function parseIgnoredPathsInput(value: string): string[] {
   return result;
 }
 
-function isSameStringArray(a: string[], b: string[]): boolean {
+function isSameStringArray(a: Array<string>, b: Array<string>): boolean {
   if (a.length !== b.length) {
     return false;
   }
@@ -258,8 +258,8 @@ function isSameStringArray(a: string[], b: string[]): boolean {
   return true;
 }
 
-function sanitizeIgnoredPaths(patterns: string[]): string[] {
-  const sanitized: string[] = [];
+function sanitizeIgnoredPaths(patterns: Array<string>): Array<string> {
+  const sanitized: Array<string> = [];
   const seen = new Set<string>();
 
   for (const pattern of patterns) {

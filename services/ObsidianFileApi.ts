@@ -9,10 +9,10 @@ export const { init: initObsidianFileApi, get: getObsidianFileApi } = (function 
   let instance: ObsidianFileApi | null = null;
 
   return {
-    init: function initObsidianFileApi(vault: Vault): ObsidianFileApi {
+    init: function (this: void, vault: Vault): ObsidianFileApi {
       return (instance ??= new ObsidianFileApi(vault));
     },
-    get: function getObsidianFileApi(): ObsidianFileApi {
+    get: function (this: void): ObsidianFileApi {
       if (!instance) {
         throw new Error('ObsidianFileApi has not been initialized. Please call initObsidianFileApi first.');
       }
@@ -161,7 +161,7 @@ export interface VaultFolder {
   name: string;
   rawPath: string;
   path: CanonicalPath;
-  children: VaultNode[];
+  children: Array<VaultNode>;
 }
 
 export class CanonicalPath {

@@ -7,19 +7,19 @@ import { getI18n } from '../../i18n';
 export type ConfigSyncAction = 'push' | 'pull';
 
 export class ProtonDriveSyncActionModal extends Modal {
-  private readonly submittedSubject = new Subject<ConfigSyncAction>();
-  public readonly submitted$ = this.submittedSubject.asObservable();
+  readonly #submittedSubject = new Subject<ConfigSyncAction>();
+  public readonly submitted$ = this.#submittedSubject.asObservable();
 
-  private readonly canceledSubject = new Subject<void>();
-  public readonly canceled$ = this.canceledSubject.asObservable();
+  readonly #canceledSubject = new Subject<void>();
+  public readonly canceled$ = this.#canceledSubject.asObservable();
 
-  private didResolve = false;
+  #didResolve = false;
 
-  constructor(app: App) {
+  public constructor(app: App) {
     super(app);
   }
 
-  onOpen(): void {
+  public onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
     contentEl.empty();
@@ -35,8 +35,8 @@ export class ProtonDriveSyncActionModal extends Modal {
           .setButtonText(t.modals.syncAction.pushButton)
           .setClass('proton-sync-config-push-button')
           .onClick(() => {
-            this.didResolve = true;
-            this.submittedSubject.next('push');
+            this.#didResolve = true;
+            this.#submittedSubject.next('push');
             this.close();
           })
       )
@@ -45,16 +45,16 @@ export class ProtonDriveSyncActionModal extends Modal {
           .setButtonText(t.modals.syncAction.pullButton)
           .setClass('proton-sync-config-pull-button')
           .onClick(() => {
-            this.didResolve = true;
-            this.submittedSubject.next('pull');
+            this.#didResolve = true;
+            this.#submittedSubject.next('pull');
             this.close();
           })
       );
   }
 
-  onClose(): void {
-    if (!this.didResolve) {
-      this.canceledSubject.next();
+  public onClose(): void {
+    if (!this.#didResolve) {
+      this.#canceledSubject.next();
     }
   }
 }

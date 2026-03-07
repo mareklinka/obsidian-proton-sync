@@ -1,13 +1,14 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 import { requestUrl } from 'obsidian';
 
 import { PROTON_BASE_URL } from './Constants';
 
-type ProtonApiRequestOptions = {
+interface ProtonApiRequestOptions {
   method?: 'GET' | 'POST' | 'DELETE';
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
   headers?: Record<string, string>;
-};
+}
 
 export async function getJson<T>(
   path: string,
@@ -43,17 +44,19 @@ async function getProtonApiJson<T>(
 ): Promise<T> {
   const url = buildUrl(path, options.query);
 
+  const hasBody = options.body !== undefined && options.body !== null;
+
   const response = await requestUrl({
     url,
     method: options.method ?? 'POST',
-    contentType: options.body ? 'application/json' : undefined,
+    contentType: hasBody ? 'application/json' : undefined,
     headers: {
       'x-pm-uid': session.uid,
       authorization: `Bearer ${session.accessToken}`,
       'x-pm-appversion': appVersion,
       ...(options.headers ?? {})
     },
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    body: hasBody ? JSON.stringify(options.body) : undefined,
     throw: false
   });
 
@@ -65,7 +68,7 @@ async function getProtonApiJson<T>(
 }
 
 function extractApiError(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object') {
+  if (payload === undefined || payload === null || typeof payload !== 'object') {
     return null;
   }
 

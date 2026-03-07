@@ -13,10 +13,10 @@ export const { init: initProtonCloudObserver, get: getProtonCloudObserver } = (f
   let instance: ProtonCloudObserver | null = null;
 
   return {
-    init: function initProtonCloudObserver(): ProtonCloudObserver {
+    init: function (this: void): ProtonCloudObserver {
       return (instance ??= new ProtonCloudObserver(getProtonDriveClient()));
     },
-    get: function getProtonCloudObserver(): ProtonCloudObserver {
+    get: function (this: void): ProtonCloudObserver {
       if (!instance) {
         throw new Error('ProtonCloudObserver has not been initialized. Please call initProtonCloudObserver first.');
       }
@@ -26,12 +26,12 @@ export const { init: initProtonCloudObserver, get: getProtonCloudObserver } = (f
 })();
 
 class ProtonCloudObserver {
-  private readonly logger = getLogger('ProtonCloudObserver');
+  readonly #logger = getLogger('ProtonCloudObserver');
 
-  private readonly cloudEventSubject = new Subject<void>();
-  public readonly cloudEvents = this.cloudEventSubject.asObservable();
+  readonly #cloudEventSubject = new Subject<void>();
+  public readonly cloudEvents = this.#cloudEventSubject.asObservable();
 
-  private subscription: EventSubscription | null = null;
+  #subscription: EventSubscription | null = null;
 
   public constructor(private readonly client: ProtonDriveClient) {}
 
@@ -40,22 +40,20 @@ class ProtonCloudObserver {
       try: async () => {
         this.unsubscribeFromTreeChanges();
 
-        this.subscription = await this.client.subscribeToTreeEvents(nodeId.treeEventScopeId, async cloudEvent => {
-          this.logger.info(`Received cloud event for node ${nodeId.treeEventScopeId}`, cloudEvent);
+        this.#subscription = await this.client.subscribeToTreeEvents(nodeId.treeEventScopeId, async cloudEvent => {
+          this.#logger.info(`Received cloud event for node ${nodeId.treeEventScopeId}`, cloudEvent);
           getObsidianSettingsStore().set('latestEventId', Option.some(new ProtonEventId(cloudEvent.eventId)));
-          this.cloudEventSubject.next();
+          this.#cloudEventSubject.next();
         });
       },
-      catch: () => {
-        return new TreeEventSubscriptionFailed();
-      }
+      catch: () => new TreeEventSubscriptionFailed()
     });
   }
 
   public unsubscribeFromTreeChanges(): void {
-    if (this.subscription) {
-      this.subscription.dispose();
-      this.subscription = null;
+    if (this.#subscription) {
+      this.#subscription.dispose();
+      this.#subscription = null;
     }
   }
 }

@@ -13,8 +13,9 @@ export function createOpenPgpCrypto(): OpenPGPCrypto {
 }
 
 class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
-  async generateKey(options: {
-    userIDs: { name: string }[];
+  public async generateKey(options: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    userIDs: Array<{ name: string }>;
     type: 'ecc';
     curve: 'ed25519Legacy';
   }): Promise<PrivateKey> {
@@ -22,13 +23,14 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
       type: options.type,
       curve: options.curve,
       format: 'object',
+      // eslint-disable-next-line @typescript-eslint/naming-convention
       userIDs: options.userIDs
     });
 
     return result.privateKey as unknown as PrivateKey;
   }
 
-  async exportPrivateKey(options: { privateKey: PrivateKey; passphrase: string | null }): Promise<string> {
+  public async exportPrivateKey(options: { privateKey: PrivateKey; passphrase: string | null }): Promise<string> {
     const key = options.passphrase
       ? await openpgp.encryptKey({
           privateKey: toOpenPgpPrivateKey(options.privateKey),
@@ -39,7 +41,7 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     return key.armor();
   }
 
-  async importPrivateKey(options: { armoredKey: string; passphrase: string | null }): Promise<PrivateKey> {
+  public async importPrivateKey(options: { armoredKey: string; passphrase: string | null }): Promise<PrivateKey> {
     const privateKey = await openpgp.readPrivateKey({ armoredKey: options.armoredKey });
     const decrypted = options.passphrase
       ? await openpgp.decryptKey({ privateKey, passphrase: options.passphrase })
@@ -48,15 +50,15 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     return decrypted as unknown as PrivateKey;
   }
 
-  async generateSessionKey(options: { recipientKeys: PublicKey[] }): Promise<SessionKey> {
+  public async generateSessionKey(options: { recipientKeys: Array<PublicKey> }): Promise<SessionKey> {
     const sessionKey = await openpgp.generateSessionKey({
       encryptionKeys: toOpenPgpPublicKeysRequired(options.recipientKeys)
     });
     return mapSessionKey(sessionKey);
   }
 
-  async encryptSessionKey(
-    options: SessionKey & { format: 'binary'; encryptionKeys?: PublicKey | PublicKey[]; passwords?: string[] }
+  public async encryptSessionKey(
+    options: SessionKey & { format: 'binary'; encryptionKeys?: PublicKey | Array<PublicKey>; passwords?: Array<string> }
   ): Promise<Uint8Array<ArrayBuffer>> {
     const openPgpSessionKey = toOpenPgpSessionKey(options);
     const encrypted = await openpgp.encryptSessionKey({
@@ -64,17 +66,17 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
       algorithm: openPgpSessionKey.algorithm,
       aeadAlgorithm: openPgpSessionKey.aeadAlgorithm,
       format: 'binary',
-      encryptionKeys: toArray(options.encryptionKeys) as openpgp.PublicKey[] | undefined,
+      encryptionKeys: toArray(options.encryptionKeys) as Array<openpgp.PublicKey> | undefined,
       passwords: options.passwords
     });
 
     return encrypted as unknown as Uint8Array<ArrayBuffer>;
   }
 
-  async decryptSessionKey(options: {
+  public async decryptSessionKey(options: {
     armoredMessage?: string;
     binaryMessage?: Uint8Array;
-    decryptionKeys: PrivateKey | PrivateKey[];
+    decryptionKeys: PrivateKey | Array<PrivateKey>;
   }): Promise<SessionKey | undefined> {
     const decrypted = options.armoredMessage
       ? await openpgp.decryptSessionKeys({
@@ -97,11 +99,14 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     });
   }
 
-  async encryptMessage<Format extends 'armored' | 'binary' = 'armored', Detached extends boolean = false>(options: {
+  public async encryptMessage<
+    Format extends 'armored' | 'binary' = 'armored',
+    Detached extends boolean = false
+  >(options: {
     format?: Format;
     binaryData: Uint8Array<ArrayBuffer>;
     sessionKey?: SessionKey;
-    encryptionKeys: PublicKey[];
+    encryptionKeys: Array<PublicKey>;
     signingKeys?: PrivateKey;
     detached?: Detached;
     compress?: boolean;
@@ -164,20 +169,20 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     } as any;
   }
 
-  async decryptMessage<Format extends 'utf8' | 'binary' = 'utf8'>(options: {
+  public async decryptMessage<Format extends 'utf8' | 'binary' = 'utf8'>(options: {
     format: Format;
     armoredMessage?: string;
     binaryMessage?: Uint8Array<ArrayBuffer>;
     armoredSignature?: string;
     binarySignature?: Uint8Array<ArrayBuffer>;
     sessionKeys?: SessionKey;
-    passwords?: string[];
-    decryptionKeys?: PrivateKey | PrivateKey[];
-    verificationKeys?: PublicKey | PublicKey[];
+    passwords?: Array<string>;
+    decryptionKeys?: PrivateKey | Array<PrivateKey>;
+    verificationKeys?: PublicKey | Array<PublicKey>;
   }): Promise<{
     data: Format extends 'binary' ? Uint8Array<ArrayBuffer> : string;
     verificationStatus: VERIFICATION_STATUS;
-    verificationErrors?: Error[];
+    verificationErrors?: Array<Error>;
   }> {
     const signature = options.armoredSignature
       ? await openpgp.readSignature({ armoredSignature: options.armoredSignature })
@@ -234,10 +239,10 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     };
   }
 
-  async signMessage<Format extends 'binary' | 'armored' = 'armored'>(options: {
+  public async signMessage<Format extends 'binary' | 'armored' = 'armored'>(options: {
     format: Format;
     binaryData: Uint8Array<ArrayBuffer>;
-    signingKeys: PrivateKey | PrivateKey[];
+    signingKeys: PrivateKey | Array<PrivateKey>;
     detached: boolean;
     signatureContext?: { critical: boolean; value: string };
   }): Promise<Format extends 'binary' ? Uint8Array<ArrayBuffer> : string> {
@@ -274,13 +279,13 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     return signature as any;
   }
 
-  async verifyMessage(options: {
+  public async verifyMessage(options: {
     binaryData: Uint8Array<ArrayBuffer>;
     armoredSignature?: string;
     binarySignature?: Uint8Array<ArrayBuffer>;
-    verificationKeys: PublicKey | PublicKey[];
+    verificationKeys: PublicKey | Array<PublicKey>;
     signatureContext?: { critical: boolean; value: string };
-  }): Promise<{ verificationStatus: VERIFICATION_STATUS; errors?: Error[] }> {
+  }): Promise<{ verificationStatus: VERIFICATION_STATUS; errors?: Array<Error> }> {
     const message = await openpgp.createMessage({ binary: options.binaryData });
     const signature = options.armoredSignature
       ? await openpgp.readSignature({ armoredSignature: options.armoredSignature })
@@ -303,15 +308,15 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
   }
 }
 
-function toArray<T>(value: T | T[] | undefined): T[] | undefined {
-  if (!value) {
+function toArray<T>(value: T | Array<T> | undefined): Array<T> | undefined {
+  if (value === undefined || value === null) {
     return undefined;
   }
 
   return Array.isArray(value) ? value : [value];
 }
 
-function toOpenPgpPublicKeys(keys: PublicKey | PublicKey[] | undefined): openpgp.PublicKey[] | undefined {
+function toOpenPgpPublicKeys(keys: PublicKey | Array<PublicKey> | undefined): Array<openpgp.PublicKey> | undefined {
   const resolved = toArray(keys);
   if (!resolved) {
     return undefined;
@@ -320,11 +325,11 @@ function toOpenPgpPublicKeys(keys: PublicKey | PublicKey[] | undefined): openpgp
   return resolved.map(key => key as unknown as openpgp.PublicKey);
 }
 
-function toOpenPgpPublicKeysRequired(keys: PublicKey | PublicKey[]): openpgp.PublicKey[] {
+function toOpenPgpPublicKeysRequired(keys: PublicKey | Array<PublicKey>): Array<openpgp.PublicKey> {
   return toArray(keys)?.map(key => key as unknown as openpgp.PublicKey) ?? [];
 }
 
-function toOpenPgpPrivateKeys(keys: PrivateKey | PrivateKey[] | undefined): openpgp.PrivateKey[] | undefined {
+function toOpenPgpPrivateKeys(keys: PrivateKey | Array<PrivateKey> | undefined): Array<openpgp.PrivateKey> | undefined {
   const resolved = toArray(keys);
   if (!resolved) {
     return undefined;
@@ -333,7 +338,7 @@ function toOpenPgpPrivateKeys(keys: PrivateKey | PrivateKey[] | undefined): open
   return resolved.map(key => toOpenPgpPrivateKey(key));
 }
 
-function toOpenPgpPrivateKeysRequired(keys: PrivateKey | PrivateKey[]): openpgp.PrivateKey[] {
+function toOpenPgpPrivateKeysRequired(keys: PrivateKey | Array<PrivateKey>): Array<openpgp.PrivateKey> {
   return toArray(keys)?.map(key => toOpenPgpPrivateKey(key)) ?? [];
 }
 
@@ -359,19 +364,19 @@ function mapSessionKey(sessionKey: openpgp.SessionKey): SessionKey {
   } as SessionKey;
 }
 
-type VerificationSummary = {
+interface VerificationSummary {
   status: VERIFICATION_STATUS;
-  errors?: Error[];
-};
+  errors?: Array<Error>;
+}
 
 type OpenPgpVerification = openpgp.VerifyMessageResult['signatures'][number];
 
-async function mapVerificationResult(signatures: OpenPgpVerification[]): Promise<VerificationSummary> {
+async function mapVerificationResult(signatures: Array<OpenPgpVerification>): Promise<VerificationSummary> {
   if (!signatures.length) {
     return { status: VERIFICATION_STATUS.NOT_SIGNED };
   }
 
-  const errors: Error[] = [];
+  const errors: Array<Error> = [];
   let hasValid = false;
 
   for (const signature of signatures) {

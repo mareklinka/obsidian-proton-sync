@@ -6,7 +6,7 @@ export class App {}
 export class Plugin {}
 export class Modal {}
 export class Notice {
-  constructor(_message: string) {}
+  public constructor(_message: string) {}
 }
 export class PluginSettingTab {}
 export class Setting {}

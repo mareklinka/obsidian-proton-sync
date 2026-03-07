@@ -17,10 +17,10 @@ export type EncryptedSecretLabel = 'session' | 'salted-passphrases';
 const SESSION_STORAGE_KEY: ObsidianSecretKey = 'proton-drive-sync-session';
 const SALTED_PASSPHRASES_SECRET_KEY: ObsidianSecretKey = 'proton-drive-sync-salted-passphrases';
 
-export type EncryptedPersistedSessionData = {
+export interface EncryptedPersistedSessionData {
   session: ProtonSession;
   saltedPassphrases: Record<string, string>;
-};
+}
 
 export interface PersistedProtonSession {
   uid: string;
@@ -34,23 +34,23 @@ export interface PersistedProtonSession {
   lastRefreshAt: number;
 }
 
-type EncryptedEnvelope = {
+interface EncryptedEnvelope {
   v: number;
   kdf: string;
   salt: string;
   iv: string;
   ciphertext: string;
   aadLabel: EncryptedSecretLabel;
-};
+}
 
 export const { init: initEncryptedSecretStore, get: getEncryptedSecretStore } = (function () {
   let instance: EncryptedSecretStore | null = null;
 
   return {
-    init: function initEncryptedSecretStore(): EncryptedSecretStore {
+    init: function (this: void): EncryptedSecretStore {
       return (instance ??= new EncryptedSecretStore(getObsidianSecretStore()));
     },
-    get: function getEncryptedSecretStore(): EncryptedSecretStore {
+    get: function (this: void): EncryptedSecretStore {
       if (!instance) {
         instance = new EncryptedSecretStore(getObsidianSecretStore());
       }
@@ -61,11 +61,11 @@ export const { init: initEncryptedSecretStore, get: getEncryptedSecretStore } = 
 })();
 
 class EncryptedSecretStore {
-  private unlockedSessionData: Option.Option<EncryptedPersistedSessionData> = Option.none();
-  private memoryClearTimeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
-  private logger = getLogger('EncryptedSecretStore');
+  #unlockedSessionData: Option.Option<EncryptedPersistedSessionData> = Option.none();
+  #memoryClearTimeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
+  readonly #logger = getLogger('EncryptedSecretStore');
 
-  constructor(private readonly baseStore: ReturnType<typeof getObsidianSecretStore>) {}
+  public constructor(private readonly baseStore: ReturnType<typeof getObsidianSecretStore>) {}
 
   public hasPersistedSessionData(): boolean {
     const session = this.baseStore.get(SESSION_STORAGE_KEY);
@@ -79,7 +79,7 @@ class EncryptedSecretStore {
     masterPassword: string
   ): Effect.Effect<void, SecretEncryptionFailedError> {
     return Effect.gen(this, function* () {
-      this.logger.debug('Persisting session data to secret store');
+      this.#logger.debug('Persisting session data to secret store');
 
       const persistedSession: PersistedProtonSession = {
         ...data.session,
@@ -88,12 +88,12 @@ class EncryptedSecretStore {
         expiresAt: data.session.expiresAt.getTime(),
         lastRefreshAt: data.session.lastRefreshAt.getTime()
       };
-      const encryptedSession = yield* this.encryptSecretJson(
+      const encryptedSession = yield* this.#encryptSecretJson(
         'session',
         JSON.stringify(persistedSession),
         masterPassword
       );
-      const encryptedPassphrases = yield* this.encryptSecretJson(
+      const encryptedPassphrases = yield* this.#encryptSecretJson(
         'salted-passphrases',
         JSON.stringify(data.saltedPassphrases),
         masterPassword
@@ -102,8 +102,8 @@ class EncryptedSecretStore {
       this.baseStore.set(SESSION_STORAGE_KEY, encryptedSession);
       this.baseStore.set(SALTED_PASSPHRASES_SECRET_KEY, encryptedPassphrases);
 
-      this.unlockedSessionData = Option.some(data);
-      this.cancelScheduledMemoryClearInternal();
+      this.#unlockedSessionData = Option.some(data);
+      this.#cancelScheduledMemoryClearInternal();
     });
   }
 
@@ -111,9 +111,9 @@ class EncryptedSecretStore {
     masterPassword: string
   ): Effect.Effect<EncryptedPersistedSessionData, PersistedSecretsInvalidFormatError | SecretDecryptionFailedError> {
     return Effect.gen(this, function* () {
-      this.logger.debug('Loading session data from secret store');
-      if (Option.isSome(this.unlockedSessionData)) {
-        return this.unlockedSessionData.value;
+      this.#logger.debug('Loading session data from secret store');
+      if (Option.isSome(this.#unlockedSessionData)) {
+        return this.#unlockedSessionData.value;
       }
 
       const storedSession = this.baseStore.get(SESSION_STORAGE_KEY);
@@ -128,13 +128,13 @@ class EncryptedSecretStore {
         return yield* new PersistedSecretsInvalidFormatError();
       }
 
-      if (!this.isEncryptedEnvelopeJson(storedSession) || !this.isEncryptedEnvelopeJson(storedSaltedPassphrases)) {
+      if (!this.#isEncryptedEnvelopeJson(storedSession) || !this.#isEncryptedEnvelopeJson(storedSaltedPassphrases)) {
         yield* this.clearSessionData();
         return yield* new PersistedSecretsInvalidFormatError();
       }
 
-      const decryptedSession = yield* this.decryptSecretJson('session', storedSession, masterPassword);
-      const decryptedSaltedPassphrases = yield* this.decryptSecretJson(
+      const decryptedSession = yield* this.#decryptSecretJson('session', storedSession, masterPassword);
+      const decryptedSaltedPassphrases = yield* this.#decryptSecretJson(
         'salted-passphrases',
         storedSaltedPassphrases,
         masterPassword
@@ -151,27 +151,27 @@ class EncryptedSecretStore {
       const saltedPassphrases = yield* parseSaltedPassphrasesJson(decryptedSaltedPassphrases);
 
       const data = { session, saltedPassphrases };
-      this.unlockedSessionData = Option.some(data);
-      this.cancelScheduledMemoryClearInternal();
+      this.#unlockedSessionData = Option.some(data);
+      this.#cancelScheduledMemoryClearInternal();
 
       return data;
     });
   }
 
   public getUnlockedSessionData(): Option.Option<EncryptedPersistedSessionData> {
-    return this.unlockedSessionData;
+    return this.#unlockedSessionData;
   }
 
   public clearUnlockedSessionData(): Effect.Effect<void> {
     return Effect.sync(() => {
-      this.cancelScheduledMemoryClearInternal();
-      this.unlockedSessionData = Option.none();
+      this.#cancelScheduledMemoryClearInternal();
+      this.#unlockedSessionData = Option.none();
     });
   }
 
   public cancelScheduledUnlockedDataClear(): Effect.Effect<void> {
     return Effect.sync(() => {
-      this.cancelScheduledMemoryClearInternal();
+      this.#cancelScheduledMemoryClearInternal();
     });
   }
 
@@ -179,32 +179,32 @@ class EncryptedSecretStore {
     return Effect.sync(() => {
       this.baseStore.clear(SESSION_STORAGE_KEY);
       this.baseStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
-      this.cancelScheduledMemoryClearInternal();
-      this.unlockedSessionData = Option.none();
+      this.#cancelScheduledMemoryClearInternal();
+      this.#unlockedSessionData = Option.none();
     });
   }
 
   public scheduleMemoryClear(): void {
-    this.logger.info('Scheduling in-memory session data clear in %d ms', POST_SYNC_MEMORY_CLEAR_DELAY_MS);
-    this.cancelScheduledMemoryClearInternal();
+    this.#logger.info('Scheduling in-memory session data clear in %d ms', POST_SYNC_MEMORY_CLEAR_DELAY_MS);
+    this.#cancelScheduledMemoryClearInternal();
 
-    this.memoryClearTimeoutId = globalThis.setTimeout(() => {
-      this.logger.debug('Clearing in-memory session data after scheduled delay');
-      this.unlockedSessionData = Option.none();
-      this.memoryClearTimeoutId = null;
+    this.#memoryClearTimeoutId = globalThis.setTimeout(() => {
+      this.#logger.debug('Clearing in-memory session data after scheduled delay');
+      this.#unlockedSessionData = Option.none();
+      this.#memoryClearTimeoutId = null;
     }, POST_SYNC_MEMORY_CLEAR_DELAY_MS);
   }
 
-  private cancelScheduledMemoryClearInternal(): void {
-    if (this.memoryClearTimeoutId === null) {
+  #cancelScheduledMemoryClearInternal(): void {
+    if (this.#memoryClearTimeoutId === null) {
       return;
     }
 
-    globalThis.clearTimeout(this.memoryClearTimeoutId);
-    this.memoryClearTimeoutId = null;
+    globalThis.clearTimeout(this.#memoryClearTimeoutId);
+    this.#memoryClearTimeoutId = null;
   }
 
-  private encryptSecretJson(
+  #encryptSecretJson(
     label: EncryptedSecretLabel,
     payloadJson: string,
     masterPassword: string
@@ -242,7 +242,7 @@ class EncryptedSecretStore {
     });
   }
 
-  private decryptSecretJson(
+  #decryptSecretJson(
     expectedLabel: EncryptedSecretLabel,
     envelopeJson: string,
     masterPassword: string
@@ -279,9 +279,9 @@ class EncryptedSecretStore {
     });
   }
 
-  private isEncryptedEnvelopeJson(value: string): boolean {
+  #isEncryptedEnvelopeJson(value: string): boolean {
     const parsed = tryParseJson(value);
-    if (!parsed || typeof parsed !== 'object') {
+    if (parsed === null || parsed === undefined || typeof parsed !== 'object') {
       return false;
     }
 
@@ -307,7 +307,7 @@ function parseSessionJson(payload: string): Effect.Effect<PersistedProtonSession
   return Effect.try({
     try: () => {
       const parsed = JSON.parse(payload) as unknown;
-      if (!parsed || typeof parsed !== 'object') {
+      if (parsed === null || parsed === undefined || typeof parsed !== 'object') {
         throw new PersistedSecretsInvalidFormatError();
       }
 
@@ -332,7 +332,7 @@ function parseSaltedPassphrasesJson(
   return Effect.try({
     try: () => {
       const parsed = JSON.parse(payload) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      if (parsed === null || parsed === undefined || typeof parsed !== 'object' || Array.isArray(parsed)) {
         throw new PersistedSecretsInvalidFormatError();
       }
 
@@ -355,7 +355,7 @@ function parseSaltedPassphrasesJson(
 }
 
 function isEnvelopeRecord(value: unknown): value is EncryptedEnvelope {
-  if (!value || typeof value !== 'object') {
+  if (value === null || value === undefined || typeof value !== 'object') {
     return false;
   }
 

@@ -1,3 +1,4 @@
+/* eslint-disable max-len */
 export const en = {
   common: {
     cancel: 'Cancel'

@@ -28,22 +28,20 @@ const PUSH_CONFIG_COMMAND_ID = 'push-vault-config';
 const PULL_CONFIG_COMMAND_ID = 'pull-vault-config';
 
 export default class ProtonDriveSyncPlugin extends Plugin {
-  private readonly logger = getLogger('Main');
-  private readonly defaultRemoteVaultRootPath = normalizePath(
-    `${DEFAULT_SYNC_CONTAINER_NAME}/${this.app.vault.getName()}`
-  );
-  private statusBarController: SyncStatusBarController | null = null;
+  readonly #logger = getLogger('Main');
+  readonly #defaultRemoteVaultRootPath = normalizePath(`${DEFAULT_SYNC_CONTAINER_NAME}/${this.app.vault.getName()}`);
+  #statusBarController: SyncStatusBarController | null = null;
 
-  private readonly subscriptions: Subscription[] = [];
+  readonly #subscriptions: Array<Subscription> = [];
 
-  async onload(): Promise<void> {
+  public async onload(): Promise<void> {
     initI18n(getLanguage());
     const { t } = getI18n();
 
-    this.logger.info('Loading Proton Drive Sync plugin', this.manifest.version);
-    this.logger.info('Obsidian language:', getLanguage());
+    this.#logger.info('Loading Proton Drive Sync plugin', this.manifest.version);
+    this.#logger.info('Obsidian language:', getLanguage());
 
-    const settings = initObsidianSettingsStore(this.defaultRemoteVaultRootPath, {
+    const settings = initObsidianSettingsStore(this.#defaultRemoteVaultRootPath, {
       save: this.saveData.bind(this),
       load: this.loadData.bind(this)
     });
@@ -57,10 +55,10 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     const syncService = initSyncService(this.app.vault);
     initSyncProgressModal(this.app);
 
-    this.statusBarController = createSyncStatusBar(this, syncService.state$);
+    this.#statusBarController = createSyncStatusBar(this, syncService.state$);
 
     this.addRibbonIcon('cloud-cog', t.ribbon.openSyncActions, () => {
-      void this.openSyncActionDialog();
+      void this.#openSyncActionDialog();
     });
 
     this.addCommand({
@@ -68,7 +66,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       name: t.commands.pushVault,
       icon: 'cloud-upload',
       callback: async () => {
-        await this.executeRegisteredSyncAction('push');
+        await this.#executeRegisteredSyncAction('push');
       }
     });
 
@@ -77,23 +75,23 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       name: t.commands.pullVault,
       icon: 'cloud-download',
       callback: async () => {
-        await this.executeRegisteredSyncAction('pull');
+        await this.#executeRegisteredSyncAction('pull');
       }
     });
 
-    this.setupSettingsTab(this);
+    this.#setupSettingsTab(this);
   }
 
-  async onunload(): Promise<void> {
-    this.logger.info('Unloading Proton Drive Sync plugin');
-    this.subscriptions.forEach(subscription => subscription.unsubscribe());
-    this.subscriptions.length = 0;
-    this.statusBarController?.dispose();
-    this.statusBarController = null;
+  public async onunload(): Promise<void> {
+    this.#logger.info('Unloading Proton Drive Sync plugin');
+    this.#subscriptions.forEach(subscription => subscription.unsubscribe());
+    this.#subscriptions.length = 0;
+    this.#statusBarController?.dispose();
+    this.#statusBarController = null;
     await Effect.runPromise(getProtonSessionService().dispose());
   }
 
-  async signIn(credentials: { email: string; password: string }): Promise<void> {
+  public async signIn(credentials: { email: string; password: string }): Promise<void> {
     const { t } = getI18n();
 
     if (!credentials.email || !credentials.password) {
@@ -106,11 +104,11 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     await Effect.runPromise(
       Effect.gen(function* () {
         yield* getProtonSessionService().signIn(credentials.email.trim(), credentials.password, {
-          requestTwoFactorCode: () => promptFromModal(app, app => new ProtonDriveTwoFactorModal(app)),
-          requestMailboxPassword: () => promptFromModal(app, app => new ProtonDriveMailboxPasswordModal(app)),
+          requestTwoFactorCode: () => promptFromModal(app, _ => new ProtonDriveTwoFactorModal(_)),
+          requestMailboxPassword: () => promptFromModal(app, _ => new ProtonDriveMailboxPasswordModal(_)),
           requestCaptchaChallenge: (captchaUrl: string) =>
-            promptFromModal(app, app => new ProtonDriveCaptchaModal(app, captchaUrl)),
-          requestMasterPassword: () => promptFromModal(app, app => new ProtonDriveMasterPasswordModal(app, 'setup'))
+            promptFromModal(app, _ => new ProtonDriveCaptchaModal(_, captchaUrl)),
+          requestMasterPassword: () => promptFromModal(app, _ => new ProtonDriveMasterPasswordModal(_, 'setup'))
         });
 
         const sessionService = getProtonSessionService();
@@ -140,10 +138,10 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     );
   }
 
-  async signOut(): Promise<void> {
+  public async signOut(): Promise<void> {
     const { t } = getI18n();
 
-    this.logger.info('Disconnecting from Proton Drive');
+    this.#logger.info('Disconnecting from Proton Drive');
 
     await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
 
@@ -156,16 +154,16 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     new Notice(t.main.notices.disconnected);
   }
 
-  private async openSyncActionDialog(): Promise<void> {
+  async #openSyncActionDialog(): Promise<void> {
     const action = await Effect.runPromise(promptFromModal(this.app, app => new ProtonDriveSyncActionModal(app)));
     if (Option.isNone(action)) {
       return;
     }
 
-    await this.executeRegisteredSyncAction(action.value);
+    await this.#executeRegisteredSyncAction(action.value);
   }
 
-  private async executeRegisteredSyncAction(action: ConfigSyncAction): Promise<void> {
+  async #executeRegisteredSyncAction(action: ConfigSyncAction): Promise<void> {
     if (action === 'push') {
       await Effect.runPromise(pushVault(this.app));
     } else if (action === 'pull') {
@@ -173,10 +171,10 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     }
   }
 
-  private setupSettingsTab(plugin: ProtonDriveSyncPlugin): ProtonDriveSyncSettingTab {
+  #setupSettingsTab(plugin: ProtonDriveSyncPlugin): ProtonDriveSyncSettingTab {
     const settingTab = new ProtonDriveSyncSettingTab(plugin, getProtonSessionService().authState$);
 
-    this.subscriptions.push(
+    this.#subscriptions.push(
       settingTab.loggingChanged$.subscribe(() => {}),
       settingTab.disconnect$.subscribe(() => {
         this.signOut();

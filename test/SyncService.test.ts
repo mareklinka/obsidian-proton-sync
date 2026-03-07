@@ -82,7 +82,7 @@ function vaultFile(rawPath: string, sha1: string, modifiedAt: Date) {
   };
 }
 
-function vaultFolder(rawPath: string, children: unknown[] = []) {
+function vaultFolder(rawPath: string, children: Array<unknown> = []) {
   const normalized = rawPath
     .replace(/\\+/g, '/')
     .replace(/\/+/g, '/')

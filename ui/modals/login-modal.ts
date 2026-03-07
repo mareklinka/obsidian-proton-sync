@@ -5,20 +5,20 @@ import { Subject } from 'rxjs';
 import { getI18n } from '../../i18n';
 
 export class ProtonDriveLoginModal extends Modal {
-  private readonly loginSubject = new Subject<{
+  readonly #loginSubject = new Subject<{
     email: string;
     password: string;
   }>();
-  public readonly login$ = this.loginSubject.asObservable();
+  public readonly login$ = this.#loginSubject.asObservable();
 
-  private email = '';
-  private password = '';
+  #email = '';
+  #password = '';
 
-  constructor(app: App) {
+  public constructor(app: App) {
     super(app);
   }
 
-  onOpen(): void {
+  public onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
 
@@ -39,7 +39,7 @@ export class ProtonDriveLoginModal extends Modal {
           .setPlaceholder(t.modals.login.emailPlaceholder)
           .setValue('')
           .onChange(value => {
-            this.email = value.trim();
+            this.#email = value.trim();
           })
       );
 
@@ -49,7 +49,7 @@ export class ProtonDriveLoginModal extends Modal {
       .addText(text => {
         text.inputEl.type = 'password';
         text.onChange(value => {
-          this.password = value;
+          this.#password = value;
         });
       });
 
@@ -58,21 +58,21 @@ export class ProtonDriveLoginModal extends Modal {
         .setButtonText(t.modals.login.submit)
         .setCta()
         .onClick(async () => {
-          this.loginSubject.next({
-            email: this.email,
-            password: this.password
+          this.#loginSubject.next({
+            email: this.#email,
+            password: this.#password
           });
-          this.clearSensitiveInputs();
+          this.#clearSensitiveInputs();
           this.close();
         })
     );
   }
 
-  onClose(): void {
-    this.clearSensitiveInputs();
+  public onClose(): void {
+    this.#clearSensitiveInputs();
   }
 
-  private clearSensitiveInputs(): void {
-    this.password = '';
+  #clearSensitiveInputs(): void {
+    this.#password = '';
   }
 }

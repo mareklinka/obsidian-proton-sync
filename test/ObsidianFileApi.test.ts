@@ -1,9 +1,12 @@
 import { Effect } from 'effect';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-type AdapterListResult = { files: string[]; folders: string[] };
+interface AdapterListResult {
+  files: Array<string>;
+  folders: Array<string>;
+}
 
-type AdapterMock = {
+interface AdapterMock {
   list: ReturnType<typeof vi.fn<(path: string) => Promise<AdapterListResult>>>;
   stat: ReturnType<typeof vi.fn<(path: string) => Promise<{ ctime: number; mtime: number } | null>>>;
   readBinary: ReturnType<typeof vi.fn<(path: string) => Promise<ArrayBuffer>>>;
@@ -12,7 +15,7 @@ type AdapterMock = {
   writeBinary: ReturnType<typeof vi.fn<(path: string, data: ArrayBuffer, options: { mtime: number }) => Promise<void>>>;
   remove: ReturnType<typeof vi.fn<(path: string) => Promise<void>>>;
   rmdir: ReturnType<typeof vi.fn<(path: string, recursive: boolean) => Promise<void>>>;
-};
+}
 
 function createAdapterMock(): AdapterMock {
   return {
@@ -120,7 +123,7 @@ describe('ObsidianFileApi', () => {
 
     const nestedFile = folder.children[0];
     expect(nestedFile?._type).toBe('file');
-    if (!nestedFile || nestedFile._type !== 'file') {
+    if (nestedFile._type !== 'file') {
       throw new Error('Expected nested file node.');
     }
     expect(nestedFile.path.path).toBe('folder/nested.md');

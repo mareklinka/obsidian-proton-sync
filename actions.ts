@@ -41,7 +41,7 @@ export function pushVault(app: App): Effect.Effect<void, never, never> {
 
     const confirmation = yield* confirmOperation(app, 'push');
 
-    if (!confirmation || !confirmation.confirmed) {
+    if (!confirmation.confirmed) {
       return;
     }
 
@@ -124,7 +124,7 @@ export function pullVault(app: App): Effect.Effect<void, never, never> {
     }
 
     const confirmation = yield* confirmOperation(app, 'pull');
-    if (!confirmation || !confirmation.confirmed) {
+    if (!confirmation.confirmed) {
       return;
     }
 
@@ -181,7 +181,7 @@ export function pullVault(app: App): Effect.Effect<void, never, never> {
 function confirmOperation(
   app: App,
   action: 'push' | 'pull'
-): Effect.Effect<{ confirmed: boolean; prune: boolean } | false, never, never> {
+): Effect.Effect<{ confirmed: boolean; prune: boolean }, never, never> {
   return Effect.gen(function* () {
     const { t } = getI18n();
     const title = action === 'push' ? t.actions.confirmation.pushTitle : t.actions.confirmation.pullTitle;
@@ -193,11 +193,11 @@ function confirmOperation(
 
     const confirmation = yield* promptFromModal(
       app,
-      app => new ProtonDriveConfirmModal(app, title, confirmButtonLabel, toggleLabel, toggleDescription)
+      _ => new ProtonDriveConfirmModal(_, title, confirmButtonLabel, toggleLabel, toggleDescription)
     );
 
-    if (Option.isNone(confirmation) || !confirmation.value) {
-      return false;
+    if (Option.isNone(confirmation)) {
+      return { confirmed: false, prune: false };
     }
 
     return { confirmed: confirmation.value.confirmed, prune: confirmation.value.toggleValue };
@@ -220,7 +220,7 @@ function prepareSyncOperation(app: App, signal: AbortSignal) {
         return yield* new PersistedSessionNotFoundError();
       }
 
-      const masterPassword = yield* promptFromModal(app, app => new ProtonDriveMasterPasswordModal(app, 'unlock'));
+      const masterPassword = yield* promptFromModal(app, _ => new ProtonDriveMasterPasswordModal(_, 'unlock'));
 
       if (Option.isNone(masterPassword)) {
         return yield* new MasterPasswordRequiredError();
@@ -236,7 +236,7 @@ function prepareSyncOperation(app: App, signal: AbortSignal) {
 
     if (Option.isNone(currentSessionBeforeActivation)) {
       yield* sessionService.activatePersistedSession(
-        promptFromModal(app, app => new ProtonDriveMasterPasswordModal(app, 'unlock'))
+        promptFromModal(app, _ => new ProtonDriveMasterPasswordModal(_, 'unlock'))
       );
     }
 
@@ -245,7 +245,6 @@ function prepareSyncOperation(app: App, signal: AbortSignal) {
     const currentSession = sessionService.getCurrentSession();
 
     if (Option.isSome(currentSession)) {
-      const settingsStore = getObsidianSettingsStore();
       settingsStore.set('lastRefreshAt', currentSession.value.lastRefreshAt);
       settingsStore.set('sessionExpiresAt', currentSession.value.expiresAt);
     }
@@ -261,8 +260,8 @@ function prepareSyncOperation(app: App, signal: AbortSignal) {
 
     return true;
   }).pipe(
-    Effect.catchAll(e => {
-      return Effect.sync(() => {
+    Effect.catchAll(e =>
+      Effect.sync(() => {
         switch (e._tag) {
           case 'SyncCancelledError':
             new Notice(t.actions.notices.syncCancelled);
@@ -312,8 +311,8 @@ function prepareSyncOperation(app: App, signal: AbortSignal) {
         getSyncService().setIdleState();
 
         return false;
-      });
-    })
+      })
+    )
   );
 }
 
@@ -370,7 +369,7 @@ function ensureVaultRootFolder(remoteVaultRootPath: string, signal: AbortSignal)
   });
 }
 
-function ensureRemotePath(parent: ProtonFolder, pathSegments: string[], signal: AbortSignal) {
+function ensureRemotePath(parent: ProtonFolder, pathSegments: Array<string>, signal: AbortSignal) {
   const protonApi = getProtonDriveApi();
   let currentFolder = parent;
 

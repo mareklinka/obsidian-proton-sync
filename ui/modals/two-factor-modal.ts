@@ -5,20 +5,20 @@ import { Subject } from 'rxjs';
 import { getI18n } from '../../i18n';
 
 export class ProtonDriveTwoFactorModal extends Modal {
-  private readonly submittedSubject = new Subject<string>();
-  public readonly submitted$ = this.submittedSubject.asObservable();
+  readonly #submittedSubject = new Subject<string>();
+  public readonly submitted$ = this.#submittedSubject.asObservable();
 
-  private readonly canceledSubject = new Subject<void>();
-  public readonly canceled$ = this.canceledSubject.asObservable();
+  readonly #canceledSubject = new Subject<void>();
+  public readonly canceled$ = this.#canceledSubject.asObservable();
 
-  private twoFactorCode = '';
-  private didResolve = false;
+  #twoFactorCode = '';
+  #didResolve = false;
 
-  constructor(app: App) {
+  public constructor(app: App) {
     super(app);
   }
 
-  onOpen(): void {
+  public onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
 
@@ -35,7 +35,7 @@ export class ProtonDriveTwoFactorModal extends Modal {
       .setDesc(t.modals.twoFactor.codeDescription)
       .addText(text =>
         text.setPlaceholder(t.modals.twoFactor.codePlaceholder).onChange(value => {
-          this.twoFactorCode = value.trim();
+          this.#twoFactorCode = value.trim();
         })
       );
 
@@ -44,23 +44,23 @@ export class ProtonDriveTwoFactorModal extends Modal {
         .setButtonText(t.modals.twoFactor.submit)
         .setCta()
         .onClick(() => {
-          this.didResolve = true;
-          this.submittedSubject.next(this.twoFactorCode);
-          this.clearSensitiveInputs();
+          this.#didResolve = true;
+          this.#submittedSubject.next(this.#twoFactorCode);
+          this.#clearSensitiveInputs();
           this.close();
         })
     );
   }
 
-  onClose(): void {
-    if (!this.didResolve) {
-      this.canceledSubject.next();
+  public onClose(): void {
+    if (!this.#didResolve) {
+      this.#canceledSubject.next();
     }
 
-    this.clearSensitiveInputs();
+    this.#clearSensitiveInputs();
   }
 
-  private clearSensitiveInputs(): void {
-    this.twoFactorCode = '';
+  #clearSensitiveInputs(): void {
+    this.#twoFactorCode = '';
   }
 }

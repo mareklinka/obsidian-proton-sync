@@ -20,23 +20,23 @@ interface CaptchaResultMessage {
 const EXPECTED_MESSAGE_TYPE = 'HUMAN_VERIFICATION_SUCCESS';
 
 export class ProtonDriveCaptchaModal extends Modal {
-  private readonly submittedSubject = new Subject<CaptchaVerification>();
-  public readonly submitted$ = this.submittedSubject.asObservable();
+  readonly #submittedSubject = new Subject<CaptchaVerification>();
+  public readonly submitted$ = this.#submittedSubject.asObservable();
 
-  private readonly canceledSubject = new Subject<void>();
-  public readonly canceled$ = this.canceledSubject.asObservable();
+  readonly #canceledSubject = new Subject<void>();
+  public readonly canceled$ = this.#canceledSubject.asObservable();
 
-  private didResolve = false;
-  private iframeEl: HTMLIFrameElement | null = null;
+  #didResolve = false;
+  #iframeEl: HTMLIFrameElement | null = null;
 
-  constructor(
+  public constructor(
     app: App,
     private readonly captchaUrl: string
   ) {
     super(app);
   }
 
-  onOpen(): void {
+  public onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
 
@@ -50,7 +50,7 @@ export class ProtonDriveCaptchaModal extends Modal {
     });
 
     const frameWrapper = contentEl.createEl('div', { cls: 'proton-sync-captcha-frame-wrapper' });
-    this.iframeEl = frameWrapper.createEl('iframe', {
+    this.#iframeEl = frameWrapper.createEl('iframe', {
       cls: 'proton-sync-captcha-frame',
       attr: {
         src: this.captchaUrl,
@@ -60,12 +60,12 @@ export class ProtonDriveCaptchaModal extends Modal {
       }
     });
 
-    window.addEventListener('message', this.onMessage, false);
+    window.addEventListener('message', this.#onMessage, false);
 
     new Setting(contentEl)
       .addButton(button =>
         button.setButtonText(t.modals.captcha.reload).onClick(() => {
-          this.reloadIframe();
+          this.#reloadIframe();
         })
       )
       .addExtraButton(button =>
@@ -73,16 +73,16 @@ export class ProtonDriveCaptchaModal extends Modal {
           .setIcon('cross')
           .setTooltip(t.common.cancel)
           .onClick(() => {
-            this.didResolve = true;
-            this.canceledSubject.next();
+            this.#didResolve = true;
+            this.#canceledSubject.next();
             this.close();
           })
       );
   }
 
-  private onMessage = (event: MessageEvent<string>): void => {
+  readonly #onMessage = (event: MessageEvent<string>): void => {
     const targetOrigin = new URL(this.captchaUrl).origin;
-    const contentWindow = this.iframeEl?.contentWindow;
+    const contentWindow = this.#iframeEl?.contentWindow;
 
     const { origin, data, source } = event;
     if (!contentWindow || origin !== targetOrigin || !data || source !== contentWindow) {
@@ -95,28 +95,28 @@ export class ProtonDriveCaptchaModal extends Modal {
       return;
     }
 
-    this.submittedSubject.next({ token: deserialized.payload.token, verificationMethod: deserialized.payload.type });
-    this.didResolve = true;
+    this.#submittedSubject.next({ token: deserialized.payload.token, verificationMethod: deserialized.payload.type });
+    this.#didResolve = true;
     this.close();
   };
 
-  onClose(): void {
-    window.removeEventListener('message', this.onMessage, false);
-    if (!this.didResolve) {
-      this.canceledSubject.next();
+  public onClose(): void {
+    window.removeEventListener('message', this.#onMessage, false);
+    if (!this.#didResolve) {
+      this.#canceledSubject.next();
     }
 
-    if (this.iframeEl) {
-      this.iframeEl.src = 'about:blank';
-      this.iframeEl = null;
+    if (this.#iframeEl) {
+      this.#iframeEl.src = 'about:blank';
+      this.#iframeEl = null;
     }
   }
 
-  private reloadIframe(): void {
-    if (!this.iframeEl) {
+  #reloadIframe(): void {
+    if (!this.#iframeEl) {
       return;
     }
 
-    this.iframeEl.src = this.captchaUrl;
+    this.#iframeEl.src = this.captchaUrl;
   }
 }

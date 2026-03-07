@@ -5,16 +5,16 @@ import { Subject } from 'rxjs';
 import { getI18n } from '../../i18n';
 
 export class ProtonDriveConfirmModal extends Modal {
-  private readonly submittedSubject = new Subject<{ confirmed: boolean; toggleValue: boolean }>();
-  public readonly submitted$ = this.submittedSubject.asObservable();
+  readonly #submittedSubject = new Subject<{ confirmed: boolean; toggleValue: boolean }>();
+  public readonly submitted$ = this.#submittedSubject.asObservable();
 
-  private readonly canceledSubject = new Subject<void>();
-  public readonly canceled$ = this.canceledSubject.asObservable();
+  readonly #canceledSubject = new Subject<void>();
+  public readonly canceled$ = this.#canceledSubject.asObservable();
 
-  private didResolve = false;
-  private toggleValue = false;
+  #didResolve = false;
+  #toggleValue = false;
 
-  constructor(
+  public constructor(
     app: App,
     private readonly title: string,
     private readonly confirmLabel: string,
@@ -24,7 +24,7 @@ export class ProtonDriveConfirmModal extends Modal {
     super(app);
   }
 
-  onOpen(): void {
+  public onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
 
@@ -36,34 +36,34 @@ export class ProtonDriveConfirmModal extends Modal {
       .setName(this.toggleLabel)
       .setDesc(this.toggleDescription)
       .addToggle(toggle => {
-        toggle.setValue(this.toggleValue).onChange(value => {
+        toggle.setValue(this.#toggleValue).onChange(value => {
           if (setting) {
             setting.clear();
-            this.createButtons(setting, toggle.getValue());
+            this.#createButtons(setting, toggle.getValue());
           }
-          this.toggleValue = value;
+          this.#toggleValue = value;
         });
       });
 
     setting = new Setting(contentEl);
-    this.createButtons(setting, this.toggleValue);
+    this.#createButtons(setting, this.#toggleValue);
   }
 
-  onClose(): void {
-    if (!this.didResolve) {
-      this.canceledSubject.next();
+  public onClose(): void {
+    if (!this.#didResolve) {
+      this.#canceledSubject.next();
     }
   }
 
-  private createButtons(setting: Setting, warn: boolean) {
+  #createButtons(setting: Setting, warn: boolean) {
     const { t } = getI18n();
     const buttonFormat = warn ? (b: ButtonComponent) => b.setWarning() : (b: ButtonComponent) => b.setCta();
 
     setting
       .addButton(b => {
         b.setButtonText(this.confirmLabel).onClick(() => {
-          this.didResolve = true;
-          this.submittedSubject.next({ confirmed: true, toggleValue: this.toggleValue });
+          this.#didResolve = true;
+          this.#submittedSubject.next({ confirmed: true, toggleValue: this.#toggleValue });
           this.close();
         });
         buttonFormat(b);
@@ -73,8 +73,8 @@ export class ProtonDriveConfirmModal extends Modal {
           .setIcon('cross')
           .setTooltip(t.modals.confirm.cancelTooltip)
           .onClick(() => {
-            this.didResolve = true;
-            this.canceledSubject.next();
+            this.#didResolve = true;
+            this.#canceledSubject.next();
             this.close();
           })
       );

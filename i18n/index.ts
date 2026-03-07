@@ -32,7 +32,7 @@ export function initI18n(language: string): I18nService {
 
   for (const locale of fallbackChain) {
     const override = localeOverrides[locale];
-    if (!override) {
+    if (override === undefined || override === null) {
       continue;
     }
 
@@ -58,8 +58,8 @@ export function getI18n(): I18nService {
   return service;
 }
 
-function buildLocaleFallbackChain(language: string): string[] {
-  const locales: string[] = ['en'];
+function buildLocaleFallbackChain(language: string): Array<string> {
+  const locales: Array<string> = ['en'];
 
   if (language) {
     const [baseLanguage] = language.split('-');

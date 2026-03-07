@@ -12,25 +12,25 @@ export const { init: initProtonDriveClient, get: getProtonDriveClient } = (funct
   let instance: ProtonDriveClient | null = null;
 
   return {
-    init: function initProtonDriveClient(): ProtonDriveClient {
+    init: function (this: void): ProtonDriveClient {
       return (instance ??= new ProtonDriveClient({
         httpClient: getProtonHttpClient(),
         entitiesCache: new MemoryCache<string>(),
         cryptoCache: new MemoryCache<CachedCryptoMaterial>(),
         account: getProtonAccount(),
+        // eslint-disable-next-line @typescript-eslint/naming-convention
         openPGPCryptoModule: createOpenPgpCrypto(),
         srpModule: new PlaceholderSrpModule(),
         latestEventIdProvider: {
-          getLatestEventId: (): string | null => {
-            return Option.match(getObsidianSettingsStore().get('latestEventId'), {
+          getLatestEventId: (): string | null =>
+            Option.match(getObsidianSettingsStore().get('latestEventId'), {
               onSome: latestEventId => latestEventId.eventId,
               onNone: () => null
-            });
-          }
+            })
         }
       }));
     },
-    get: function getProtonDriveClient(): ProtonDriveClient {
+    get: function (this: void): ProtonDriveClient {
       if (!instance) {
         throw new Error('ProtonDriveClient has not been initialized. Please call initProtonDriveClient first.');
       }
@@ -43,7 +43,7 @@ type SrpModule = ProtonDriveClientContructorParameters['srpModule'];
 type SrpVerifier = Awaited<ReturnType<SrpModule['getSrpVerifier']>>;
 
 class PlaceholderSrpModule implements SrpModule {
-  async getSrp(
+  public async getSrp(
     version: number,
     modulus: string,
     serverEphemeral: string,
@@ -62,11 +62,11 @@ class PlaceholderSrpModule implements SrpModule {
     };
   }
 
-  async getSrpVerifier(_password: string): Promise<SrpVerifier> {
+  public async getSrpVerifier(_password: string): Promise<SrpVerifier> {
     throw new Error('SRP verifier generation not implemented.');
   }
 
-  async computeKeyPassword(_password: string, _salt: string): Promise<string> {
+  public async computeKeyPassword(_password: string, _salt: string): Promise<string> {
     throw new Error('Key password computation not implemented.');
   }
 }

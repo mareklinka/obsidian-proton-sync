@@ -9,7 +9,8 @@ export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } 
   let instance: ObsidianSettingsStore | null = null;
 
   return {
-    init: function initObsidianSettingsStore(
+    init: function (
+      this: void,
       defaultRemoteVaultRootPath: string,
       callbacks: {
         load: () => Promise<PluginSettingsStorageModel | null>;
@@ -18,7 +19,7 @@ export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } 
     ): ObsidianSettingsStore {
       return (instance ??= new ObsidianSettingsStore(defaultRemoteVaultRootPath, callbacks));
     },
-    get: function getObsidianSettingsStoreInstance(): ObsidianSettingsStore {
+    get: function (this: void): ObsidianSettingsStore {
       if (!instance) {
         throw new Error('ObsidianSettingsStore has not been initialized. Please call initObsidianSettingsStore first.');
       }
@@ -28,7 +29,7 @@ export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } 
 })();
 
 class ObsidianSettingsStore {
-  private readonly settingsSubject = new BehaviorSubject<Readonly<PluginSettings>>({
+  readonly #settingsSubject = new BehaviorSubject<Readonly<PluginSettings>>({
     accountEmail: '',
     lastLoginAt: null,
     lastLoginError: null,
@@ -41,7 +42,7 @@ class ObsidianSettingsStore {
     ignoredPaths: [],
     remoteVaultRootPath: ''
   });
-  public readonly settings$ = this.settingsSubject.asObservable();
+  public readonly settings$ = this.#settingsSubject.asObservable();
 
   public constructor(
     private readonly defaultRemoteVaultRootPath: string,
@@ -55,11 +56,11 @@ class ObsidianSettingsStore {
     const loaded = await this.callbacks.load();
 
     if (loaded) {
-      this.settingsSubject.next({
+      this.#settingsSubject.next({
         accountEmail: loaded.accountEmail,
-        lastLoginAt: loaded.lastLoginAt ? new Date(loaded.lastLoginAt) : null,
-        lastRefreshAt: loaded.lastRefreshAt ? new Date(loaded.lastRefreshAt) : null,
-        sessionExpiresAt: loaded.sessionExpiresAt ? new Date(loaded.sessionExpiresAt) : null,
+        lastLoginAt: typeof loaded.lastLoginAt === 'number' ? new Date(loaded.lastLoginAt) : null,
+        lastRefreshAt: typeof loaded.lastRefreshAt === 'number' ? new Date(loaded.lastRefreshAt) : null,
+        sessionExpiresAt: typeof loaded.sessionExpiresAt === 'number' ? new Date(loaded.sessionExpiresAt) : null,
         lastLoginError: loaded.lastLoginError,
         latestEventId: loaded.latestEventId ? Option.some(new ProtonEventId(loaded.latestEventId)) : Option.none(),
         vaultRootNodeUid: loaded.vaultRootNodeUid
@@ -74,8 +75,8 @@ class ObsidianSettingsStore {
             : loaded.remoteVaultRootPath
       });
     } else {
-      this.settingsSubject.next({
-        ...this.settingsSubject.getValue(),
+      this.#settingsSubject.next({
+        ...this.#settingsSubject.getValue(),
         remoteVaultRootPath: this.defaultRemoteVaultRootPath
       });
     }
@@ -98,19 +99,19 @@ class ObsidianSettingsStore {
   }
 
   public get<K extends keyof PluginSettings>(key: K): PluginSettings[K] {
-    return this.settingsSubject.getValue()[key];
+    return this.#settingsSubject.getValue()[key];
   }
 
   public set<K extends keyof PluginSettings>(key: K, value: PluginSettings[K]): void {
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
+    this.#settingsSubject.next({
+      ...this.#settingsSubject.getValue(),
       [key]: value
     });
   }
 
   public reset() {
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
+    this.#settingsSubject.next({
+      ...this.#settingsSubject.getValue(),
       accountEmail: '',
       lastLoginAt: null,
       lastLoginError: null,
@@ -131,7 +132,7 @@ interface PluginSettingsStorageModel {
   vaultRootNodeUid: string | null;
   enableFileLogging: boolean;
   logLevel: LogLevel;
-  ignoredPaths?: string[];
+  ignoredPaths?: Array<string>;
   remoteVaultRootPath: string | null;
 }
 
@@ -145,7 +146,7 @@ export interface PluginSettings {
   vaultRootNodeUid: Option.Option<ProtonFolderId>;
   enableFileLogging: boolean;
   logLevel: LogLevel;
-  ignoredPaths: string[];
+  ignoredPaths: Array<string>;
   remoteVaultRootPath: string;
 }
 

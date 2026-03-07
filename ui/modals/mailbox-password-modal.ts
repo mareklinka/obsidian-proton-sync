@@ -5,20 +5,20 @@ import { Subject } from 'rxjs';
 import { getI18n } from '../../i18n';
 
 export class ProtonDriveMailboxPasswordModal extends Modal {
-  private readonly submittedSubject = new Subject<string>();
-  public readonly submitted$ = this.submittedSubject.asObservable();
+  readonly #submittedSubject = new Subject<string>();
+  public readonly submitted$ = this.#submittedSubject.asObservable();
 
-  private readonly canceledSubject = new Subject<void>();
-  public readonly canceled$ = this.canceledSubject.asObservable();
+  readonly #canceledSubject = new Subject<void>();
+  public readonly canceled$ = this.#canceledSubject.asObservable();
 
-  private mailboxPassword = '';
-  private didResolve = false;
+  #mailboxPassword = '';
+  #didResolve = false;
 
-  constructor(app: App) {
+  public constructor(app: App) {
     super(app);
   }
 
-  onOpen(): void {
+  public onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
 
@@ -36,7 +36,7 @@ export class ProtonDriveMailboxPasswordModal extends Modal {
       .addText(text => {
         text.inputEl.type = 'password';
         text.onChange(value => {
-          this.mailboxPassword = value;
+          this.#mailboxPassword = value;
         });
       });
 
@@ -45,23 +45,23 @@ export class ProtonDriveMailboxPasswordModal extends Modal {
         .setButtonText(t.modals.mailboxPassword.submit)
         .setCta()
         .onClick(() => {
-          this.didResolve = true;
-          this.submittedSubject.next(this.mailboxPassword);
-          this.clearSensitiveInputs();
+          this.#didResolve = true;
+          this.#submittedSubject.next(this.#mailboxPassword);
+          this.#clearSensitiveInputs();
           this.close();
         })
     );
   }
 
-  onClose(): void {
-    if (!this.didResolve) {
-      this.canceledSubject.next();
+  public onClose(): void {
+    if (!this.#didResolve) {
+      this.#canceledSubject.next();
     }
 
-    this.clearSensitiveInputs();
+    this.#clearSensitiveInputs();
   }
 
-  private clearSensitiveInputs(): void {
-    this.mailboxPassword = '';
+  #clearSensitiveInputs(): void {
+    this.#mailboxPassword = '';
   }
 }
