@@ -40,6 +40,8 @@ export const en = {
       pushCompleted: 'Push completed.',
       pullStarted: 'Pulling vault data from Proton Drive...',
       pullCompleted: 'Pull completed.',
+      signInRequired: 'Please sign in to Proton Drive before syncing.',
+      sessionActivationFailed: 'Saved session could not be activated. Please sign in again.',
       syncCancelled: 'Sync cancelled.',
       syncAlreadyInProgress: 'A sync is already in progress. Please wait for it to complete.',
       vaultRootUnavailable: 'Vault root ID is not available. Please ensure your Proton account is connected correctly.',
@@ -49,8 +51,8 @@ export const en = {
       pullFailed: 'Pull failed. Please try again.'
     },
     confirmation: {
-      pushTitle: 'Proton Drive Sync - Push',
-      pullTitle: 'Proton Drive Sync - Pull',
+      pushTitle: 'Push vault to Proton Drive',
+      pullTitle: 'Pull vault from Proton Drive',
       pushLabel: 'Push',
       pullLabel: 'Pull',
       pruneRemoteLabel: 'Prune remote vault',
@@ -60,12 +62,12 @@ export const en = {
     }
   },
   statusBar: {
-    prefix: 'Proton Sync',
-    ariaLabel: (loginText: string, syncText: string) => `Proton Sync status: ${loginText} / ${syncText}`,
-    syncLabels: {
-      pulling: 'Downloading',
-      pushing: 'Uploading',
-      idle: 'Idle'
+    prefix: 'Proton Drive Sync:',
+    titles: {
+      idle: 'Idle',
+      pulling: 'Pull in progress',
+      pushing: 'Push in progress',
+      auth: 'Authentication in progress'
     }
   },
   auth: {
@@ -181,15 +183,15 @@ export const en = {
       details: ''
     },
     localTreeBuild: {
-      message: 'Scanning local files…',
+      message: 'Scanning local files...',
       details: 'Building local file tree.'
     },
     remoteTreeBuild: {
-      message: 'Scanning remote files…',
+      message: 'Scanning remote files...',
       details: 'Building remote file tree.'
     },
     diffComputation: {
-      message: 'Comparing files…',
+      message: 'Comparing files...',
       details: 'Determining files to synchronize.'
     },
     applyingChanges: {

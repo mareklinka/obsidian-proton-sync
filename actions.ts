@@ -1,178 +1,372 @@
-import { Effect, Option } from 'effect';
+import { Data, Effect, Option } from 'effect';
 import type { App } from 'obsidian';
-import { Notice } from 'obsidian';
+import { normalizePath, Notice } from 'obsidian';
 
 import { getI18n } from './i18n';
+import { getProtonSessionService, PersistedSessionNotFoundError } from './proton/auth/ProtonSessionService';
+import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
+import { initProtonAccount } from './proton/drive/ProtonAccount';
+import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { getLogger } from './services/ConsoleLogger';
-import { getSyncService, SyncAlreadyInProgressError } from './services/SyncService';
+import { getObsidianSettingsStore } from './services/ObsidianSettingsStore';
+import type { ProtonFolder } from './services/ProtonDriveApi';
+import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
+import { beginSyncOperationCancellation, clearSyncOperationCancellation } from './services/SyncOperationCancellation';
+import { getSyncService, SyncAlreadyInProgressError, SyncCancelledError } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
 import { getSyncProgressModal } from './ui/modals/sync-progress-modal';
 
-export async function pushVault(app: App): Promise<void> {
+export function pushVault(app: App): Effect.Effect<void, never, never> {
   const { t } = getI18n();
-  const confirmation = await confirmPrune(app, 'push');
-
-  if (!confirmation || !confirmation.confirmed) {
-    return;
-  }
-
-  const syncService = getSyncService();
   const progressModal = getSyncProgressModal();
-  progressModal.open();
+  return Effect.gen(function* () {
+    const syncService = getSyncService();
 
-  new Notice(t.actions.notices.pushingStarted);
+    const state = syncService.getState().state;
+    if (state === 'pulling') {
+      return yield* new SyncAlreadyInProgressError();
+    }
 
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const state = syncService.getState().state;
-      if (state === 'pulling') {
-        return yield* new SyncAlreadyInProgressError();
-      }
+    if (state === 'pushing') {
+      getSyncProgressModal().open();
+      return;
+    }
 
-      if (state === 'pushing') {
-        getSyncProgressModal().open();
-        return;
-      }
+    const confirmation = yield* confirmOperation(app, 'push');
 
-      yield* syncService.push(confirmation.prune).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            progressModal.markCompleted();
-            new Notice(t.actions.notices.pushCompleted);
-          })
-        )
-      );
-    }).pipe(
-      Effect.catchTag('SyncAlreadyInProgressError', () =>
+    if (!confirmation || !confirmation.confirmed) {
+      return;
+    }
+
+    const operationController = beginSyncOperationCancellation();
+
+    progressModal.open();
+
+    const ready = yield* prepareSyncOperation(operationController.signal);
+    if (!ready) {
+      return;
+    }
+
+    new Notice(t.actions.notices.pushingStarted);
+
+    yield* syncService.push(confirmation.prune, operationController.signal).pipe(
+      Effect.tap(() =>
         Effect.sync(() => {
-          progressModal.close();
-          new Notice(t.actions.notices.syncAlreadyInProgress);
+          progressModal.markCompleted();
+          new Notice(t.actions.notices.pushCompleted);
         })
-      ),
-      Effect.catchTag('VaultRootIdNotAvailableError', () =>
-        Effect.sync(() => {
-          progressModal.close();
-          new Notice(t.actions.notices.vaultRootUnavailable);
-        })
-      ),
-      Effect.catchTag('ProtonApiError', e =>
-        Effect.sync(() => {
-          getLogger('SyncActions').error(`Push failed due to Proton API error ${e.code}: ${e.message}`);
-          progressModal.markFailed(t.actions.notices.pushFailed);
-        })
-      ),
-      Effect.catchTag('PermissionError', () =>
-        Effect.sync(() => {
-          getLogger('SyncActions').error(`Push failed due to permission issues.`);
-          progressModal.markFailed(t.actions.notices.permissionError);
-        })
-      ),
-      Effect.catchTag('SyncCancelledError', () =>
-        Effect.sync(() => {
-          getLogger('SyncActions').info('Push cancelled by user.');
-          progressModal.markCancelled();
-          new Notice(t.actions.notices.syncCancelled);
-        })
-      ),
-      Effect.catchAll(e => {
-        getLogger('SyncActions').error('Push failed', e);
-        return Effect.sync(() => {
-          progressModal.markFailed(t.actions.notices.pushFailed);
-          new Notice(t.actions.notices.pushFailed);
-        });
+      )
+    );
+  }).pipe(
+    Effect.tapBoth({ onSuccess: teardownAfterSync, onFailure: teardownAfterSync }),
+    Effect.catchTag('SyncAlreadyInProgressError', () =>
+      Effect.sync(() => {
+        progressModal.close();
+        new Notice(t.actions.notices.syncAlreadyInProgress);
       })
-    )
+    ),
+    Effect.catchTag('VaultRootIdNotAvailableError', () =>
+      Effect.sync(() => {
+        progressModal.close();
+        new Notice(t.actions.notices.vaultRootUnavailable);
+      })
+    ),
+    Effect.catchTag('ProtonApiError', e =>
+      Effect.sync(() => {
+        getLogger('SyncActions').error(`Push failed due to Proton API error ${e.code}: ${e.message}`);
+        progressModal.markFailed(t.actions.notices.pushFailed);
+      })
+    ),
+    Effect.catchTag('PermissionError', () =>
+      Effect.sync(() => {
+        getLogger('SyncActions').error(`Push failed due to permission issues.`);
+        progressModal.markFailed(t.actions.notices.permissionError);
+      })
+    ),
+    Effect.catchTag('SyncCancelledError', () =>
+      Effect.sync(() => {
+        getLogger('SyncActions').info('Push cancelled by user.');
+        progressModal.markCancelled();
+        new Notice(t.actions.notices.syncCancelled);
+      })
+    ),
+    Effect.catchAll(e => {
+      getLogger('SyncActions').error('Push failed', e);
+      return Effect.sync(() => {
+        progressModal.markFailed(t.actions.notices.pushFailed);
+        new Notice(t.actions.notices.pushFailed);
+      });
+    })
   );
 }
 
-export async function pullVault(app: App): Promise<void> {
+export function pullVault(app: App): Effect.Effect<void, never, never> {
   const { t } = getI18n();
-
-  const confirmation = await confirmPrune(app, 'pull');
-  if (!confirmation || !confirmation.confirmed) {
-    return;
-  }
-
-  const syncService = getSyncService();
   const progressModal = getSyncProgressModal();
-  progressModal.open();
 
-  new Notice(t.actions.notices.pullStarted);
+  return Effect.gen(function* () {
+    const syncService = getSyncService();
+    const state = syncService.getState().state;
+    if (state === 'pushing') {
+      return yield* new SyncAlreadyInProgressError();
+    }
 
-  await Effect.runPromise(
-    Effect.gen(function* () {
-      const state = syncService.getState().state;
-      if (state === 'pushing') {
-        return yield* new SyncAlreadyInProgressError();
-      }
+    if (state === 'pulling') {
+      getSyncProgressModal().open();
+      return;
+    }
 
-      if (state === 'pulling') {
-        getSyncProgressModal().open();
-        return;
-      }
+    const confirmation = yield* confirmOperation(app, 'pull');
+    if (!confirmation || !confirmation.confirmed) {
+      return;
+    }
 
-      yield* syncService.pull(confirmation.prune).pipe(
-        Effect.tap(() =>
-          Effect.sync(() => {
-            progressModal.markCompleted();
-            new Notice(t.actions.notices.pullCompleted);
-          })
-        )
-      );
-    }).pipe(
-      Effect.catchTag('SyncAlreadyInProgressError', () =>
+    const operationController = beginSyncOperationCancellation();
+
+    progressModal.open();
+
+    const ready = yield* prepareSyncOperation(operationController.signal);
+    if (!ready) {
+      return;
+    }
+
+    new Notice(t.actions.notices.pullStarted);
+
+    yield* syncService.pull(confirmation.prune, operationController.signal).pipe(
+      Effect.tap(() =>
         Effect.sync(() => {
-          progressModal.close();
-          new Notice(t.actions.notices.syncAlreadyInProgress);
+          progressModal.markCompleted();
+          new Notice(t.actions.notices.pullCompleted);
         })
-      ),
-      Effect.catchTag('VaultRootIdNotAvailableError', () =>
-        Effect.sync(() => {
-          progressModal.close();
-          new Notice(t.actions.notices.vaultRootUnavailable);
-        })
-      ),
-      Effect.catchTag('SyncCancelledError', () =>
-        Effect.sync(() => {
-          getLogger('SyncActions').info('Pull cancelled by user.');
-          progressModal.markCancelled();
-          new Notice(t.actions.notices.syncCancelled);
-        })
-      ),
-      Effect.catchAll(e => {
-        getLogger('SyncActions').error('Pull failed', e);
-        return Effect.sync(() => {
-          progressModal.markFailed(t.actions.notices.pullFailed);
-          new Notice(t.actions.notices.pullFailed);
-        });
+      )
+    );
+  }).pipe(
+    Effect.tapBoth({ onSuccess: teardownAfterSync, onFailure: teardownAfterSync }),
+    Effect.catchTag('SyncAlreadyInProgressError', () =>
+      Effect.sync(() => {
+        progressModal.close();
+        new Notice(t.actions.notices.syncAlreadyInProgress);
       })
-    )
+    ),
+    Effect.catchTag('VaultRootIdNotAvailableError', () =>
+      Effect.sync(() => {
+        progressModal.close();
+        new Notice(t.actions.notices.vaultRootUnavailable);
+      })
+    ),
+    Effect.catchTag('SyncCancelledError', () =>
+      Effect.sync(() => {
+        getLogger('SyncActions').info('Pull cancelled by user.');
+        progressModal.markCancelled();
+        new Notice(t.actions.notices.syncCancelled);
+      })
+    ),
+    Effect.catchAll(e => {
+      getLogger('SyncActions').error('Pull failed', e);
+      return Effect.sync(() => {
+        progressModal.markFailed(t.actions.notices.pullFailed);
+        new Notice(t.actions.notices.pullFailed);
+      });
+    })
   );
 }
 
-async function confirmPrune(
+function confirmOperation(
   app: App,
   action: 'push' | 'pull'
-): Promise<{ confirmed: boolean; prune: boolean } | false> {
-  const { t } = getI18n();
-  const title = action === 'push' ? t.actions.confirmation.pushTitle : t.actions.confirmation.pullTitle;
-  const toggleLabel =
-    action === 'push' ? t.actions.confirmation.pruneRemoteLabel : t.actions.confirmation.pruneLocalLabel;
-  const toggleDescription =
-    action === 'push' ? t.actions.confirmation.pruneRemoteDescription : t.actions.confirmation.pruneLocalDescription;
-  const confirmButtonLabel = action === 'push' ? t.actions.confirmation.pushLabel : t.actions.confirmation.pullLabel;
+): Effect.Effect<{ confirmed: boolean; prune: boolean } | false, never, never> {
+  return Effect.gen(function* () {
+    const { t } = getI18n();
+    const title = action === 'push' ? t.actions.confirmation.pushTitle : t.actions.confirmation.pullTitle;
+    const toggleLabel =
+      action === 'push' ? t.actions.confirmation.pruneRemoteLabel : t.actions.confirmation.pruneLocalLabel;
+    const toggleDescription =
+      action === 'push' ? t.actions.confirmation.pruneRemoteDescription : t.actions.confirmation.pruneLocalDescription;
+    const confirmButtonLabel = action === 'push' ? t.actions.confirmation.pushLabel : t.actions.confirmation.pullLabel;
 
-  const confirmation = await Effect.runPromise(
-    promptFromModal(
+    const confirmation = yield* promptFromModal(
       app,
       app => new ProtonDriveConfirmModal(app, title, confirmButtonLabel, toggleLabel, toggleDescription)
-    )
-  );
+    );
 
-  if (Option.isNone(confirmation) || !confirmation.value) {
-    return false;
+    if (Option.isNone(confirmation) || !confirmation.value) {
+      return false;
+    }
+
+    return { confirmed: confirmation.value.confirmed, prune: confirmation.value.toggleValue };
+  });
+}
+
+function prepareSyncOperation(signal: AbortSignal) {
+  const { t } = getI18n();
+  return Effect.gen(function* () {
+    getSyncService().setAuthenticationState();
+    yield* ensureNotCancelled(signal);
+
+    const settingsStore = getObsidianSettingsStore();
+    const sessionService = getProtonSessionService();
+
+    if (!sessionService.hasPersistedSession()) {
+      return yield* new PersistedSessionNotFoundError();
+    }
+
+    yield* ensureNotCancelled(signal);
+    yield* sessionService.activatePersistedSession();
+    yield* ensureNotCancelled(signal);
+
+    const currentSession = sessionService.getCurrentSession();
+
+    if (Option.isSome(currentSession)) {
+      const settingsStore = getObsidianSettingsStore();
+      settingsStore.set('lastRefreshAt', currentSession.value.lastRefreshAt);
+      settingsStore.set('sessionExpiresAt', currentSession.value.expiresAt);
+    }
+
+    initProtonAccount();
+    initProtonHttpClient();
+    initProtonDriveClient();
+    initProtonDriveApi();
+
+    yield* ensureNotCancelled(signal);
+    const vaultRoot = yield* ensureVaultRootFolder(settingsStore.get('remoteVaultRootPath'), signal);
+    settingsStore.set('vaultRootNodeUid', Option.some(vaultRoot.id));
+
+    return true;
+  }).pipe(
+    Effect.catchAll(e => {
+      return Effect.sync(() => {
+        switch (e._tag) {
+          case 'SyncCancelledError':
+            new Notice(t.actions.notices.syncCancelled);
+            break;
+          case 'PersistedSessionNotFoundError':
+            new Notice(t.actions.notices.signInRequired);
+            break;
+          case 'ProtonApiCommunicationError':
+            new Notice(t.actions.notices.sessionActivationFailed);
+            break;
+          case 'InvalidName':
+            new Notice(t.main.notices.invalidFolderName);
+            break;
+          case 'ItemAlreadyExists':
+            new Notice(t.main.notices.folderAlreadyExists);
+            break;
+          case 'MyFilesRootFilesNotFound':
+            new Notice(t.main.notices.myFilesRootNotFound);
+            break;
+          case 'GenericProtonDriveError':
+            new Notice(t.main.notices.setupVaultRootFailed);
+            break;
+          case 'ProtonApiError':
+            new Notice(t.main.notices.protonApiError);
+            break;
+          case 'AmbiguousSharedPathError':
+            new Notice(t.main.notices.ambiguousSharedPath);
+            break;
+          case 'SharedFolderNotFoundError':
+            new Notice(t.main.notices.sharedFolderNotFound);
+            break;
+          case 'InvalidSharedPathError':
+            new Notice(t.main.notices.invalidSharedPath);
+            break;
+          default:
+            new Notice(t.actions.notices.sessionActivationFailed);
+            break;
+        }
+
+        getSyncService().setIdleState();
+
+        return false;
+      });
+    })
+  );
+}
+
+function teardownAfterSync() {
+  return Effect.gen(function* () {
+    getLogger('SyncActions').warn('Cleaning up after sync operation');
+    const sessionService = getProtonSessionService();
+    yield* sessionService.deactivateSession();
+    clearSyncOperationCancellation();
+  });
+}
+
+function ensureVaultRootFolder(remoteVaultRootPath: string, signal: AbortSignal) {
+  return Effect.gen(function* () {
+    yield* ensureNotCancelled(signal);
+
+    const normalizedRemoteRootPath = normalizePath(remoteVaultRootPath);
+    const pathSegments = normalizedRemoteRootPath.split('/').filter(segment => segment.trim() !== '');
+
+    const protonApi = getProtonDriveApi();
+
+    let remoteRoot: ProtonFolder;
+    if (normalizedRemoteRootPath.startsWith('$shared$/')) {
+      // target root is a folder shared with the user - we should not attempt to create it, only to find it
+      if (pathSegments.length < 2) {
+        // at least $shared$ and one folder name are required in the path
+        return yield* new InvalidSharedPathError();
+      }
+
+      const shareName = pathSegments[1];
+      const shares = yield* protonApi.getSharedFolders();
+      yield* ensureNotCancelled(signal);
+      const matchingShares = shares.filter(share => share.name === shareName);
+
+      if (matchingShares.length === 0) {
+        return yield* new SharedFolderNotFoundError();
+      }
+
+      if (matchingShares.length > 1) {
+        return yield* new AmbiguousSharedPathError();
+      }
+
+      const targetShare = matchingShares[0];
+
+      remoteRoot = yield* ensureRemotePath(targetShare, pathSegments.slice(2), signal);
+    } else {
+      // target root is the user's own folder
+      const myFilesRoot = yield* protonApi.getRootFolder();
+      yield* ensureNotCancelled(signal);
+      remoteRoot = yield* ensureRemotePath(myFilesRoot, pathSegments, signal);
+    }
+
+    getLogger('SyncActions').info('Vault node root ID is: ', remoteRoot);
+
+    return remoteRoot;
+  });
+}
+
+function ensureRemotePath(parent: ProtonFolder, pathSegments: string[], signal: AbortSignal) {
+  const protonApi = getProtonDriveApi();
+  let currentFolder = parent;
+
+  return Effect.gen(function* () {
+    for (const segment of pathSegments) {
+      yield* ensureNotCancelled(signal);
+
+      const maybeFolder = yield* protonApi.getFolderByName(segment, currentFolder.id, signal);
+      if (Option.isSome(maybeFolder)) {
+        currentFolder = maybeFolder.value;
+      } else {
+        const newFolder = yield* protonApi.createFolder(segment, currentFolder.id, signal);
+        currentFolder = newFolder;
+      }
+    }
+
+    return currentFolder;
+  });
+}
+
+function ensureNotCancelled(signal: AbortSignal): Effect.Effect<void, SyncCancelledError> {
+  if (signal.aborted) {
+    return Effect.fail(new SyncCancelledError({ reason: signal.reason }));
   }
 
-  return { confirmed: confirmation.value.confirmed, prune: confirmation.value.toggleValue };
+  return Effect.void;
 }
+
+class InvalidSharedPathError extends Data.TaggedError('InvalidSharedPathError') {}
+class SharedFolderNotFoundError extends Data.TaggedError('SharedFolderNotFoundError') {}
+class AmbiguousSharedPathError extends Data.TaggedError('AmbiguousSharedPathError') {}

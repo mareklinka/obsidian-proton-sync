@@ -4,23 +4,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
+  border-radius: var(--radius-s);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
-.proton-sync-status__label {
-  opacity: 0.95;
-  color: var(--text-normal);
-}
-
-.proton-sync-status__separator {
-  opacity: 0.55;
-}
-
-.proton-sync-status__label--disconnected {
-  color: var(--text-warning);
-}
-
-.proton-sync-status__label--error {
-  color: var(--text-error);
+.proton-sync-status:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-accent);
 }
 
 .proton-sync-disclosure {

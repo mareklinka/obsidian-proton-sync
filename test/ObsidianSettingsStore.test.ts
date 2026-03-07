@@ -50,7 +50,6 @@ describe('ObsidianSettingsStore', () => {
 
     const callbacks = createCallbacks({
       accountEmail: 'user@example.com',
-      connectionStatus: 'connected',
       lastLoginAt,
       lastRefreshAt,
       sessionExpiresAt,
@@ -70,7 +69,6 @@ describe('ObsidianSettingsStore', () => {
     expect(callbacks.save).toHaveBeenCalled();
 
     expect(store.get('accountEmail')).toBe('user@example.com');
-    expect(store.get('connectionStatus')).toBe('connected');
     expect(store.get('lastLoginAt')?.toISOString()).toBe(new Date(lastLoginAt).toISOString());
     expect(store.get('lastRefreshAt')?.toISOString()).toBe(new Date(lastRefreshAt).toISOString());
     expect(store.get('sessionExpiresAt')?.toISOString()).toBe(new Date(sessionExpiresAt).toISOString());
@@ -94,7 +92,6 @@ describe('ObsidianSettingsStore', () => {
     const persisted = callbacks.save.mock.calls.at(-1)?.[0];
     expect(persisted).toEqual({
       accountEmail: 'user@example.com',
-      connectionStatus: 'connected',
       lastLoginAt,
       lastRefreshAt,
       sessionExpiresAt,
@@ -128,7 +125,7 @@ describe('ObsidianSettingsStore', () => {
     expect(persisted.ignoredPaths).toEqual([]);
   });
 
-  it('persists settings changes from set and authentication updates', async () => {
+  it('persists settings changes from set and session metadata updates', async () => {
     const mod = await import('../services/ObsidianSettingsStore');
 
     const callbacks = createCallbacks(null);
@@ -156,13 +153,15 @@ describe('ObsidianSettingsStore', () => {
       expiresAt: expires
     };
 
-    store.setAuthenticationResult(Option.some(session));
+    store.set('lastLoginAt', session.updatedAt);
+    store.set('lastRefreshAt', session.lastRefreshAt);
+    store.set('sessionExpiresAt', session.expiresAt);
+    store.set('lastLoginError', null);
 
     expect(callbacks.save).toHaveBeenCalled();
 
     expect(store.get('accountEmail')).toBe('new@example.com');
     expect(store.get('ignoredPaths')).toEqual(['private/', 'tmp/']);
-    expect(store.get('connectionStatus')).toBe('connected');
     expect(store.get('lastLoginAt')?.toISOString()).toBe(now.toISOString());
     expect(store.get('lastRefreshAt')?.toISOString()).toBe(refreshed.toISOString());
     expect(store.get('sessionExpiresAt')?.toISOString()).toBe(expires.toISOString());
@@ -170,18 +169,16 @@ describe('ObsidianSettingsStore', () => {
     const persisted = callbacks.save.mock.calls.at(-1)?.[0];
     expect(persisted.accountEmail).toBe('new@example.com');
     expect(persisted.ignoredPaths).toEqual(['private/', 'tmp/']);
-    expect(persisted.connectionStatus).toBe('connected');
     expect(persisted.lastLoginAt).toBe(now.getTime());
     expect(persisted.lastRefreshAt).toBe(refreshed.getTime());
     expect(persisted.sessionExpiresAt).toBe(expires.getTime());
   });
 
-  it('reset clears auth/session fields and persists disconnected state', async () => {
+  it('reset clears auth/session fields', async () => {
     const mod = await import('../services/ObsidianSettingsStore');
 
     const callbacks = createCallbacks({
       accountEmail: 'user@example.com',
-      connectionStatus: 'connected',
       lastLoginAt: 1_700_000_000_000,
       lastRefreshAt: 1_700_000_100_000,
       sessionExpiresAt: 1_700_000_200_000,
@@ -204,7 +201,6 @@ describe('ObsidianSettingsStore', () => {
     expect(callbacks.save).toHaveBeenCalled();
 
     expect(store.get('accountEmail')).toBe('');
-    expect(store.get('connectionStatus')).toBe('disconnected');
     expect(store.get('lastLoginAt')).toBeNull();
     expect(store.get('lastRefreshAt')).toBeNull();
     expect(store.get('sessionExpiresAt')).toBeNull();
@@ -215,7 +211,6 @@ describe('ObsidianSettingsStore', () => {
     expect(store.get('remoteVaultRootPath')).toBe('/custom-root');
 
     const persisted = callbacks.save.mock.calls.at(-1)?.[0];
-    expect(persisted.connectionStatus).toBe('disconnected');
     expect(persisted.lastLoginAt).toBeNull();
     expect(persisted.lastRefreshAt).toBeNull();
     expect(persisted.sessionExpiresAt).toBeNull();

@@ -18,6 +18,14 @@ export function toConfigSyncProgressViewState(state: SyncState): ConfigSyncProgr
     };
   }
 
+  if (state.state === 'auth') {
+    return {
+      message: 'Initializing Proton Drive session...',
+      details: '',
+      progressPercent: null
+    };
+  }
+
   switch (state.subState) {
     case 'localTreeBuild':
       return {

@@ -1,23 +1,15 @@
-import type { Plugin } from 'obsidian';
-import { combineLatest, map, type Observable } from 'rxjs';
+import { type Plugin, setIcon } from 'obsidian';
+import { type Observable } from 'rxjs';
 
 import { getI18n } from '../i18n';
-import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 import { type SyncState } from '../services/SyncService';
 import { getSyncProgressModal } from './modals/sync-progress-modal';
-import { toLoginIcon, toLoginLabel } from './ui-helpers';
 
 export interface SyncStatusBarController {
   dispose(): void;
 }
 
-export function createSyncStatusBar(
-  plugin: Plugin,
-  input: {
-    loginState$: Observable<ProtonAuthStatus>;
-    syncState$: Observable<SyncState>;
-  }
-): SyncStatusBarController {
+export function createSyncStatusBar(plugin: Plugin, syncState$: Observable<SyncState>): SyncStatusBarController {
   const itemEl = plugin.addStatusBarItem();
   itemEl.addClass('proton-sync-status');
   itemEl.onClickEvent((e: MouseEvent) => {
@@ -28,29 +20,13 @@ export function createSyncStatusBar(
     getSyncProgressModal().open();
   });
 
-  const subscription = combineLatest([input.loginState$, input.syncState$])
-    .pipe(
-      map(([loginState, syncState]) => ({
-        loginState,
-        syncState: toEffectiveSyncState(syncState)
-      }))
-    )
-    .subscribe(({ loginState, syncState }) => {
-      const { t } = getI18n();
-      const loginText = toLoginLabel(loginState);
-      const loginIcon = toLoginIcon(loginState);
-      const syncText = toSyncLabel(syncState);
-      const syncIcon = toSyncIcon(syncState);
+  const subscription = syncState$.subscribe(syncState => {
+    const { t } = getI18n();
+    itemEl.empty();
+    itemEl.title = `${t.statusBar.prefix} ${t.statusBar.titles[syncState.state]}`;
 
-      itemEl.setAttribute('aria-label', t.statusBar.ariaLabel(loginText, syncText));
-      itemEl.innerHTML =
-        `${t.statusBar.prefix}: ` +
-        `<span class="proton-sync-status__label proton-sync-status__label--${loginState}">` +
-        `${loginIcon}</span>` +
-        '<span class="proton-sync-status__separator">•</span>' +
-        `<span class="proton-sync-status__label proton-sync-status__label--${syncState}">` +
-        `${syncIcon}</span>`;
-    });
+    setIcon(itemEl.createEl('span'), toSyncIcon(syncState.state));
+  });
 
   return {
     dispose(): void {
@@ -60,32 +36,15 @@ export function createSyncStatusBar(
   };
 }
 
-function toEffectiveSyncState(syncState: SyncState): SyncState['state'] {
-  return syncState.state;
-}
-
-function toSyncLabel(state: SyncState['state']): string {
-  const { t } = getI18n();
-
-  switch (state) {
-    case 'pulling':
-      return t.statusBar.syncLabels.pulling;
-    case 'pushing':
-      return t.statusBar.syncLabels.pushing;
-    case 'idle':
-    default:
-      return t.statusBar.syncLabels.idle;
-  }
-}
-
 function toSyncIcon(state: SyncState['state']): string {
   switch (state) {
     case 'pulling':
-      return '⬇️';
+      return 'cloud-download';
     case 'pushing':
-      return '⬆️';
+      return 'cloud-upload';
     case 'idle':
-    default:
-      return '💤';
+      return 'octagon-pause';
+    case 'auth':
+      return 'key-round';
   }
 }

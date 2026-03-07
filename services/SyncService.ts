@@ -33,6 +33,7 @@ export type SyncSubstate = 'localTreeBuild' | 'remoteTreeBuild' | 'diffComputati
 
 export type SyncState =
   | { state: 'idle' }
+  | { state: 'auth' }
   | {
       state: 'pushing';
       subState: SyncSubstate;
@@ -126,7 +127,6 @@ class SyncService {
   private readonly logger = getLogger('SyncService');
   private readonly stateSubject = new BehaviorSubject<SyncState>({ state: 'idle' });
   public readonly state$ = this.stateSubject.asObservable();
-  private activeAbortController: AbortController | null = null;
 
   constructor(private readonly vault: Vault) {}
 
@@ -134,24 +134,25 @@ class SyncService {
     return this.stateSubject.value;
   }
 
-  public push(prune: boolean, signal?: AbortSignal) {
+  public setAuthenticationState() {
+    this.stateSubject.next({ state: 'auth' });
+  }
+
+  public setIdleState() {
+    this.stateSubject.next({ state: 'idle' });
+  }
+
+  public push(prune: boolean, signal: AbortSignal) {
     return Effect.gen(this, function* () {
-      if (this.stateSubject.value.state !== 'idle') {
+      if (this.stateSubject.value.state !== 'idle' && this.stateSubject.value.state !== 'auth') {
         yield* new SyncAlreadyInProgressError();
       }
 
-      const { controller, signal: syncSignal, cleanup } = this.createCancellationContext(signal);
-      this.activeAbortController = controller;
-
       const idleEffect = Effect.sync(() => {
-        this.stateSubject.next({ state: 'idle' });
-        if (this.activeAbortController === controller) {
-          this.activeAbortController = null;
-        }
-        cleanup();
+        this.setIdleState();
       });
 
-      yield* this.pushImpl(prune, syncSignal).pipe(
+      yield* this.pushImpl(prune, signal).pipe(
         Effect.catchTag('ProtonRequestCancelledError', error =>
           Effect.fail(new SyncCancelledError({ reason: error.reason }))
         ),
@@ -160,39 +161,23 @@ class SyncService {
     });
   }
 
-  public pull(prune: boolean, signal?: AbortSignal) {
+  public pull(prune: boolean, signal: AbortSignal) {
     return Effect.gen(this, function* () {
-      if (this.stateSubject.value.state !== 'idle') {
+      if (this.stateSubject.value.state !== 'idle' && this.stateSubject.value.state !== 'auth') {
         yield* new SyncAlreadyInProgressError();
       }
 
-      const { controller, signal: syncSignal, cleanup } = this.createCancellationContext(signal);
-      this.activeAbortController = controller;
-
       const idleEffect = Effect.sync(() => {
-        this.stateSubject.next({ state: 'idle' });
-        if (this.activeAbortController === controller) {
-          this.activeAbortController = null;
-        }
-        cleanup();
+        this.setIdleState();
       });
 
-      yield* this.pullImpl(prune, syncSignal).pipe(
+      yield* this.pullImpl(prune, signal).pipe(
         Effect.catchTag('ProtonRequestCancelledError', error =>
           Effect.fail(new SyncCancelledError({ reason: error.reason }))
         ),
         Effect.tapBoth({ onSuccess: () => idleEffect, onFailure: () => idleEffect })
       );
     });
-  }
-
-  public cancelCurrentOperation(reason: unknown = 'User cancelled sync operation.'): boolean {
-    if (!this.activeAbortController || this.activeAbortController.signal.aborted) {
-      return false;
-    }
-
-    this.activeAbortController.abort(reason);
-    return true;
   }
 
   private pushImpl(prune: boolean, signal: AbortSignal) {
@@ -257,7 +242,7 @@ class SyncService {
         this.applyPushOperations(syncOps, logger, driveApi, fileApi, signal)
       );
 
-      this.stateSubject.next({ state: 'idle' });
+      this.setIdleState();
     });
   }
 
@@ -346,7 +331,7 @@ class SyncService {
         this.applyPullOperations(pullOps, logger, getProtonDriveApi(), fileApi, signal)
       );
 
-      this.stateSubject.next({ state: 'idle' });
+      this.setIdleState();
     });
   }
 
@@ -950,32 +935,6 @@ class SyncService {
     }
 
     return Effect.void;
-  }
-
-  private createCancellationContext(signal?: AbortSignal): {
-    controller: AbortController;
-    signal: AbortSignal;
-    cleanup: () => void;
-  } {
-    const controller = new AbortController();
-
-    if (!signal) {
-      return { controller, signal: controller.signal, cleanup: () => {} };
-    }
-
-    if (signal.aborted) {
-      controller.abort(signal.reason);
-      return { controller, signal: controller.signal, cleanup: () => {} };
-    }
-
-    const onAbort = () => controller.abort(signal.reason);
-    signal.addEventListener('abort', onAbort, { once: true });
-
-    return {
-      controller,
-      signal: controller.signal,
-      cleanup: () => signal.removeEventListener('abort', onAbort)
-    };
   }
 }
 

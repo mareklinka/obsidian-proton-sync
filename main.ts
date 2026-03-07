@@ -1,13 +1,10 @@
-import { Data, Effect, Option } from 'effect';
+import { Effect, Option } from 'effect';
 import { getLanguage, normalizePath, Notice, Plugin } from 'obsidian';
-import { combineLatest, distinctUntilChanged, map, type Subscription } from 'rxjs';
+import { type Subscription } from 'rxjs';
 
 import { pullVault, pushVault } from './actions';
 import { getI18n, initI18n } from './i18n';
 import { getProtonSessionService, initProtonSessionService } from './proton/auth/ProtonSessionService';
-import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
-import { initProtonAccount } from './proton/drive/ProtonAccount';
-import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { getLogger } from './services/ConsoleLogger';
 import { initObsidianFileApi } from './services/ObsidianFileApi';
 import { initObsidianSecretStore } from './services/ObsidianSecretStore';
@@ -16,10 +13,7 @@ import {
   getObsidianSettingsStore,
   initObsidianSettingsStore
 } from './services/ObsidianSettingsStore';
-import { getProtonCloudObserver, initProtonCloudObserver } from './services/ProtonCloudObserver';
-import type { ProtonFolder } from './services/ProtonDriveApi';
-import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
-import { getSyncService, initSyncService } from './services/SyncService';
+import { initSyncService } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
@@ -57,80 +51,12 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     initObsidianSecretStore(this.app.secretStorage);
     initObsidianFileApi(this.app.vault);
 
-    const sessionService = initProtonSessionService(`external-drive-obsidiansync@${this.manifest.version}`);
-    await Effect.runPromise(
-      sessionService
-        .loadSession()
-        .pipe(
-          Effect.catchTag('ProtonApiCommunicationError', error =>
-            Effect.succeed(this.logger.error(t.main.notices.login.protonApiCommunicationFailed(error.message), error))
-          )
-        )
-    );
+    initProtonSessionService(`external-drive-obsidiansync@${this.manifest.version}`);
 
-    initProtonAccount();
-    initProtonHttpClient();
-    initProtonDriveClient();
-    initProtonDriveApi();
-    initProtonCloudObserver();
-    initSyncService(this.app.vault);
+    const syncService = initSyncService(this.app.vault);
     initSyncProgressModal(this.app);
-    const syncService = getSyncService();
 
-    const remoteVaultRootPath$ = settings.settings$.pipe(
-      map(_ => _.remoteVaultRootPath),
-      distinctUntilChanged()
-    );
-    combineLatest([remoteVaultRootPath$, sessionService.authState$]).subscribe(
-      async ([remoteVaultRootPath, authState]) => {
-        const effect = Effect.gen(this, function* () {
-          this.logger.debug(
-            'Auth state or remote vault root path changed. Setting up vault root in Proton Drive if needed.',
-            {
-              authState,
-              remoteVaultRootPath
-            }
-          );
-          const session = sessionService.getCurrentSession();
-          settings.setAuthenticationResult(session);
-
-          if (authState === 'connected') {
-            const vaultRoot = yield* this.ensureVaultRootFolder(remoteVaultRootPath);
-            getObsidianSettingsStore().set('vaultRootNodeUid', Option.some(vaultRoot.id));
-            yield* getProtonCloudObserver().subscribeToTreeChanges(vaultRoot.treeEventScopeId);
-          } else if (authState === 'disconnected') {
-            getProtonCloudObserver().unsubscribeFromTreeChanges();
-          }
-        }).pipe(
-          Effect.catchAll(error => {
-            return Effect.gen(this, function* () {
-              this.logger.error('Error in vault root setup', error);
-              getObsidianSettingsStore().set('vaultRootNodeUid', Option.none());
-
-              return yield* error;
-            });
-          }),
-          Effect.catchTags({
-            InvalidName: () => Effect.succeed(new Notice(t.main.notices.invalidFolderName)),
-            ItemAlreadyExists: () => Effect.succeed(new Notice(t.main.notices.folderAlreadyExists)),
-            MyFilesRootFilesNotFound: () => Effect.succeed(new Notice(t.main.notices.myFilesRootNotFound)),
-            GenericProtonDriveError: () => Effect.succeed(new Notice(t.main.notices.setupVaultRootFailed)),
-            ProtonApiError: () => Effect.succeed(new Notice(t.main.notices.protonApiError)),
-            AmbiguousSharedPathError: () => Effect.succeed(new Notice(t.main.notices.ambiguousSharedPath)),
-            SharedFolderNotFoundError: () => Effect.succeed(new Notice(t.main.notices.sharedFolderNotFound)),
-            InvalidSharedPathError: () => Effect.succeed(new Notice(t.main.notices.invalidSharedPath)),
-            TreeEventSubscriptionFailed: () => Effect.succeed(new Notice(t.main.notices.treeSubscriptionFailed))
-          })
-        );
-
-        await Effect.runPromise(effect);
-      }
-    );
-
-    this.statusBarController = createSyncStatusBar(this, {
-      loginState$: sessionService.authState$,
-      syncState$: syncService.state$
-    });
+    this.statusBarController = createSyncStatusBar(this, syncService.state$);
 
     this.addRibbonIcon('cloud-cog', t.ribbon.openSyncActions, () => {
       void this.openSyncActionDialog();
@@ -140,8 +66,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       id: PUSH_CONFIG_COMMAND_ID,
       name: t.commands.pushVault,
       icon: 'cloud-upload',
-      callback: () => {
-        void pushVault(this.app);
+      callback: async () => {
+        await this.executeRegisteredSyncAction('push');
       }
     });
 
@@ -149,8 +75,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       id: PULL_CONFIG_COMMAND_ID,
       name: t.commands.pullVault,
       icon: 'cloud-download',
-      callback: () => {
-        void pullVault(this.app);
+      callback: async () => {
+        await this.executeRegisteredSyncAction('pull');
       }
     });
 
@@ -176,7 +102,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     const app = this.app;
 
-    Effect.runPromise(
+    await Effect.runPromise(
       Effect.gen(
         (this,
         function* () {
@@ -186,6 +112,18 @@ export default class ProtonDriveSyncPlugin extends Plugin {
             requestCaptchaChallenge: (captchaUrl: string) =>
               promptFromModal(app, app => new ProtonDriveCaptchaModal(app, captchaUrl))
           });
+
+          const sessionService = getProtonSessionService();
+          const currentSession = sessionService.getCurrentSession();
+
+          if (Option.isSome(currentSession)) {
+            const settingsStore = getObsidianSettingsStore();
+            settingsStore.set('lastLoginAt', new Date());
+            settingsStore.set('lastRefreshAt', new Date());
+            settingsStore.set('sessionExpiresAt', currentSession.value.expiresAt);
+          }
+
+          yield* sessionService.deactivateSession();
         })
       ).pipe(
         Effect.catchTags({
@@ -207,69 +145,14 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.logger.info('Disconnecting from Proton Drive');
 
     await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
-    getObsidianSettingsStore().set('vaultRootNodeUid', Option.none());
+
+    const settingsStore = getObsidianSettingsStore();
+    settingsStore.set('lastLoginAt', null);
+    settingsStore.set('lastRefreshAt', null);
+    settingsStore.set('sessionExpiresAt', null);
+    settingsStore.set('vaultRootNodeUid', Option.none());
+
     new Notice(t.main.notices.disconnected);
-  }
-
-  private ensureVaultRootFolder(remoteVaultRootPath: string | null) {
-    return Effect.gen(this, function* () {
-      const normalizedRemoteRootPath = normalizePath(remoteVaultRootPath ?? this.defaultRemoteVaultRootPath);
-      const pathSegments = normalizedRemoteRootPath.split('/').filter(segment => segment.trim() !== '');
-
-      const protonApi = getProtonDriveApi();
-
-      let remoteRootId: ProtonFolder;
-      if (normalizedRemoteRootPath.startsWith('$shared$/')) {
-        // target root is a folder shared with the user - we should not attempt to create it, only to find it
-        if (pathSegments.length < 2) {
-          // at least $shared$ and one folder name are required in the path
-          return yield* new InvalidSharedPathError();
-        }
-
-        const shareName = pathSegments[1];
-        const shares = yield* protonApi.getSharedFolders();
-        const matchingShares = shares.filter(share => share.name === shareName);
-
-        if (matchingShares.length === 0) {
-          return yield* new SharedFolderNotFoundError();
-        }
-
-        if (matchingShares.length > 1) {
-          return yield* new AmbiguousSharedPathError();
-        }
-
-        const targetShare = matchingShares[0];
-
-        remoteRootId = yield* this.ensureRemotePath(targetShare, pathSegments.slice(2));
-      } else {
-        // target root is the user's own folder
-        const myFilesRoot = yield* protonApi.getRootFolder();
-        remoteRootId = yield* this.ensureRemotePath(myFilesRoot, pathSegments);
-      }
-
-      this.logger.info('Vault node root ID is: ', remoteRootId);
-
-      return remoteRootId;
-    });
-  }
-
-  private ensureRemotePath(parent: ProtonFolder, pathSegments: string[]) {
-    const protonApi = getProtonDriveApi();
-    let currentFolder = parent;
-
-    return Effect.gen(this, function* () {
-      for (const segment of pathSegments) {
-        const maybeFolder = yield* protonApi.getFolderByName(segment, currentFolder.id);
-        if (Option.isSome(maybeFolder)) {
-          currentFolder = maybeFolder.value;
-        } else {
-          const newFolder = yield* protonApi.createFolder(segment, currentFolder.id);
-          currentFolder = newFolder;
-        }
-      }
-
-      return currentFolder;
-    });
   }
 
   private async openSyncActionDialog(): Promise<void> {
@@ -283,9 +166,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   private async executeRegisteredSyncAction(action: ConfigSyncAction): Promise<void> {
     if (action === 'push') {
-      await pushVault(this.app);
+      await Effect.runPromise(pushVault(this.app));
     } else if (action === 'pull') {
-      await pullVault(this.app);
+      await Effect.runPromise(pullVault(this.app));
     }
   }
 
@@ -307,7 +190,3 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     return settingTab;
   }
 }
-
-class InvalidSharedPathError extends Data.TaggedError('InvalidSharedPathError') {}
-class SharedFolderNotFoundError extends Data.TaggedError('SharedFolderNotFoundError') {}
-class AmbiguousSharedPathError extends Data.TaggedError('AmbiguousSharedPathError') {}

@@ -119,6 +119,10 @@ function protonFile(uid: string, name: string, modifiedAt: Date, sha1?: string, 
   };
 }
 
+function createSignal(): AbortSignal {
+  return new AbortController().signal;
+}
+
 describe('SyncService', () => {
   const vault = { configDir: '.obsidian' };
 
@@ -253,7 +257,7 @@ describe('SyncService', () => {
       return undefined;
     });
 
-    const result = await Effect.runPromise(Effect.either(sync.push(false)));
+    const result = await Effect.runPromise(Effect.either(sync.push(false, createSignal())));
 
     expect(result._tag).toBe('Left');
     if (result._tag === 'Left') {
@@ -304,7 +308,7 @@ describe('SyncService', () => {
       return Effect.succeed([]);
     });
 
-    await Effect.runPromise(sync.push(true));
+    await Effect.runPromise(sync.push(true, createSignal()));
 
     expect(uploadFileMock).toHaveBeenCalledTimes(1);
     expect(uploadFileMock.mock.calls[0]?.[0]).toBe('new.md');
@@ -364,7 +368,7 @@ describe('SyncService', () => {
       return Effect.succeed([]);
     });
 
-    await Effect.runPromise(sync.pull(true));
+    await Effect.runPromise(sync.pull(true, createSignal()));
 
     expect(writeFileContentMock).toHaveBeenCalledWith('root-new.md', expect.any(ArrayBuffer), newer);
     expect(writeFileContentMock).toHaveBeenCalledWith('docs/remote-new.md', expect.any(ArrayBuffer), newer);
@@ -384,7 +388,7 @@ describe('SyncService', () => {
 
     getChildrenMock.mockImplementation(() => Effect.fail(new ProtonRequestCancelledError({ reason: 'stop' })));
 
-    const result = await Effect.runPromise(Effect.either(sync.push(false)));
+    const result = await Effect.runPromise(Effect.either(sync.push(false, createSignal())));
 
     expect(result._tag).toBe('Left');
     if (result._tag === 'Left') {
@@ -394,7 +398,7 @@ describe('SyncService', () => {
     expect(sync.getState()).toEqual({ state: 'idle' });
   });
 
-  it('blocks concurrent operations and allows cancelling active operation', async () => {
+  it('blocks concurrent operations and allows cancelling through external signal', async () => {
     const mod = await import('../services/SyncService');
     const sync = mod.initSyncService(vault as never);
 
@@ -407,17 +411,18 @@ describe('SyncService', () => {
 
     getFileTreeMock.mockImplementation(() => Effect.promise(() => pendingTree as Promise<unknown>));
 
-    const firstPushPromise = Effect.runPromise(Effect.either(sync.push(false)));
+    const controller = new AbortController();
+    const firstPushPromise = Effect.runPromise(Effect.either(sync.push(false, controller.signal)));
 
     await Promise.resolve();
 
-    const secondPushResult = await Effect.runPromise(Effect.either(sync.push(false)));
+    const secondPushResult = await Effect.runPromise(Effect.either(sync.push(false, createSignal())));
     expect(secondPushResult._tag).toBe('Left');
     if (secondPushResult._tag === 'Left') {
       expect(secondPushResult.left).toMatchObject({ _tag: 'SyncAlreadyInProgressError' });
     }
 
-    expect(sync.cancelCurrentOperation('manual-stop')).toBe(true);
+    controller.abort('manual-stop');
 
     resolveTree(localTree);
 
@@ -427,7 +432,6 @@ describe('SyncService', () => {
       expect(firstPushResult.left).toMatchObject({ _tag: 'SyncCancelledError', reason: 'manual-stop' });
     }
 
-    expect(sync.cancelCurrentOperation()).toBe(false);
     expect(sync.getState()).toEqual({ state: 'idle' });
   });
 
@@ -451,7 +455,7 @@ describe('SyncService', () => {
       observed.push({ state: state.state, subState: 'subState' in state ? state.subState : undefined });
     });
 
-    await Effect.runPromise(sync.push(false));
+    await Effect.runPromise(sync.push(false, createSignal()));
     sub.unsubscribe();
 
     const pushSubstatesInOrder = observed
@@ -481,7 +485,7 @@ describe('SyncService', () => {
       return Effect.succeed([]);
     });
 
-    await Effect.runPromise(sync.push(false));
+    await Effect.runPromise(sync.push(false, createSignal()));
 
     expect(trashNodesMock).not.toHaveBeenCalled();
     expect(uploadFileMock).not.toHaveBeenCalled();
@@ -518,7 +522,7 @@ describe('SyncService', () => {
 
     getChildrenMock.mockImplementation(() => Effect.succeed([]));
 
-    await Effect.runPromise(sync.push(false));
+    await Effect.runPromise(sync.push(false, createSignal()));
 
     expect(uploadFileMock).toHaveBeenCalledTimes(1);
     expect(uploadFileMock.mock.calls[0]?.[0]).toBe('normal.md');
@@ -565,7 +569,7 @@ describe('SyncService', () => {
       observed.push({ state: state.state, subState: 'subState' in state ? state.subState : undefined });
     });
 
-    await Effect.runPromise(sync.pull(false));
+    await Effect.runPromise(sync.pull(false, createSignal()));
     sub.unsubscribe();
 
     const pullSubstatesInOrder = observed
@@ -610,7 +614,7 @@ describe('SyncService', () => {
       }
     });
 
-    await Effect.runPromise(sync.pull(true));
+    await Effect.runPromise(sync.pull(true, createSignal()));
     sub.unsubscribe();
 
     expect(applyingSnapshots.length).toBeGreaterThanOrEqual(1);
@@ -647,7 +651,7 @@ describe('SyncService', () => {
       return Effect.succeed([]);
     });
 
-    await Effect.runPromise(sync.pull(true));
+    await Effect.runPromise(sync.pull(true, createSignal()));
 
     expect(deleteFolderMock).toHaveBeenCalledTimes(1);
     expect(deleteFolderMock).toHaveBeenCalledWith('orphan-folder');

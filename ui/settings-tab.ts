@@ -4,7 +4,7 @@ import { combineLatest, Subject, take } from 'rxjs';
 
 import { getI18n } from '../i18n';
 import type ProtonDriveSyncPlugin from '../main';
-import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import { getProtonSessionService, type ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 import { getLogger } from '../services/ConsoleLogger';
 import type { PluginSettings } from '../services/ObsidianSettingsStore';
 import { getObsidianSettingsStore, LogLevel } from '../services/ObsidianSettingsStore';
@@ -41,6 +41,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     this.stateSub?.unsubscribe();
     this.stateSub = combineLatest([this.authState, settingsStore.settings$]).subscribe(([authStatus, settings]) => {
       const { t } = getI18n();
+      const hasPersistedSession = getProtonSessionService().hasPersistedSession();
 
       containerEl.empty();
 
@@ -58,13 +59,13 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         text: t.settings.disclosureCredentials
       });
 
-      const statusDescription = this.buildStatusDescription(settings);
+      const statusDescription = this.buildStatusDescription(settings, hasPersistedSession);
       const connectionSetting = new Setting(containerEl)
         .setName(t.settings.connectionStatus.name)
         .setDesc(statusDescription);
       connectionSetting.clear();
 
-      if (authStatus === 'connected') {
+      if (hasPersistedSession) {
         connectionSetting.addButton(button =>
           button
             .setButtonText(t.settings.connectionStatus.disconnectButton)
@@ -90,7 +91,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
                 this.loginSubject.next(credentials);
 
-                connectionSetting.setDesc(this.buildStatusDescription(settings));
+                connectionSetting.setDesc(this.buildStatusDescription(settings, hasPersistedSession));
               });
 
               modal.open();
@@ -162,7 +163,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     super.hide();
   }
 
-  private buildStatusDescription(settings: PluginSettings): DocumentFragment {
+  private buildStatusDescription(settings: PluginSettings, hasPersistedSession: boolean): DocumentFragment {
     const { t } = getI18n();
     const fragment = document.createDocumentFragment();
     const list = document.createElement('ul');
@@ -176,7 +177,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
 
     appendItem(
       t.settings.statusLabels.status,
-      `${toLoginIcon(settings.connectionStatus)} ${toLoginLabel(settings.connectionStatus)}`
+      `${toLoginIcon(hasPersistedSession)} ${toLoginLabel(hasPersistedSession)}`
     );
 
     if (settings.accountEmail) {

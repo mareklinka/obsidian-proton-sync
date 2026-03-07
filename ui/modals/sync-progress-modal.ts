@@ -3,6 +3,7 @@ import { Modal, Setting } from 'obsidian';
 import { type Subscription } from 'rxjs';
 
 import { getI18n } from '../../i18n';
+import { cancelSyncOperationCancellation } from '../../services/SyncOperationCancellation';
 import { getSyncService } from '../../services/SyncService';
 import { toConfigSyncProgressViewState } from '../config-sync-progress-state';
 
@@ -78,7 +79,7 @@ class SyncProgressModal extends Modal {
         .setButtonText(t.common.cancel)
         .setWarning()
         .onClick(() => {
-          const wasCancelled = getSyncService().cancelCurrentOperation();
+          const wasCancelled = cancelSyncOperationCancellation();
           if (!wasCancelled) {
             return;
           }

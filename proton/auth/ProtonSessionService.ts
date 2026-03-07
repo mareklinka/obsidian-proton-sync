@@ -96,9 +96,11 @@ class ProtonSessionService {
 
   constructor(public readonly appVersionHeader: string) {
     this.secretStore = getObsidianSecretStore();
+  }
 
-    const saltedPasswordsJson = this.secretStore.get(SALTED_PASSPHRASES_SECRET_KEY);
-    this.saltedKeyPasswords = JSON.parse(saltedPasswordsJson ? saltedPasswordsJson : '{}') as Record<string, string>;
+  public hasPersistedSession(): boolean {
+    const stored = this.secretStore.get(SESSION_STORAGE_KEY);
+    return Boolean(stored && stored.trim() !== '');
   }
 
   public signIn(
@@ -241,46 +243,68 @@ class ProtonSessionService {
   public signOut(): Effect.Effect<void> {
     return Effect.gen(this, function* () {
       const session = this.session;
-      if (!session || session.state !== 'ok') {
-        return;
-      }
 
       this.stopAutoRefresh();
       this.secretStore.clear(SESSION_STORAGE_KEY);
+      this.secretStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
       this.saltedKeyPasswords = {};
 
       this.session = { state: 'logged-out' };
       this.authStatusSubject.next('disconnected');
       getObsidianSettingsStore().set('accountEmail', '');
 
-      yield* this.destroySession(session.session);
+      if (session && session.state === 'ok') {
+        yield* this.destroySession(session.session);
+      }
     });
   }
 
   public dispose(): Effect.Effect<void> {
     return Effect.gen(this, function* () {
-      const session = this.session;
-      if (!session || session.state !== 'ok') {
-        return;
-      }
-
-      this.stopAutoRefresh();
-
-      this.session = { state: 'disconnected' };
-      this.authStatusSubject.next('disconnected');
-
-      yield* this.destroySession(session.session);
+      yield* this.deactivateSession();
     });
   }
 
-  public loadSession(): Effect.Effect<void, ProtonApiCommunicationError> {
+  public activatePersistedSession(): Effect.Effect<void, ProtonApiCommunicationError | PersistedSessionNotFoundError> {
     return Effect.gen(this, function* () {
+      this.authStatusSubject.next('connecting');
+
       const stored = this.secretStore.get(SESSION_STORAGE_KEY);
-      if (!stored) {
-        return;
+      const saltedPasswordsJson = this.secretStore.get(SALTED_PASSPHRASES_SECRET_KEY);
+      const saltedPasswords = JSON.parse(saltedPasswordsJson ? saltedPasswordsJson : '{}') as Record<string, string>;
+
+      if (!stored || stored.trim() === '' || Object.keys(saltedPasswords).length === 0) {
+        this.authStatusSubject.next('disconnected');
+        return yield* new PersistedSessionNotFoundError();
       }
 
-      yield* this.refreshSession(JSON.parse(stored) as ProtonSession);
+      const persistedSession = JSON.parse(stored) as ProtonSession;
+
+      yield* this.refreshSession(persistedSession).pipe(
+        Effect.catchTag('ProtonApiCommunicationError', error =>
+          Effect.gen(this, function* () {
+            this.secretStore.clear(SESSION_STORAGE_KEY);
+            this.secretStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
+            this.saltedKeyPasswords = {};
+            this.session = { state: 'disconnected' };
+            this.authStatusSubject.next('error');
+
+            return yield* error;
+          })
+        )
+      );
+
+      this.saltedKeyPasswords = saltedPasswords;
+      this.startAutoRefresh();
+    });
+  }
+
+  public deactivateSession(): Effect.Effect<void> {
+    return Effect.sync(() => {
+      this.stopAutoRefresh();
+      this.saltedKeyPasswords = {};
+      this.session = { state: 'disconnected' };
+      this.authStatusSubject.next('disconnected');
     });
   }
 
@@ -607,7 +631,8 @@ export type ProtonSessionError =
   | TwoFactorCodeRequiredError
   | EncryptionPasswordRequiredError
   | CaptchaRequiredError
-  | CaptchaDataNotProvidedError;
+  | CaptchaDataNotProvidedError
+  | PersistedSessionNotFoundError;
 
 export class ProtonApiCommunicationError extends Data.TaggedError('ProtonApiCommunicationError') {}
 export class CryptographyError extends Data.TaggedError('CryptographyError') {}
@@ -615,3 +640,4 @@ export class TwoFactorCodeRequiredError extends Data.TaggedError('TwoFactorCodeR
 export class EncryptionPasswordRequiredError extends Data.TaggedError('EncryptionPasswordRequiredError') {}
 export class CaptchaRequiredError extends Data.TaggedError('CaptchaRequiredError') {}
 export class CaptchaDataNotProvidedError extends Data.TaggedError('CaptchaDataNotProvidedError') {}
+export class PersistedSessionNotFoundError extends Data.TaggedError('PersistedSessionNotFoundError') {}

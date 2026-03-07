@@ -1,8 +1,6 @@
 import { Option } from 'effect';
 import { BehaviorSubject } from 'rxjs';
 
-import type { ProtonSession } from '../proton/auth/ProtonSession';
-import type { ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
 import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
 
 export const DEFAULT_SYNC_CONTAINER_NAME = 'obsidian-notes';
@@ -32,7 +30,6 @@ export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } 
 class ObsidianSettingsStore {
   private readonly settingsSubject = new BehaviorSubject<Readonly<PluginSettings>>({
     accountEmail: '',
-    connectionStatus: 'disconnected',
     lastLoginAt: null,
     lastLoginError: null,
     lastRefreshAt: null,
@@ -60,7 +57,6 @@ class ObsidianSettingsStore {
     if (loaded) {
       this.settingsSubject.next({
         accountEmail: loaded.accountEmail,
-        connectionStatus: loaded.connectionStatus,
         lastLoginAt: loaded.lastLoginAt ? new Date(loaded.lastLoginAt) : null,
         lastRefreshAt: loaded.lastRefreshAt ? new Date(loaded.lastRefreshAt) : null,
         sessionExpiresAt: loaded.sessionExpiresAt ? new Date(loaded.sessionExpiresAt) : null,
@@ -87,7 +83,6 @@ class ObsidianSettingsStore {
     this.settings$.subscribe(async settings => {
       await this.callbacks.save({
         accountEmail: settings.accountEmail,
-        connectionStatus: settings.connectionStatus,
         lastLoginAt: settings.lastLoginAt ? settings.lastLoginAt.getTime() : null,
         lastRefreshAt: settings.lastRefreshAt ? settings.lastRefreshAt.getTime() : null,
         sessionExpiresAt: settings.sessionExpiresAt ? settings.sessionExpiresAt.getTime() : null,
@@ -99,26 +94,6 @@ class ObsidianSettingsStore {
         ignoredPaths: settings.ignoredPaths,
         remoteVaultRootPath: settings.remoteVaultRootPath ?? null
       });
-    });
-  }
-
-  public setAuthenticationResult(session: Option.Option<ProtonSession>): void {
-    this.settingsSubject.next({
-      ...this.settingsSubject.getValue(),
-      ...(Option.isSome(session)
-        ? {
-            connectionStatus: 'connected',
-            lastLoginError: null,
-            lastLoginAt: session.value.updatedAt,
-            lastRefreshAt: session.value.lastRefreshAt,
-            sessionExpiresAt: session.value.expiresAt
-          }
-        : {
-            connectionStatus: 'disconnected',
-            sessionExpiresAt: null,
-            lastLoginAt: null,
-            lastRefreshAt: null
-          })
     });
   }
 
@@ -137,7 +112,6 @@ class ObsidianSettingsStore {
     this.settingsSubject.next({
       ...this.settingsSubject.getValue(),
       accountEmail: '',
-      connectionStatus: 'disconnected',
       lastLoginAt: null,
       lastLoginError: null,
       lastRefreshAt: null,
@@ -149,7 +123,6 @@ class ObsidianSettingsStore {
 
 interface PluginSettingsStorageModel {
   accountEmail: string;
-  connectionStatus: ProtonAuthStatus;
   lastLoginAt: number | null;
   lastRefreshAt: number | null;
   sessionExpiresAt: number | null;
@@ -164,7 +137,6 @@ interface PluginSettingsStorageModel {
 
 export interface PluginSettings {
   accountEmail: string;
-  connectionStatus: ProtonAuthStatus;
   lastLoginAt: Date | null;
   lastRefreshAt: Date | null;
   sessionExpiresAt: Date | null;

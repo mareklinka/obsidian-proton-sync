@@ -38,6 +38,8 @@ class ProtonCloudObserver {
   public subscribeToTreeChanges(nodeId: TreeEventScopeId): Effect.Effect<void, TreeEventSubscriptionFailed> {
     return Effect.tryPromise({
       try: async () => {
+        this.unsubscribeFromTreeChanges();
+
         this.subscription = await this.client.subscribeToTreeEvents(nodeId.treeEventScopeId, async cloudEvent => {
           this.logger.info(`Received cloud event for node ${nodeId.treeEventScopeId}`, cloudEvent);
           getObsidianSettingsStore().set('latestEventId', Option.some(new ProtonEventId(cloudEvent.eventId)));
