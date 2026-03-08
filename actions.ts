@@ -3,11 +3,7 @@ import type { App } from 'obsidian';
 import { normalizePath, Notice } from 'obsidian';
 
 import { getI18n } from './i18n';
-import {
-  getProtonSessionService,
-  MasterPasswordRequiredError,
-  PersistedSessionNotFoundError
-} from './proton/auth/ProtonSessionService';
+import { getProtonSessionService } from './proton/auth/ProtonSessionService';
 import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
 import { initProtonAccount } from './proton/drive/ProtonAccount';
 import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
@@ -29,6 +25,7 @@ import { beginSyncOperationCancellation, clearSyncOperationCancellation } from '
 import { getSyncService, SyncAlreadyInProgressError, SyncCancelledError } from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
+import type { MasterPasswordModalMode } from './ui/modals/master-password-modal';
 import { ProtonDriveMasterPasswordModal } from './ui/modals/master-password-modal';
 import { getSyncProgressModal } from './ui/modals/sync-progress-modal';
 
@@ -220,34 +217,13 @@ function prepareSyncOperation(app: App, signal: AbortSignal): Effect.Effect<bool
     yield* ensureNotCancelled(signal);
 
     const settingsStore = getObsidianSettingsStore();
-    const secretStore = getEncryptedSecretStore();
-
-    const unlockedSessionData = secretStore.getUnlockedSessionData();
-
-    if (Option.isNone(unlockedSessionData)) {
-      if (!secretStore.hasPersistedSessionData()) {
-        return yield* new PersistedSessionNotFoundError();
-      }
-
-      const masterPassword = yield* promptFromModal(app, _ => new ProtonDriveMasterPasswordModal(_, 'unlock'));
-
-      if (Option.isNone(masterPassword)) {
-        return yield* new MasterPasswordRequiredError();
-      }
-
-      yield* secretStore.loadSessionData(masterPassword.value);
-    }
-
     const sessionService = getProtonSessionService();
 
     yield* ensureNotCancelled(signal);
-    const currentSessionBeforeActivation = sessionService.getCurrentSession();
 
-    if (Option.isNone(currentSessionBeforeActivation)) {
-      yield* sessionService.activatePersistedSession(
-        promptFromModal(app, _ => new ProtonDriveMasterPasswordModal(_, 'unlock'))
-      );
-    }
+    yield* sessionService.activatePersistedSession((mode: MasterPasswordModalMode) =>
+      promptFromModal(app, _ => new ProtonDriveMasterPasswordModal(_, mode))
+    );
 
     yield* ensureNotCancelled(signal);
 
@@ -269,7 +245,7 @@ function prepareSyncOperation(app: App, signal: AbortSignal): Effect.Effect<bool
 
     const observer = initProtonCloudObserver();
     observer.unsubscribeFromTreeChanges();
-    observer.subscribeToTreeChanges(vaultRoot.treeEventScopeId);
+    yield* observer.subscribeToTreeChanges(vaultRoot.treeEventScopeId);
 
     return true;
   }).pipe(
@@ -304,6 +280,7 @@ function prepareSyncOperation(app: App, signal: AbortSignal): Effect.Effect<bool
             new Notice(t.main.notices.setupVaultRootFailed);
             break;
           case 'ProtonApiError':
+          case 'ProtonApiCommunicationError':
             new Notice(t.main.notices.protonApiError);
             break;
           case 'AmbiguousSharedPathError':

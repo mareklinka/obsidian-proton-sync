@@ -4,6 +4,8 @@ import { Subject } from 'rxjs';
 
 import { getI18n } from '../../i18n';
 
+export type MasterPasswordModalMode = 'setup' | 'unlock' | 'session-refresh';
+
 export class ProtonDriveMasterPasswordModal extends Modal {
   readonly #submittedSubject = new Subject<string>();
   public readonly submitted$ = this.#submittedSubject.asObservable();
@@ -16,7 +18,7 @@ export class ProtonDriveMasterPasswordModal extends Modal {
 
   public constructor(
     app: App,
-    private readonly mode: 'setup' | 'unlock'
+    private readonly mode: MasterPasswordModalMode
   ) {
     super(app);
   }
@@ -24,20 +26,42 @@ export class ProtonDriveMasterPasswordModal extends Modal {
   public override onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
+    const title =
+      this.mode === 'setup'
+        ? t.modals.masterPassword.setupTitle
+        : this.mode === 'session-refresh'
+          ? t.modals.masterPassword.sessionRefreshTitle
+          : t.modals.masterPassword.unlockTitle;
+    const description =
+      this.mode === 'session-refresh'
+        ? t.modals.masterPassword.sessionRefreshDescription
+        : t.modals.masterPassword.description;
+    const passwordDescription =
+      this.mode === 'setup'
+        ? t.modals.masterPassword.passwordDescription
+        : this.mode === 'session-refresh'
+          ? t.modals.masterPassword.sessionRefreshPasswordDescription
+          : '';
+    const submitButtonText =
+      this.mode === 'setup'
+        ? t.modals.masterPassword.setupButton
+        : this.mode === 'session-refresh'
+          ? t.modals.masterPassword.sessionRefreshButton
+          : t.modals.masterPassword.unlockButton;
 
     contentEl.empty();
 
     contentEl.createEl('h2', {
-      text: this.mode === 'setup' ? t.modals.masterPassword.setupTitle : t.modals.masterPassword.unlockTitle
+      text: title
     });
     const disclosure = contentEl.createEl('div', { cls: 'proton-sync-disclosure' });
     disclosure.createEl('p', {
-      text: t.modals.masterPassword.description
+      text: description
     });
 
     new Setting(contentEl)
       .setName(t.modals.masterPassword.passwordName)
-      .setDesc(this.mode === 'setup' ? t.modals.masterPassword.passwordDescription : '')
+      .setDesc(passwordDescription)
       .addText(text => {
         text.inputEl.type = 'password';
         text.onChange(value => {
@@ -47,9 +71,7 @@ export class ProtonDriveMasterPasswordModal extends Modal {
 
     new Setting(contentEl).addButton(button =>
       button
-        .setButtonText(
-          this.mode === 'setup' ? t.modals.masterPassword.setupButton : t.modals.masterPassword.unlockButton
-        )
+        .setButtonText(submitButtonText)
         .setCta()
         .onClick(() => {
           this.#didResolve = true;

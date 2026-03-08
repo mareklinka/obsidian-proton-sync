@@ -164,12 +164,18 @@ export const en = {
     masterPassword: {
       unlockTitle: 'Unlock Proton Drive session',
       setupTitle: 'Set up master password',
+      sessionRefreshTitle: 'Re-encrypt refreshed session',
       description: 'A master password is used to protect your Proton Drive session data. Never stored or logged.',
+      sessionRefreshDescription:
+        'Your session was refreshed and must be securely stored before syncing can continue. Please enter your master password.',
       passwordName: 'Master password',
       passwordDescription:
         'This can be your regular Proton account password or a separate password used only for this purpose.',
+      sessionRefreshPasswordDescription:
+        'Enter a password to protect your saved Proton Drive session data. This can be your current master password or a new one, if you want to use a different master password from now on.',
       unlockButton: 'Unlock',
       setupButton: 'Continue',
+      sessionRefreshButton: 'Continue',
       processingButton: 'Processing...'
     },
     changeMasterPassword: {

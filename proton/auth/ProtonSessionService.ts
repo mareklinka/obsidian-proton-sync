@@ -4,6 +4,7 @@ import { Platform, requestUrl, type RequestUrlResponse } from 'obsidian';
 import { BehaviorSubject, distinctUntilChanged } from 'rxjs';
 
 import type {
+  EncryptedPersistedSessionData,
   PersistedSecretsInvalidFormatError,
   SecretDecryptionFailedError,
   SecretEncryptionFailedError
@@ -11,6 +12,7 @@ import type {
 import { getEncryptedSecretStore } from '../../services/EncryptedSecretStore';
 import { getObsidianSettingsStore } from '../../services/ObsidianSettingsStore';
 import type { CaptchaVerification } from '../../ui/modals/captcha-modal';
+import type { MasterPasswordModalMode } from '../../ui/modals/master-password-modal';
 import { PROTON_BASE_URL } from '../Constants';
 import { deleteJson, getJson, postJson } from '../ProtonApiClient';
 import type { ProtonSession } from './ProtonSession';
@@ -262,17 +264,18 @@ class ProtonSessionService {
   }
 
   public activatePersistedSession(
-    requestMasterPassword: Effect.Effect<Option.Option<string>, never>
+    requestMasterPassword: (type: MasterPasswordModalMode) => Effect.Effect<Option.Option<string>, never>
   ): Effect.Effect<
-    void,
+    ProtonSession,
     | PersistedSessionNotFoundError
     | PersistedSecretsInvalidFormatError
     | MasterPasswordRequiredError
     | SecretDecryptionFailedError
+    | ProtonApiCommunicationError
+    | SecretEncryptionFailedError
   > {
     return Effect.gen(this, function* () {
       this.#authStatusSubject.next('connecting');
-      this.#encryptedSecretStore.cancelScheduledLock();
 
       if (!this.#encryptedSecretStore.hasPersistedSessionData()) {
         this.#authStatusSubject.next('disconnected');
@@ -281,13 +284,68 @@ class ProtonSessionService {
 
       const unlocked = this.#encryptedSecretStore.getUnlockedSessionData();
 
-      if (Option.isNone(unlocked)) {
-        const masterPassword = yield* this.#resolveMasterPassword(requestMasterPassword);
+      let unlockedSessionData: EncryptedPersistedSessionData;
+      let masterPassword: string | null = null;
 
-        yield* this.#encryptedSecretStore.loadSessionData(masterPassword);
+      if (Option.isNone(unlocked)) {
+        masterPassword = yield* this.#resolveMasterPassword(requestMasterPassword('unlock'));
+
+        unlockedSessionData = yield* this.#encryptedSecretStore.loadSessionData(masterPassword);
+      } else {
+        unlockedSessionData = unlocked.value;
       }
 
+      let session = unlockedSessionData.session;
+
+      if (session.expiresAt.getTime() - Date.now() < 10 * 60 * 1000) {
+        session = yield* this.#refreshSession(session);
+        yield* this.#persistEncryptedSessionData(
+          session,
+          unlockedSessionData.saltedPassphrases,
+          masterPassword ?? (yield* this.#resolveMasterPassword(requestMasterPassword('session-refresh')))
+        );
+      }
+
+      this.#encryptedSecretStore.cancelScheduledLock();
       this.#authStatusSubject.next('connected');
+
+      return session;
+    });
+  }
+
+  #refreshSession(session: ProtonSession): Effect.Effect<ProtonSession, ProtonApiCommunicationError> {
+    return Effect.gen(this, function* () {
+      const state = encodeBase64(this.#randomToken(32));
+      const body = {
+        UID: session.uid,
+        RefreshToken: session.refreshToken,
+        ResponseType: 'token',
+        GrantType: 'refresh_token',
+        RedirectURI: 'https://protonmail.ch',
+        State: state,
+        AccessToken: session.accessToken,
+        Scope: session.scope
+      };
+
+      const response = yield* this.#request<ProtonAuthResponse>('/auth/v4/refresh', body, {
+        'x-pm-uid': session.uid,
+        authorization: `Bearer ${session.accessToken}`
+      });
+
+      const refreshedAt = new Date();
+
+      const x: ProtonSession = {
+        ...session,
+        uid: response.UID || session.uid,
+        accessToken: response.AccessToken,
+        refreshToken: response.RefreshToken,
+        scope: response.Scope || session.scope,
+        updatedAt: refreshedAt,
+        expiresAt: new Date(refreshedAt.getTime() + response.ExpiresIn * 1000),
+        lastRefreshAt: refreshedAt
+      };
+
+      return x;
     });
   }
 
@@ -299,6 +357,12 @@ class ProtonSessionService {
         // session deletion is best-effort, we ignore any errors here
       }
     });
+  }
+
+  #randomToken(byteLength: number): Uint8Array {
+    const bytes = new Uint8Array(byteLength);
+    globalThis.crypto.getRandomValues(bytes);
+    return bytes;
   }
 
   #fetchAuthInfo(username: string): Effect.Effect<ProtonAuthInfo, ProtonApiCommunicationError> {
