@@ -36,7 +36,10 @@ export interface ProtonFile {
   sha1: Option.Option<string>;
 }
 
-export const { init: initProtonDriveApi, get: getProtonDriveApi } = (function () {
+export const { init: initProtonDriveApi, get: getProtonDriveApi } = (function (): {
+  init: (this: void) => ProtonDriveApi;
+  get: (this: void) => ProtonDriveApi;
+} {
   let instance: ProtonDriveApi | null = null;
 
   return {
@@ -215,14 +218,14 @@ class ProtonDriveApi {
     metadata: UploadMetadata,
     parentId: ProtonFolderId,
     signal?: AbortSignal
-  ) {
+  ): Effect.Effect<void, ProtonRequestCancelledError | PermissionError | FileUploadError, never> {
     return Effect.tryPromise({
       try: async () => {
         this.#throwIfCancelled(signal);
 
         const result = await this.client.getFileUploader(parentId.uid, name, metadata, signal);
         const stream = new ReadableStream<Uint8Array>({
-          start: c => {
+          start: (c): void => {
             c.enqueue(new Uint8Array(data));
             c.close();
           }
@@ -247,14 +250,19 @@ class ProtonDriveApi {
     });
   }
 
-  public uploadRevision(id: ProtonFileId, data: ArrayBuffer, metadata: UploadMetadata, signal?: AbortSignal) {
+  public uploadRevision(
+    id: ProtonFileId,
+    data: ArrayBuffer,
+    metadata: UploadMetadata,
+    signal?: AbortSignal
+  ): Effect.Effect<void, ProtonRequestCancelledError | PermissionError | FileUploadError, never> {
     return Effect.tryPromise({
       try: async () => {
         this.#throwIfCancelled(signal);
 
         const result = await this.client.getFileRevisionUploader(id.uid, metadata, signal);
         const stream = new ReadableStream<Uint8Array>({
-          start: c => {
+          start: (c): void => {
             c.enqueue(new Uint8Array(data));
             c.close();
           }
@@ -292,7 +300,7 @@ class ProtonDriveApi {
         let total = 0;
 
         const writable = new WritableStream<Uint8Array>({
-          write: async chunk => {
+          write: async (chunk): Promise<void> => {
             chunks.push(chunk);
             total += chunk.byteLength;
           }

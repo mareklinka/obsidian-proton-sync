@@ -19,7 +19,7 @@ export class ProtonDriveSyncActionModal extends Modal {
     super(app);
   }
 
-  public onOpen(): void {
+  public override onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
     contentEl.empty();
@@ -52,7 +52,7 @@ export class ProtonDriveSyncActionModal extends Modal {
       );
   }
 
-  public onClose(): void {
+  public override onClose(): void {
     if (!this.#didResolve) {
       this.#canceledSubject.next();
     }

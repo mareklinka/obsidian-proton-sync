@@ -10,6 +10,13 @@
     "isolatedModules": true,
     "strict": true,
     "noImplicitAny": true,
+    "alwaysStrict": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "forceConsistentCasingInFileNames": true,
     "plugins": [
       {

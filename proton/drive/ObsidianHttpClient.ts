@@ -11,7 +11,10 @@ import { getLogger } from '../../services/ConsoleLogger';
 import type { ProtonSession } from '../auth/ProtonSession';
 import { getProtonSessionService } from '../auth/ProtonSessionService';
 
-export const { init: initProtonHttpClient, get: getProtonHttpClient } = (function () {
+export const { init: initProtonHttpClient, get: getProtonHttpClient } = (function (): {
+  init: (this: void) => ObsidianHttpClient;
+  get: (this: void) => ObsidianHttpClient;
+} {
   let instance: ObsidianHttpClient | null = null;
 
   return {

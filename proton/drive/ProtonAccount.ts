@@ -56,7 +56,10 @@ interface CachedValue<T> {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-export const { init: initProtonAccount, get: getProtonAccount } = (function () {
+export const { init: initProtonAccount, get: getProtonAccount } = (function (): {
+  init: (this: void) => ProtonAccount;
+  get: (this: void) => ProtonAccount;
+} {
   let instance: ProtonAccount | null = null;
 
   return {

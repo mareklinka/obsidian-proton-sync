@@ -7,7 +7,10 @@ import { cancelSyncOperationCancellation } from '../../services/SyncOperationCan
 import { getSyncService } from '../../services/SyncService';
 import { toConfigSyncProgressViewState } from '../config-sync-progress-state';
 
-export const { init: initSyncProgressModal, get: getSyncProgressModal } = (function () {
+export const { init: initSyncProgressModal, get: getSyncProgressModal } = (function (): {
+  init: (this: void, app: App) => SyncProgressModal;
+  get: (this: void) => SyncProgressModal;
+} {
   let instance: SyncProgressModal | null = null;
 
   return {
@@ -40,7 +43,7 @@ class SyncProgressModal extends Modal {
     super(app);
   }
 
-  public onOpen(): void {
+  public override onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
     contentEl.empty();
@@ -117,7 +120,7 @@ class SyncProgressModal extends Modal {
     });
   }
 
-  public onClose(): void {
+  public override onClose(): void {
     this.#stateSubscription?.unsubscribe();
     this.#stateSubscription = null;
     this.#clearAutoCloseTimers();

@@ -5,7 +5,17 @@ import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
 
 export const DEFAULT_SYNC_CONTAINER_NAME = 'obsidian-notes';
 
-export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } = (function () {
+export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } = (function (): {
+  init: (
+    this: void,
+    defaultRemoteVaultRootPath: string,
+    callbacks: {
+      load: () => Promise<PluginSettingsStorageModel | null>;
+      save: (data: PluginSettingsStorageModel) => Promise<void>;
+    }
+  ) => ObsidianSettingsStore;
+  get: (this: void) => ObsidianSettingsStore;
+} {
   let instance: ObsidianSettingsStore | null = null;
 
   return {
@@ -109,7 +119,7 @@ class ObsidianSettingsStore {
     });
   }
 
-  public reset() {
+  public reset(): void {
     this.#settingsSubject.next({
       ...this.#settingsSubject.getValue(),
       accountEmail: '',

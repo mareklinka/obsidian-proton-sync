@@ -36,7 +36,7 @@ export class ProtonDriveCaptchaModal extends Modal {
     super(app);
   }
 
-  public onOpen(): void {
+  public override onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
 
@@ -100,7 +100,7 @@ export class ProtonDriveCaptchaModal extends Modal {
     this.close();
   };
 
-  public onClose(): void {
+  public override onClose(): void {
     window.removeEventListener('message', this.#onMessage, false);
     if (!this.#didResolve) {
       this.#canceledSubject.next();

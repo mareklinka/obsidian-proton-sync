@@ -45,7 +45,10 @@ interface EncryptedEnvelope {
   aadLabel: EncryptedSecretLabel;
 }
 
-export const { init: initEncryptedSecretStore, get: getEncryptedSecretStore } = (function () {
+export const { init: initEncryptedSecretStore, get: getEncryptedSecretStore } = (function (): {
+  init: (this: void) => EncryptedSecretStore;
+  get: (this: void) => EncryptedSecretStore;
+} {
   let instance: EncryptedSecretStore | null = null;
 
   return {
@@ -222,13 +225,13 @@ class EncryptedSecretStore {
     return this.#unlockedSessionData;
   }
 
-  public lockSession() {
+  public lockSession(): void {
     this.cancelScheduledLock();
     this.#unlockedSessionData = Option.none();
     this.#sessionLockedSubject.next();
   }
 
-  public cancelScheduledLock() {
+  public cancelScheduledLock(): void {
     if (this.#memoryClearTimeoutId === null) {
       return;
     }
@@ -237,7 +240,7 @@ class EncryptedSecretStore {
     this.#memoryClearTimeoutId = null;
   }
 
-  public clearSessionData() {
+  public clearSessionData(): Effect.Effect<void, never, never> {
     return Effect.sync(() => {
       this.lockSession();
       this.baseStore.clear(SESSION_STORAGE_KEY);
@@ -245,7 +248,7 @@ class EncryptedSecretStore {
     });
   }
 
-  public scheduleLock() {
+  public scheduleLock(): void {
     this.cancelScheduledLock();
 
     this.#memoryClearTimeoutId = globalThis.setTimeout(() => {

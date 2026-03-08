@@ -10,7 +10,10 @@ import { getObsidianSettingsStore } from './ObsidianSettingsStore';
 import type { TreeEventScopeId } from './proton-drive-types';
 import { ProtonEventId, TreeEventSubscriptionFailed } from './proton-drive-types';
 
-export const { init: initProtonCloudObserver, get: getProtonCloudObserver } = (function () {
+export const { init: initProtonCloudObserver, get: getProtonCloudObserver } = (function (): {
+  init: (this: void) => ProtonCloudObserver;
+  get: (this: void) => ProtonCloudObserver;
+} {
   let instance: ProtonCloudObserver | null = null;
 
   return {

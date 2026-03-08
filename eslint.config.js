@@ -151,7 +151,8 @@ export default defineConfig(
       '@typescript-eslint/no-unused-expressions': 'error',
       '@typescript-eslint/prefer-function-type': 'error',
       '@typescript-eslint/prefer-readonly': 'error',
-      '@typescript-eslint/unified-signatures': 'error'
+      '@typescript-eslint/unified-signatures': 'error',
+      '@typescript-eslint/explicit-function-return-type': 'error'
     }
   },
   {

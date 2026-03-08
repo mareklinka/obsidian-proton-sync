@@ -64,7 +64,10 @@ interface ProtonCaptchaApiErrorResponse {
   ExpiresAt: number;
 }
 
-export const { init: initProtonSessionService, get: getProtonSessionService } = (function () {
+export const { init: initProtonSessionService, get: getProtonSessionService } = (function (): {
+  init: (this: void, appVersionHeader: string) => ProtonSessionService;
+  get: (this: void) => ProtonSessionService;
+} {
   let instance: ProtonSessionService | null = null;
 
   return {
@@ -88,7 +91,22 @@ class ProtonSessionService {
 
   public constructor(public readonly appVersionHeader: string) {}
 
-  public signIn(email: string, password: string, delegates: ProtonSignInDelegates) {
+  public signIn(
+    email: string,
+    password: string,
+    delegates: ProtonSignInDelegates
+  ): Effect.Effect<
+    void,
+    | ProtonApiCommunicationError
+    | CryptographyError
+    | CaptchaRequiredError
+    | CaptchaDataNotProvidedError
+    | TwoFactorCodeRequiredError
+    | EncryptionPasswordRequiredError
+    | MasterPasswordRequiredError
+    | SecretEncryptionFailedError,
+    never
+  > {
     let authResponse: ProtonAuthResponse | null = null;
 
     return Effect.gen(this, function* () {
@@ -238,7 +256,7 @@ class ProtonSessionService {
     });
   }
 
-  public dispose() {
+  public dispose(): void {
     this.#encryptedSecretStore.lockSession();
     this.#authStatusSubject.next('disconnected');
   }
@@ -428,15 +446,15 @@ class ProtonSessionService {
 
   #verifyServerProof(serverProof: string, expected: Uint8Array): Effect.Effect<void, CryptographyError> {
     return Effect.try({
-      try: () => {
+      try: (): void => {
         const decoded = decodeBase64(serverProof);
         if (decoded.length !== expected.length) {
-          return new CryptographyError();
+          throw new CryptographyError();
         }
 
         for (let index = 0; index < decoded.length; index += 1) {
           if (decoded[index] !== expected[index]) {
-            return new CryptographyError();
+            throw new CryptographyError();
           }
         }
       },

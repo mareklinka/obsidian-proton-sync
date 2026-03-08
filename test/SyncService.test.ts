@@ -26,7 +26,7 @@ vi.mock('../services/ObsidianSettingsStore', () => ({
 
 vi.mock('../services/ObsidianFileApi', () => ({
   getObsidianFileApi: getObsidianFileApiMock,
-  canonicalizePath: (path: string) => {
+  canonicalizePath: (path: string): { path: string; equals(other: { path: string }): boolean } => {
     const cleaned = path
       .trim()
       .replace(/\\+/g, '/')
@@ -36,7 +36,7 @@ vi.mock('../services/ObsidianFileApi', () => ({
 
     return {
       path: cleaned,
-      equals(other: { path: string }) {
+      equals(other: { path: string }): boolean {
         return cleaned === other.path;
       }
     };
@@ -47,7 +47,7 @@ vi.mock('../services/ProtonDriveApi', () => ({
   getProtonDriveApi: getProtonDriveApiMock
 }));
 
-function canonicalPath(path: string) {
+function canonicalPath(path: string): { path: string; equals(other: { path: string }): boolean } {
   const cleaned = path
     .trim()
     .replace(/\\+/g, '/')
@@ -57,13 +57,25 @@ function canonicalPath(path: string) {
 
   return {
     path: cleaned,
-    equals(other: { path: string }) {
+    equals(other: { path: string }): boolean {
       return cleaned === other.path;
     }
   };
 }
 
-function vaultFile(rawPath: string, sha1: string, modifiedAt: Date) {
+function vaultFile(
+  rawPath: string,
+  sha1: string,
+  modifiedAt: Date
+): {
+  _type: 'file';
+  name: string;
+  rawPath: string;
+  path: { path: string; equals(other: { path: string }): boolean };
+  createdAt: Date;
+  modifiedAt: Date;
+  sha1: string;
+} {
   const normalized = rawPath
     .replace(/\\+/g, '/')
     .replace(/\/+/g, '/')
@@ -82,7 +94,16 @@ function vaultFile(rawPath: string, sha1: string, modifiedAt: Date) {
   };
 }
 
-function vaultFolder(rawPath: string, children: Array<unknown> = []) {
+function vaultFolder(
+  rawPath: string,
+  children: Array<unknown> = []
+): {
+  _type: 'folder';
+  name: string;
+  rawPath: string;
+  path: { path: string; equals(other: { path: string }): boolean };
+  children: Array<unknown>;
+} {
   const normalized = rawPath
     .replace(/\\+/g, '/')
     .replace(/\/+/g, '/')
@@ -98,7 +119,17 @@ function vaultFolder(rawPath: string, children: Array<unknown> = []) {
   };
 }
 
-function protonFolder(uid: string, name: string, parentId?: ProtonFolderId) {
+function protonFolder(
+  uid: string,
+  name: string,
+  parentId?: ProtonFolderId
+): {
+  _tag: 'folder';
+  id: ProtonFolderId;
+  parentId: Option.None<ProtonFolderId> | Option.Some<ProtonFolderId>;
+  treeEventScopeId: TreeEventScopeId;
+  name: string;
+} {
   return {
     _tag: 'folder' as const,
     id: new ProtonFolderId(uid),
@@ -108,7 +139,20 @@ function protonFolder(uid: string, name: string, parentId?: ProtonFolderId) {
   };
 }
 
-function protonFile(uid: string, name: string, modifiedAt: Date, sha1?: string, parentId?: ProtonFolderId) {
+function protonFile(
+  uid: string,
+  name: string,
+  modifiedAt: Date,
+  sha1?: string,
+  parentId?: ProtonFolderId
+): {
+  _tag: 'file';
+  id: ProtonFileId;
+  parentId: Option.None<ProtonFolderId> | Option.Some<ProtonFolderId>;
+  modifiedAt: Date;
+  name: string;
+  sha1: Option.None<string> | Option.Some<string>;
+} {
   return {
     _tag: 'file' as const,
     id: new ProtonFileId(uid),

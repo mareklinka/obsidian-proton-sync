@@ -18,7 +18,7 @@ export class ProtonDriveLoginModal extends Modal {
     super(app);
   }
 
-  public onOpen(): void {
+  public override onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
 
@@ -68,7 +68,7 @@ export class ProtonDriveLoginModal extends Modal {
     );
   }
 
-  public onClose(): void {
+  public override onClose(): void {
     this.#clearSensitiveInputs();
   }
 

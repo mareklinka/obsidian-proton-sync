@@ -24,7 +24,7 @@ export class ProtonDriveConfirmModal extends Modal {
     super(app);
   }
 
-  public onOpen(): void {
+  public override onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
 
@@ -49,15 +49,17 @@ export class ProtonDriveConfirmModal extends Modal {
     this.#createButtons(setting, this.#toggleValue);
   }
 
-  public onClose(): void {
+  public override onClose(): void {
     if (!this.#didResolve) {
       this.#canceledSubject.next();
     }
   }
 
-  #createButtons(setting: Setting, warn: boolean) {
+  #createButtons(setting: Setting, warn: boolean): void {
     const { t } = getI18n();
-    const buttonFormat = warn ? (b: ButtonComponent) => b.setWarning() : (b: ButtonComponent) => b.setCta();
+    const buttonFormat = warn
+      ? (b: ButtonComponent): ButtonComponent => b.setWarning()
+      : (b: ButtonComponent): ButtonComponent => b.setCta();
 
     setting
       .addButton(b => {

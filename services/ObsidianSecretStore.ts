@@ -1,6 +1,9 @@
 import type { SecretStorage } from 'obsidian';
 
-export const { init: initObsidianSecretStore, get: getObsidianSecretStore } = (function () {
+export const { init: initObsidianSecretStore, get: getObsidianSecretStore } = (function (): {
+  init: (this: void, store: SecretStorage) => ObsidianSecretStore;
+  get: (this: void) => ObsidianSecretStore;
+} {
   let instance: ObsidianSecretStore | null = null;
 
   return {

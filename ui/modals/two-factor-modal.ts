@@ -18,7 +18,7 @@ export class ProtonDriveTwoFactorModal extends Modal {
     super(app);
   }
 
-  public onOpen(): void {
+  public override onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
 
@@ -52,7 +52,7 @@ export class ProtonDriveTwoFactorModal extends Modal {
     );
   }
 
-  public onClose(): void {
+  public override onClose(): void {
     if (!this.#didResolve) {
       this.#canceledSubject.next();
     }

@@ -1,13 +1,30 @@
 import { Option } from 'effect';
+import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ProtonSession } from '../proton/auth/ProtonSession';
+import type { initObsidianSettingsStore } from '../services/ObsidianSettingsStore';
 
-function createCallbacks(loaded: unknown) {
+type SettingsStoreCallbacks = Parameters<typeof initObsidianSettingsStore>[1];
+type PersistedSettings = Parameters<SettingsStoreCallbacks['save']>[0];
+
+function createCallbacks(loaded: Awaited<ReturnType<SettingsStoreCallbacks['load']>>): {
+  load: Mock<SettingsStoreCallbacks['load']>;
+  save: Mock<SettingsStoreCallbacks['save']>;
+} {
   return {
-    load: vi.fn().mockResolvedValue(loaded),
-    save: vi.fn().mockResolvedValue(undefined)
+    load: vi.fn<SettingsStoreCallbacks['load']>().mockResolvedValue(loaded),
+    save: vi.fn<SettingsStoreCallbacks['save']>().mockResolvedValue(undefined)
   };
+}
+
+function getLastPersisted(callbacks: { save: Mock<SettingsStoreCallbacks['save']> }): PersistedSettings {
+  const lastCall = callbacks.save.mock.calls[callbacks.save.mock.calls.length - 1];
+  const persisted = lastCall?.[0];
+  if (persisted === undefined) {
+    throw new Error('Expected save callback to be called with persisted settings.');
+  }
+  return persisted;
 }
 
 describe('ObsidianSettingsStore', () => {
@@ -89,7 +106,7 @@ describe('ObsidianSettingsStore', () => {
       expect(vaultRootNodeUid.value.uid).toBe('folder-456');
     }
 
-    const persisted = callbacks.save.mock.calls.at(-1)?.[0];
+    const persisted = getLastPersisted(callbacks);
     expect(persisted).toEqual({
       accountEmail: 'user@example.com',
       lastLoginAt,
@@ -119,7 +136,7 @@ describe('ObsidianSettingsStore', () => {
     expect(store.get('logLevel')).toBe(mod.LogLevel.info);
     expect(store.get('ignoredPaths')).toEqual([]);
 
-    const persisted = callbacks.save.mock.calls.at(-1)?.[0];
+    const persisted = getLastPersisted(callbacks);
     expect(persisted.remoteVaultRootPath).toBe('/default-root');
     expect(persisted.logLevel).toBe(mod.LogLevel.info);
     expect(persisted.ignoredPaths).toEqual([]);
@@ -166,7 +183,7 @@ describe('ObsidianSettingsStore', () => {
     expect(store.get('lastRefreshAt')?.toISOString()).toBe(refreshed.toISOString());
     expect(store.get('sessionExpiresAt')?.toISOString()).toBe(expires.toISOString());
 
-    const persisted = callbacks.save.mock.calls.at(-1)?.[0];
+    const persisted = getLastPersisted(callbacks);
     expect(persisted.accountEmail).toBe('new@example.com');
     expect(persisted.ignoredPaths).toEqual(['private/', 'tmp/']);
     expect(persisted.lastLoginAt).toBe(now.getTime());
@@ -210,7 +227,7 @@ describe('ObsidianSettingsStore', () => {
     expect(store.get('ignoredPaths')).toEqual(['keep/me']);
     expect(store.get('remoteVaultRootPath')).toBe('/custom-root');
 
-    const persisted = callbacks.save.mock.calls.at(-1)?.[0];
+    const persisted = getLastPersisted(callbacks);
     expect(persisted.lastLoginAt).toBeNull();
     expect(persisted.lastRefreshAt).toBeNull();
     expect(persisted.sessionExpiresAt).toBeNull();

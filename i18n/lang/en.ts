@@ -20,7 +20,7 @@ export const en = {
         mailboxPasswordRequired: 'Mailbox password is required to login. Login aborted.',
         masterPasswordRequired: 'Master password is required to protect your session. Login aborted.',
         secureStorageFailed: 'Failed to securely persist encrypted credentials. Login aborted.',
-        protonApiCommunicationFailed: (message: string) =>
+        protonApiCommunicationFailed: (message: string): string =>
           `Failed to communicate with Proton API: ${message}. Login aborted.`
       },
       invalidFolderName: 'Invalid folder name.',
@@ -209,7 +209,7 @@ export const en = {
       closeHint: 'You can close this dialog at any time. The sync will continue in the background.',
       completedMessage: 'Operation complete.',
       failedMessage: 'Operation failed.',
-      autoCloseMessage: (secondsRemaining: number) =>
+      autoCloseMessage: (secondsRemaining: number): string =>
         `All changes have been processed. This dialog will close in ${secondsRemaining} ${secondsRemaining === 1 ? 'second' : 'seconds'}.`
     },
     confirm: {
@@ -236,7 +236,7 @@ export const en = {
     applyingChanges: {
       downloading: 'Downloading notes...',
       uploading: 'Uploading notes...',
-      details: (processed: number, total: number) => `Processed ${processed} of ${total} items.`
+      details: (processed: number, total: number): string => `Processed ${processed} of ${total} items.`
     },
     fallback: {
       message: 'Synchronizing...'

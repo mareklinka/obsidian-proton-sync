@@ -5,7 +5,10 @@ import { normalizePath } from 'obsidian';
 
 import { getLogger } from './ConsoleLogger';
 
-export const { init: initObsidianFileApi, get: getObsidianFileApi } = (function () {
+export const { init: initObsidianFileApi, get: getObsidianFileApi } = (function (): {
+  init: (this: void, vault: Vault) => ObsidianFileApi;
+  get: (this: void) => ObsidianFileApi;
+} {
   let instance: ObsidianFileApi | null = null;
 
   return {

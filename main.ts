@@ -35,7 +35,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
   readonly #subscriptions: Array<Subscription> = [];
 
-  public async onload(): Promise<void> {
+  public override async onload(): Promise<void> {
     initI18n(getLanguage());
     const { t } = getI18n();
 
@@ -83,7 +83,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     this.#setupSettingsTab(this);
   }
 
-  public async onunload(): Promise<void> {
+  public override async onunload(): Promise<void> {
     this.#logger.info('Unloading Proton Drive Sync plugin');
     this.#subscriptions.forEach(subscription => subscription.unsubscribe());
     this.#subscriptions.length = 0;

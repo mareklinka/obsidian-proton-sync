@@ -8,7 +8,10 @@ import { getProtonHttpClient } from './ObsidianHttpClient';
 import { getProtonAccount } from './ProtonAccount';
 import { createOpenPgpCrypto } from './ProtonOpenPgp';
 
-export const { init: initProtonDriveClient, get: getProtonDriveClient } = (function () {
+export const { init: initProtonDriveClient, get: getProtonDriveClient } = (function (): {
+  init: (this: void) => ProtonDriveClient;
+  get: (this: void) => ProtonDriveClient;
+} {
   let instance: ProtonDriveClient | null = null;
 
   return {

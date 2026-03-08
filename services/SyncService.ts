@@ -9,9 +9,12 @@ import type { VaultFolder } from './ObsidianFileApi';
 import { canonicalizePath, getObsidianFileApi } from './ObsidianFileApi';
 import { getObsidianSettingsStore } from './ObsidianSettingsStore';
 import type {
+  FileUploadError,
   GenericProtonDriveError,
   InvalidNameError,
   ItemAlreadyExistsError,
+  NotAFolderError,
+  PermissionError,
   ProtonApiError,
   ProtonFileId,
   ProtonRequestCancelledError
@@ -47,7 +50,10 @@ export type SyncState =
       processedItems: number;
     };
 
-export const { init: initSyncService, get: getSyncService } = (function () {
+export const { init: initSyncService, get: getSyncService } = (function (): {
+  init: (this: void, vault: Vault) => SyncService;
+  get: (this: void) => SyncService;
+} {
   let instance: SyncService | null = null;
 
   return {
@@ -134,15 +140,31 @@ class SyncService {
     return this.#stateSubject.value;
   }
 
-  public setAuthenticationState() {
+  public setAuthenticationState(): void {
     this.#stateSubject.next({ state: 'auth' });
   }
 
-  public setIdleState() {
+  public setIdleState(): void {
     this.#stateSubject.next({ state: 'idle' });
   }
 
-  public push(prune: boolean, signal: AbortSignal) {
+  public push(
+    prune: boolean,
+    signal: AbortSignal
+  ): Effect.Effect<
+    void,
+    | SyncAlreadyInProgressError
+    | VaultRootIdNotAvailableError
+    | SyncCancelledError
+    | GenericProtonDriveError
+    | InvalidNameError
+    | ItemAlreadyExistsError
+    | ProtonApiError
+    | NotAFolderError
+    | PermissionError
+    | FileUploadError,
+    never
+  > {
     return Effect.gen(this, function* () {
       if (this.#stateSubject.value.state !== 'idle' && this.#stateSubject.value.state !== 'auth') {
         yield* new SyncAlreadyInProgressError();
@@ -161,7 +183,21 @@ class SyncService {
     });
   }
 
-  public pull(prune: boolean, signal: AbortSignal) {
+  public pull(
+    prune: boolean,
+    signal: AbortSignal
+  ): Effect.Effect<
+    void,
+    | SyncAlreadyInProgressError
+    | VaultRootIdNotAvailableError
+    | SyncCancelledError
+    | GenericProtonDriveError
+    | InvalidNameError
+    | ItemAlreadyExistsError
+    | ProtonApiError
+    | NotAFolderError,
+    never
+  > {
     return Effect.gen(this, function* () {
       if (this.#stateSubject.value.state !== 'idle' && this.#stateSubject.value.state !== 'auth') {
         yield* new SyncAlreadyInProgressError();
@@ -180,7 +216,23 @@ class SyncService {
     });
   }
 
-  #pushImpl(prune: boolean, signal: AbortSignal) {
+  #pushImpl(
+    prune: boolean,
+    signal: AbortSignal
+  ): Effect.Effect<
+    undefined,
+    | VaultRootIdNotAvailableError
+    | SyncCancelledError
+    | GenericProtonDriveError
+    | InvalidNameError
+    | ItemAlreadyExistsError
+    | ProtonApiError
+    | NotAFolderError
+    | PermissionError
+    | FileUploadError
+    | ProtonRequestCancelledError,
+    never
+  > {
     return Effect.gen(this, function* () {
       const logger = this.#logger.withScope('push');
       const timingLogger = logger.withScope(SYNC_TIMING_SCOPE);
@@ -244,7 +296,21 @@ class SyncService {
     });
   }
 
-  #pullImpl(prune: boolean, signal: AbortSignal) {
+  #pullImpl(
+    prune: boolean,
+    signal: AbortSignal
+  ): Effect.Effect<
+    undefined,
+    | VaultRootIdNotAvailableError
+    | SyncCancelledError
+    | GenericProtonDriveError
+    | InvalidNameError
+    | ItemAlreadyExistsError
+    | ProtonApiError
+    | NotAFolderError
+    | ProtonRequestCancelledError,
+    never
+  > {
     return Effect.gen(this, function* () {
       const logger = this.#logger.withScope('pull');
       const timingLogger = logger.withScope(SYNC_TIMING_SCOPE);
@@ -339,7 +405,7 @@ class SyncService {
     driveApi: ReturnType<typeof getProtonDriveApi>,
     fileApi: ReturnType<typeof getObsidianFileApi>,
     signal: AbortSignal
-  ) {
+  ): Effect.Effect<void, SyncCancelledError | GenericProtonDriveError | ProtonRequestCancelledError, never> {
     return Effect.gen(this, function* () {
       const totalOps = pullOps.length;
       let processedOps = 0;
@@ -401,7 +467,18 @@ class SyncService {
     driveApi: ReturnType<typeof getProtonDriveApi>,
     fileApi: ReturnType<typeof getObsidianFileApi>,
     signal: AbortSignal
-  ) {
+  ): Effect.Effect<
+    void,
+    | SyncCancelledError
+    | GenericProtonDriveError
+    | InvalidNameError
+    | ItemAlreadyExistsError
+    | ProtonApiError
+    | ProtonRequestCancelledError
+    | PermissionError
+    | FileUploadError,
+    never
+  > {
     return Effect.gen(this, function* () {
       const totalOps = syncOps.length;
       let processedOps = 0;
@@ -621,7 +698,7 @@ class SyncService {
     localRoot: VaultFolder,
     remoteRoot: ProtonRecursiveFolder,
     logger: ReturnType<typeof getLogger>
-  ) {
+  ): { localFolderCreatePaths: Set<string>; localFileWrites: Map<string, LocalFileWrite> } {
     const localFolderCreatePaths = new Set<string>();
     const localFileWrites = new Map<string, LocalFileWrite>();
 
@@ -711,7 +788,11 @@ class SyncService {
     return { localFolderCreatePaths, localFileWrites };
   }
 
-  #computePullPruneOperations(localRoot: VaultFolder, remoteRoot: ProtonRecursiveFolder, prune: boolean) {
+  #computePullPruneOperations(
+    localRoot: VaultFolder,
+    remoteRoot: ProtonRecursiveFolder,
+    prune: boolean
+  ): { localFileDeletePaths: Set<string>; localFolderDeletePaths: Set<string> } {
     const localFileDeletePaths = new Set<string>();
     const localFolderDeletePaths = new Set<string>();
 
@@ -784,7 +865,14 @@ class SyncService {
     return { localFileDeletePaths, localFolderDeletePaths };
   }
 
-  #buildRemoteTree(remoteConfigRoot: ProtonFolder, signal: AbortSignal) {
+  #buildRemoteTree(
+    remoteConfigRoot: ProtonFolder,
+    signal: AbortSignal
+  ): Effect.Effect<
+    ProtonRecursiveFolder,
+    SyncCancelledError | GenericProtonDriveError | NotAFolderError | ProtonRequestCancelledError,
+    never
+  > {
     return Effect.gen(this, function* () {
       const driveApi = getProtonDriveApi();
 

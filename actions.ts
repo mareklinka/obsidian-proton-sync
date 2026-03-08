@@ -14,6 +14,14 @@ import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { getLogger } from './services/ConsoleLogger';
 import { getEncryptedSecretStore } from './services/EncryptedSecretStore';
 import { getObsidianSettingsStore } from './services/ObsidianSettingsStore';
+import type {
+  GenericProtonDriveError,
+  InvalidNameError,
+  ItemAlreadyExistsError,
+  MyFilesRootFilesNotFound,
+  ProtonApiError,
+  ProtonRequestCancelledError
+} from './services/proton-drive-types';
 import { initProtonCloudObserver } from './services/ProtonCloudObserver';
 import type { ProtonFolder } from './services/ProtonDriveApi';
 import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
@@ -205,7 +213,7 @@ function confirmOperation(
   });
 }
 
-function prepareSyncOperation(app: App, signal: AbortSignal) {
+function prepareSyncOperation(app: App, signal: AbortSignal): Effect.Effect<boolean, never, never> {
   const { t } = getI18n();
   return Effect.gen(function* () {
     getSyncService().setAuthenticationState();
@@ -321,14 +329,30 @@ function prepareSyncOperation(app: App, signal: AbortSignal) {
   );
 }
 
-function finalizeSync() {
+function finalizeSync(): Effect.Effect<void, never, never> {
   return Effect.sync(() => {
     getEncryptedSecretStore().scheduleLock();
     clearSyncOperationCancellation();
   });
 }
 
-function ensureVaultRootFolder(remoteVaultRootPath: string, signal: AbortSignal) {
+function ensureVaultRootFolder(
+  remoteVaultRootPath: string,
+  signal: AbortSignal
+): Effect.Effect<
+  ProtonFolder,
+  | MyFilesRootFilesNotFound
+  | GenericProtonDriveError
+  | SyncCancelledError
+  | InvalidNameError
+  | ItemAlreadyExistsError
+  | ProtonApiError
+  | InvalidSharedPathError
+  | SharedFolderNotFoundError
+  | AmbiguousSharedPathError
+  | ProtonRequestCancelledError,
+  never
+> {
   return Effect.gen(function* () {
     yield* ensureNotCancelled(signal);
 
@@ -374,7 +398,20 @@ function ensureVaultRootFolder(remoteVaultRootPath: string, signal: AbortSignal)
   });
 }
 
-function ensureRemotePath(parent: ProtonFolder, pathSegments: Array<string>, signal: AbortSignal) {
+function ensureRemotePath(
+  parent: ProtonFolder,
+  pathSegments: Array<string>,
+  signal: AbortSignal
+): Effect.Effect<
+  ProtonFolder,
+  | GenericProtonDriveError
+  | ProtonRequestCancelledError
+  | InvalidNameError
+  | ItemAlreadyExistsError
+  | ProtonApiError
+  | SyncCancelledError,
+  never
+> {
   const protonApi = getProtonDriveApi();
   let currentFolder = parent;
 

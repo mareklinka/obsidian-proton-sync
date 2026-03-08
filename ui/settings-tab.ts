@@ -140,7 +140,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         .setName(t.settings.ignoredPaths.name)
         .setDesc(t.settings.ignoredPaths.description)
         .addTextArea(text => {
-          const commit = (value: string) => {
+          const commit = (value: string): void => {
             const newPatterns = parseIgnoredPathsInput(value);
             if (isSameStringArray(newPatterns, settingsStore.get('ignoredPaths'))) {
               return;
@@ -178,7 +178,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     });
   }
 
-  public hide() {
+  public override hide(): void {
     // vault root is only updated on tab hide to avoid having to create the folders in Proton on every change
     getObsidianSettingsStore().set('remoteVaultRootPath', this.#remoteVaultRootPath);
     this.#stateSub?.unsubscribe();
