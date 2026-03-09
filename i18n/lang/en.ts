@@ -111,9 +111,14 @@ export const en = {
       description3: '$shared$/[shared folder name]/[rest of path]',
       placeholder: 'e.g. obsidian-notes/my-vault'
     },
+    fileLogging: {
+      name: 'File logging',
+      description:
+        'When enabled, logs are written to both the developer console and a rotating vault log file (.obsidian/plugins/proton-drive-sync/logs/proton-drive-sync.log).'
+    },
     logLevel: {
       name: 'Log level',
-      description: 'Minimum log severity to write to the developer console.',
+      description: 'Minimum log severity for both developer console and file logging.',
       options: {
         debug: 'Debug',
         info: 'Info',

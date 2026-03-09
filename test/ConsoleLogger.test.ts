@@ -2,14 +2,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getSettingMock = vi.hoisted(() => vi.fn());
 const getObsidianSettingsStoreMock = vi.hoisted(() => vi.fn());
+const fileSinkWriteMock = vi.hoisted(() => vi.fn());
+const getVaultLogSinkMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../services/ObsidianSettingsStore', () => ({
   getObsidianSettingsStore: getObsidianSettingsStoreMock
 }));
 
+vi.mock('../services/VaultLogSink', () => ({
+  getVaultLogSink: getVaultLogSinkMock
+}));
+
 import { getLogger } from '../services/ConsoleLogger';
 
 describe('ConsoleLogger', () => {
+  let currentLevel: 'debug' | 'info' | 'warn' | 'error' = 'info';
+  let isFileLoggingEnabled = false;
+
   const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
   const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
   const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -20,15 +29,30 @@ describe('ConsoleLogger', () => {
     vi.clearAllMocks();
     getSettingMock.mockReset();
     getObsidianSettingsStoreMock.mockReset();
+    getVaultLogSinkMock.mockReset();
+    fileSinkWriteMock.mockReset();
 
-    getSettingMock.mockReturnValue('info');
+    currentLevel = 'info';
+    isFileLoggingEnabled = false;
+
+    getSettingMock.mockImplementation((key: 'logLevel' | 'enableFileLogging') => {
+      if (key === 'logLevel') {
+        return currentLevel;
+      }
+
+      return isFileLoggingEnabled;
+    });
+
     getObsidianSettingsStoreMock.mockReturnValue({
       get: getSettingMock
+    });
+    getVaultLogSinkMock.mockReturnValue({
+      write: fileSinkWriteMock
     });
   });
 
   it('formats scoped messages and forwards extra payload', () => {
-    getSettingMock.mockReturnValue('debug');
+    currentLevel = 'debug';
 
     const logger = getLogger('sync').withScope('files');
     logger.info('Saved changes', { count: 2 });
@@ -38,7 +62,7 @@ describe('ConsoleLogger', () => {
   });
 
   it('filters logs by configured level severity', () => {
-    getSettingMock.mockReturnValue('warn');
+    currentLevel = 'warn';
 
     const logger = getLogger('scope');
 
@@ -60,7 +84,7 @@ describe('ConsoleLogger', () => {
   });
 
   it('emits all methods when level is debug', () => {
-    getSettingMock.mockReturnValue('debug');
+    currentLevel = 'debug';
 
     const logger = getLogger('all');
 
@@ -78,7 +102,7 @@ describe('ConsoleLogger', () => {
   });
 
   it('suppresses all but error when level is error', () => {
-    getSettingMock.mockReturnValue('error');
+    currentLevel = 'error';
 
     const logger = getLogger('strict');
 
@@ -96,7 +120,7 @@ describe('ConsoleLogger', () => {
   });
 
   it('logs without scope decoration when scope is not provided', () => {
-    getSettingMock.mockReturnValue('debug');
+    currentLevel = 'debug';
 
     const logger = getLogger('');
     logger.log('Plain log');
@@ -129,5 +153,16 @@ describe('ConsoleLogger', () => {
     logger.error('should-not-log');
 
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('writes accepted entries to file sink when file logging is enabled', () => {
+    currentLevel = 'info';
+    isFileLoggingEnabled = true;
+
+    const logger = getLogger('file-scope');
+    logger.info('hello-file', { answer: 42 });
+
+    expect(infoSpy).toHaveBeenCalledWith('[ObsidianSync] [file-scope] hello-file', { answer: 42 });
+    expect(fileSinkWriteMock).toHaveBeenCalledWith('info', 'file-scope', 'hello-file', [{ answer: 42 }]);
   });
 });

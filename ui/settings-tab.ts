@@ -160,6 +160,16 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
+        .setName(t.settings.fileLogging.name)
+        .setDesc(t.settings.fileLogging.description)
+        .addToggle(toggle => {
+          toggle.setValue(settings.enableFileLogging).onChange(value => {
+            settingsStore.set('enableFileLogging', value);
+            this.#loggingChangedSubject.next({ isEnabled: value, minLevel: settingsStore.get('logLevel') });
+          });
+        });
+
+      new Setting(containerEl)
         .setName(t.settings.logLevel.name)
         .setDesc(t.settings.logLevel.description)
         .addDropdown(dropdown => {
@@ -172,7 +182,10 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             .onChange(value => {
               const logLevel = value as LogLevel;
               settingsStore.set('logLevel', logLevel);
-              this.#loggingChangedSubject.next({ isEnabled: true, minLevel: logLevel });
+              this.#loggingChangedSubject.next({
+                isEnabled: settingsStore.get('enableFileLogging'),
+                minLevel: logLevel
+              });
             });
         });
     });

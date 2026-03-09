@@ -15,6 +15,7 @@ import {
   initObsidianSettingsStore
 } from './services/ObsidianSettingsStore';
 import { getSyncService, initSyncService } from './services/SyncService';
+import { initVaultLogSink } from './services/VaultLogSink';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
@@ -50,6 +51,7 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     await settings.load();
     initObsidianSecretStore(this.app.secretStorage);
     initObsidianFileApi(this.app.vault);
+    initVaultLogSink(this.app.vault);
 
     initProtonSessionService(`external-drive-obsidiansync@${this.manifest.version}`);
 
