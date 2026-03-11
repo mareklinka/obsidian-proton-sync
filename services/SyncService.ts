@@ -961,7 +961,8 @@ class SyncService {
       mediaType: inferMediaType(relativePath),
       expectedSize,
       modificationTime: new Date(modifiedAt),
-      expectedSha1
+      expectedSha1,
+      overrideExistingDraftByOtherClient: true
     };
   }
 
