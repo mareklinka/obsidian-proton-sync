@@ -1,1 +1,1 @@
-npx lint-staged
+npm run sync-version && git add VERSION manifest.json package.json && npx lint-staged
