@@ -1,5 +1,4 @@
-import { type UploadMetadata } from '@protontech/drive-sdk';
-import { Data, Effect, Option } from 'effect';
+import { Effect, Option } from 'effect';
 import { normalizePath, type Vault } from 'obsidian';
 import picomatch from 'picomatch';
 import { BehaviorSubject } from 'rxjs';
@@ -16,46 +15,55 @@ import type {
   NotAFolderError,
   PermissionError,
   ProtonApiError,
-  ProtonFileId,
   ProtonRequestCancelledError
 } from './proton-drive-types';
 import { ProtonFolderId, TreeEventScopeId } from './proton-drive-types';
-import type { ProtonFile, ProtonFolder } from './ProtonDriveApi';
+import type { ProtonFile } from './ProtonDriveApi';
 import { getProtonDriveApi } from './ProtonDriveApi';
+import { createRemoteFileStateSnapshot, type RemoteFileStateSnapshot } from './RemoteFileStateSnapshot';
+import { SyncAlreadyInProgressError, SyncCancelledError, VaultRootIdNotAvailableError } from './sync/SyncErrors';
+import { applyPullOperations, applyPushOperations } from './sync/SyncExecutors';
+import { buildRemoteTree, getRemoteRoot } from './sync/SyncTreeBuilder';
+import type {
+  ConflictActionResolver,
+  LocalFileWrite,
+  ProtonRecursiveFolder,
+  PullCreationPlan,
+  PullSyncOperation,
+  PushSyncOperation,
+  SyncConflictAction,
+  SyncConflictResolver,
+  SyncState
+} from './sync/SyncTypes';
 import {
-  createRemoteFileStateSnapshot,
-  deleteRemoteFileStateSnapshotEntry,
-  deleteRemoteFolderStateSnapshotEntries,
-  type RemoteFileStateSnapshot,
-  setRemoteFileStateSnapshotEntry
-} from './RemoteFileStateSnapshot';
+  findConflictingLocalPruneFilePath,
+  findConflictingRemotePruneFilePath,
+  getSnapshotSha,
+  hasGlobMeta,
+  pathDepth
+} from './sync/SyncUtils';
+
+export {
+  type ConfigSyncError,
+  InvalidConfigPathError,
+  SyncAlreadyInProgressError,
+  SyncCancelledError,
+  VaultRootIdNotAvailableError
+} from './sync/SyncErrors';
+export type {
+  SyncConflict,
+  SyncConflictAction,
+  SyncConflictDecision,
+  SyncConflictReason,
+  SyncConflictResolver,
+  SyncState,
+  SyncSubstate
+} from './sync/SyncTypes';
 
 const EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH = '/plugins/proton-drive-sync';
 const SYNC_TIMING_SCOPE = 'timing-metrics';
 
 type TimingLogger = Pick<ReturnType<typeof getLogger>, 'debug'>;
-
-type ProtonRecursiveFolder = ProtonFolder & {
-  children: Array<ProtonRecursiveFolder | ProtonFile>;
-};
-
-export type SyncSubstate = 'localTreeBuild' | 'remoteTreeBuild' | 'diffComputation' | 'applyingChanges';
-
-export type SyncState =
-  | { state: 'idle' }
-  | { state: 'auth' }
-  | {
-      state: 'pushing';
-      subState: SyncSubstate;
-      totalItems: number;
-      processedItems: number;
-    }
-  | {
-      state: 'pulling';
-      subState: SyncSubstate;
-      totalItems: number;
-      processedItems: number;
-    };
 
 export const { init: initSyncService, get: getSyncService } = (function (): {
   init: (this: void, vault: Vault) => SyncService;
@@ -75,112 +83,6 @@ export const { init: initSyncService, get: getSyncService } = (function (): {
     }
   };
 })();
-
-interface FolderCreate {
-  id: ProtonFolderId;
-  name: string;
-  parentId: ProtonFolderId;
-}
-
-interface FileUpload {
-  name: string;
-  parentId: ProtonFolderId;
-  rawPath: string;
-  modifiedAt: Date;
-  sha1: string;
-}
-
-interface FileUpdate {
-  id: ProtonFileId;
-  rawPath: string;
-  modifiedAt: Date;
-  sha1: string;
-}
-
-interface FileDelete {
-  id: ProtonFileId;
-  rawPath: string;
-  // immediate is used during conflict resolution, deferred is for pruning
-  applyMode?: 'immediate' | 'deferred';
-}
-
-interface FolderDelete {
-  id: ProtonFolderId;
-  rawPath: string;
-  // immediate is used during conflict resolution, deferred is for pruning
-  applyMode?: 'immediate' | 'deferred';
-}
-
-interface LocalFolderCreate {
-  rawPath: string;
-}
-
-interface LocalFileWrite {
-  rawPath: string;
-  remoteId: ProtonFileId;
-  remoteModifiedAt: Date;
-}
-
-interface LocalFileDelete {
-  rawPath: string;
-}
-
-interface LocalFolderDelete {
-  rawPath: string;
-}
-
-interface PullCreationPlan {
-  localFolderCreatePaths: Set<string>;
-  localFileWrites: Map<string, LocalFileWrite>;
-  replacementFileDeletePaths: Set<string>;
-  replacementFolderDeletePaths: Set<string>;
-}
-
-type PushSyncOperation =
-  | { type: 'createFolder'; details: FolderCreate }
-  | { type: 'uploadFile'; details: FileUpload }
-  | { type: 'updateFile'; details: FileUpdate }
-  | { type: 'deleteFile'; details: FileDelete }
-  | { type: 'deleteFolder'; details: FolderDelete };
-
-type PullSyncOperation =
-  | { type: 'createLocalFolder'; details: LocalFolderCreate }
-  | { type: 'writeLocalFile'; details: LocalFileWrite }
-  | { type: 'deleteLocalFile'; details: LocalFileDelete }
-  | { type: 'deleteLocalFolder'; details: LocalFolderDelete };
-
-export type SyncConflictAction = 'overwrite' | 'skip';
-
-export type SyncConflictReason =
-  | 'contentChanged'
-  | 'missingSnapshotBaseline'
-  | 'localFolderRemoteFileTypeMismatch'
-  | 'localFileRemoteFolderTypeMismatch'
-  | 'remoteFolderLocalFileTypeMismatch'
-  | 'remoteFileLocalFolderTypeMismatch'
-  | 'pruneFileChanged'
-  | 'pruneFileMissingSnapshotBaseline'
-  | 'pruneFolderChanged'
-  | 'pruneRemoteFolderLocalFileTypeMismatch'
-  | 'pruneRemoteFileLocalFolderTypeMismatch';
-
-export interface SyncConflict {
-  direction: 'push' | 'pull';
-  reason: SyncConflictReason;
-  path: string;
-  conflictingPath?: string;
-}
-
-export interface SyncConflictDecision {
-  action: SyncConflictAction;
-  applyToAll: boolean;
-}
-
-export type SyncConflictResolver = (conflict: SyncConflict) => Effect.Effect<SyncConflictDecision, never, never>;
-
-type ConflictActionResolver = (
-  conflict: Omit<SyncConflict, 'direction'>
-) => Effect.Effect<SyncConflictAction, never, never>;
 
 class SyncService {
   readonly #logger = getLogger('SyncService');
@@ -317,13 +219,18 @@ class SyncService {
         timingLogger,
         'Computed remote file tree',
         Effect.gen(this, function* () {
-          const remoteConfigRootFolder = yield* this.#getRemoteRoot(vaultRootNodeId.value, signal);
+          const remoteConfigRootFolder = yield* getRemoteRoot(vaultRootNodeId.value, signal);
 
           if (Option.isNone(remoteConfigRootFolder)) {
             return yield* new VaultRootIdNotAvailableError();
           }
 
-          return yield* this.#buildRemoteTree(remoteConfigRootFolder.value, signal);
+          return yield* buildRemoteTree(
+            remoteConfigRootFolder.value,
+            signal,
+            this.#isExcluded.bind(this),
+            this.#ensureNotCancelled.bind(this)
+          );
         })
       );
       yield* this.#ensureNotCancelled(signal);
@@ -366,7 +273,23 @@ class SyncService {
         yield* this.#withTiming(
           timingLogger,
           'Applied operations',
-          this.#applyPushOperations(syncOps, logger, driveApi, fileApi, remoteFileStateSnapshot, signal)
+          applyPushOperations(
+            syncOps,
+            logger,
+            driveApi,
+            fileApi,
+            remoteFileStateSnapshot,
+            signal,
+            this.#ensureNotCancelled.bind(this),
+            (processedItems, totalItems) => {
+              this.#stateSubject.next({
+                state: 'pushing',
+                subState: 'applyingChanges',
+                totalItems,
+                processedItems
+              });
+            }
+          )
         );
 
         this.setIdleState();
@@ -419,13 +342,18 @@ class SyncService {
         timingLogger,
         'Computed remote file tree',
         Effect.gen(this, function* () {
-          const remoteConfigRootFolder = yield* this.#getRemoteRoot(vaultRootNodeId.value, signal);
+          const remoteConfigRootFolder = yield* getRemoteRoot(vaultRootNodeId.value, signal);
 
           if (Option.isNone(remoteConfigRootFolder)) {
             return yield* new VaultRootIdNotAvailableError();
           }
 
-          return yield* this.#buildRemoteTree(remoteConfigRootFolder.value, signal);
+          return yield* buildRemoteTree(
+            remoteConfigRootFolder.value,
+            signal,
+            this.#isExcluded.bind(this),
+            this.#ensureNotCancelled.bind(this)
+          );
         })
       );
       yield* this.#ensureNotCancelled(signal);
@@ -507,7 +435,22 @@ class SyncService {
         yield* this.#withTiming(
           timingLogger,
           'Applied operations',
-          this.#applyPullOperations(pullOps, logger, getProtonDriveApi(), fileApi, signal)
+          applyPullOperations(
+            pullOps,
+            logger,
+            getProtonDriveApi(),
+            fileApi,
+            signal,
+            this.#ensureNotCancelled.bind(this),
+            (processedItems, totalItems) => {
+              this.#stateSubject.next({
+                state: 'pulling',
+                subState: 'applyingChanges',
+                totalItems,
+                processedItems
+              });
+            }
+          )
         );
 
         this.setIdleState();
@@ -516,196 +459,6 @@ class SyncService {
           Effect.sync(() => getObsidianSettingsStore().setRemoteFileStateSnapshot(remoteFileStateSnapshot))
         )
       );
-    });
-  }
-
-  #applyPullOperations(
-    pullOps: Array<PullSyncOperation>,
-    logger: ReturnType<typeof getLogger>,
-    driveApi: ReturnType<typeof getProtonDriveApi>,
-    fileApi: ReturnType<typeof getObsidianFileApi>,
-    signal: AbortSignal
-  ): Effect.Effect<void, SyncCancelledError | GenericProtonDriveError | ProtonRequestCancelledError, never> {
-    return Effect.gen(this, function* () {
-      const totalOps = pullOps.length;
-      let processedOps = 0;
-
-      for (const op of pullOps) {
-        yield* this.#ensureNotCancelled(signal);
-
-        this.#stateSubject.next({
-          state: 'pulling',
-          subState: 'applyingChanges',
-          totalItems: totalOps,
-          processedItems: processedOps
-        });
-
-        switch (op.type) {
-          case 'createLocalFolder':
-            {
-              logger.debug('Creating local folder', { path: op.details.rawPath });
-              yield* fileApi.ensureFolder(op.details.rawPath);
-            }
-            break;
-          case 'writeLocalFile':
-            {
-              logger.debug('Writing local file', {
-                path: op.details.rawPath,
-                remoteModifiedAt: op.details.remoteModifiedAt
-              });
-              const parentPath = getParentPath(op.details.rawPath);
-              if (parentPath) {
-                yield* fileApi.ensureFolder(parentPath);
-              }
-
-              const data = yield* driveApi.downloadFile(op.details.remoteId, signal);
-              yield* fileApi.writeFileContent(op.details.rawPath, data, op.details.remoteModifiedAt);
-            }
-            break;
-          case 'deleteLocalFile':
-            {
-              logger.debug('Deleting local file', { path: op.details.rawPath });
-              yield* fileApi.deleteFile(op.details.rawPath);
-            }
-            break;
-          case 'deleteLocalFolder':
-            {
-              logger.debug('Deleting local folder', { path: op.details.rawPath });
-              yield* fileApi.deleteFolder(op.details.rawPath);
-            }
-            break;
-        }
-
-        processedOps += 1;
-      }
-    });
-  }
-
-  #applyPushOperations(
-    syncOps: Array<PushSyncOperation>,
-    logger: ReturnType<typeof getLogger>,
-    driveApi: ReturnType<typeof getProtonDriveApi>,
-    fileApi: ReturnType<typeof getObsidianFileApi>,
-    remoteFileStateSnapshot: RemoteFileStateSnapshot,
-    signal: AbortSignal
-  ): Effect.Effect<
-    void,
-    | SyncCancelledError
-    | GenericProtonDriveError
-    | InvalidNameError
-    | ItemAlreadyExistsError
-    | ProtonApiError
-    | ProtonRequestCancelledError
-    | PermissionError
-    | FileUploadError,
-    never
-  > {
-    return Effect.gen(this, function* () {
-      const totalOps = syncOps.length;
-      let processedOps = 0;
-      const deleteOps: Array<Extract<PushSyncOperation, { type: 'deleteFile' | 'deleteFolder' }>> = [];
-
-      while (syncOps.length > 0) {
-        yield* this.#ensureNotCancelled(signal);
-
-        const op = syncOps.shift();
-        if (!op) {
-          continue;
-        }
-
-        if ((op.type === 'deleteFile' || op.type === 'deleteFolder') && op.details.applyMode !== 'immediate') {
-          deleteOps.push(op);
-          continue;
-        }
-
-        this.#stateSubject.next({
-          state: 'pushing',
-          subState: 'applyingChanges',
-          totalItems: totalOps,
-          processedItems: processedOps++
-        });
-
-        switch (op.type) {
-          case 'deleteFile':
-            {
-              logger.debug('Deleting remote file', { path: op.details.rawPath });
-              yield* driveApi.trashNodes([op.details.id], signal);
-              deleteRemoteFileStateSnapshotEntry(remoteFileStateSnapshot, op.details.rawPath);
-            }
-            break;
-          case 'deleteFolder':
-            {
-              logger.debug('Deleting remote folder', { path: op.details.rawPath });
-              yield* driveApi.trashNodes([op.details.id], signal);
-              deleteRemoteFolderStateSnapshotEntries(remoteFileStateSnapshot, op.details.rawPath);
-            }
-            break;
-          case 'createFolder':
-            {
-              logger.debug('Creating folder', { name: op.details.name, parentId: op.details.parentId.uid });
-              const newRemoteFolder = yield* driveApi.createFolder(op.details.name, op.details.parentId, signal);
-              for (const item of syncOps) {
-                if ('parentId' in item.details && item.details.parentId.equals(op.details.id)) {
-                  item.details.parentId = newRemoteFolder.id;
-                }
-              }
-            }
-            break;
-          case 'uploadFile':
-            {
-              logger.debug('Uploading file', { path: op.details.rawPath, modifiedAt: op.details.modifiedAt });
-              const data = yield* fileApi.readFileContent(op.details.rawPath);
-              const metadata = this.#buildUploadMetadata(
-                op.details.rawPath,
-                op.details.modifiedAt.getTime(),
-                data.byteLength,
-                op.details.sha1
-              );
-
-              yield* driveApi.uploadFile(op.details.name, data, metadata, op.details.parentId, signal);
-              setRemoteFileStateSnapshotEntry(remoteFileStateSnapshot, op.details.rawPath, op.details.sha1);
-            }
-            break;
-          case 'updateFile':
-            {
-              logger.debug('Updating file', { path: op.details.rawPath, modifiedAt: op.details.modifiedAt });
-              const data = yield* fileApi.readFileContent(op.details.rawPath);
-              const metadata = this.#buildUploadMetadata(
-                op.details.rawPath,
-                op.details.modifiedAt.getTime(),
-                data.byteLength,
-                op.details.sha1
-              );
-              yield* driveApi.uploadRevision(op.details.id, data, metadata, signal);
-              setRemoteFileStateSnapshotEntry(remoteFileStateSnapshot, op.details.rawPath, op.details.sha1);
-            }
-            break;
-        }
-      }
-
-      if (deleteOps.length > 0) {
-        yield* this.#ensureNotCancelled(signal);
-
-        this.#stateSubject.next({
-          state: 'pushing',
-          subState: 'applyingChanges',
-          totalItems: totalOps,
-          processedItems: processedOps
-        });
-
-        yield* driveApi.trashNodes(
-          deleteOps.map(op => op.details.id),
-          signal
-        );
-
-        for (const op of deleteOps) {
-          if (op.type === 'deleteFile') {
-            deleteRemoteFileStateSnapshotEntry(remoteFileStateSnapshot, op.details.rawPath);
-          } else {
-            deleteRemoteFolderStateSnapshotEntries(remoteFileStateSnapshot, op.details.rawPath);
-          }
-        }
-      }
     });
   }
 
@@ -1355,87 +1108,12 @@ class SyncService {
         }
 
         const decision = yield* conflictResolver({ direction, ...conflict });
-        if (decision.applyToAll) {
+        if (decision.applyToAll === true) {
           rememberedAction = decision.action;
         }
 
         return decision.action;
       });
-  }
-
-  #buildRemoteTree(
-    remoteConfigRoot: ProtonFolder,
-    signal: AbortSignal
-  ): Effect.Effect<
-    ProtonRecursiveFolder,
-    SyncCancelledError | GenericProtonDriveError | NotAFolderError | ProtonRequestCancelledError,
-    never
-  > {
-    return Effect.gen(this, function* () {
-      const driveApi = getProtonDriveApi();
-
-      const root: ProtonRecursiveFolder = {
-        ...remoteConfigRoot,
-        children: []
-      };
-
-      const queue: Array<{ folder: ProtonRecursiveFolder; relativePath: string }> = [
-        { folder: root, relativePath: '' }
-      ];
-
-      while (queue.length > 0) {
-        yield* this.#ensureNotCancelled(signal);
-
-        const current = queue.shift();
-        if (!current) {
-          continue;
-        }
-
-        for (const child of yield* driveApi.getChildren(current.folder.id, signal)) {
-          const relativePath = normalizePath(
-            current.relativePath ? `${current.relativePath}/${child.name}` : child.name
-          );
-          if (!relativePath || this.#isExcluded(relativePath)) {
-            continue;
-          }
-
-          if (child._tag === 'folder') {
-            const folderNode: ProtonRecursiveFolder = {
-              ...child,
-              children: []
-            };
-            current.folder.children.push(folderNode);
-            queue.push({ folder: folderNode, relativePath });
-          } else if (child._tag === 'file') {
-            current.folder.children.push(child);
-          }
-        }
-      }
-
-      return root;
-    });
-  }
-
-  #getRemoteRoot(vaultRootId: ProtonFolderId, signal?: AbortSignal): Effect.Effect<Option.Option<ProtonFolder>> {
-    return Effect.gen(this, function* () {
-      const driveApi = getProtonDriveApi();
-      return yield* driveApi.getFolder(vaultRootId, signal).pipe(Effect.catchAll(() => Effect.succeed(Option.none())));
-    });
-  }
-
-  #buildUploadMetadata(
-    relativePath: string,
-    modifiedAt: number,
-    expectedSize: number,
-    expectedSha1: string
-  ): UploadMetadata {
-    return {
-      mediaType: inferMediaType(relativePath),
-      expectedSize,
-      modificationTime: new Date(modifiedAt),
-      expectedSha1,
-      overrideExistingDraftByOtherClient: true
-    };
   }
 
   #isExcluded(relativePath: string): boolean {
@@ -1496,129 +1174,3 @@ class SyncService {
     return Effect.void;
   }
 }
-
-function hasGlobMeta(pattern: string): boolean {
-  return /[*?[\]]/.test(pattern);
-}
-
-function getParentPath(path: string): string {
-  const normalized = normalizePath(path);
-  const idx = normalized.lastIndexOf('/');
-  if (idx <= 0) {
-    return '';
-  }
-
-  return normalized.slice(0, idx);
-}
-
-function pathDepth(path: string): number {
-  const normalized = normalizePath(path);
-  if (!normalized) {
-    return 0;
-  }
-
-  return normalized.split('/').filter(Boolean).length;
-}
-
-function getSnapshotSha(snapshot: RemoteFileStateSnapshot | null, rawPath: string): string | null | undefined {
-  if (!snapshot) {
-    return undefined;
-  }
-
-  return snapshot[canonicalizePath(rawPath).path];
-}
-
-function findConflictingRemotePruneFilePath(
-  remoteFolder: ProtonRecursiveFolder,
-  remoteFolderPath: string,
-  snapshot: RemoteFileStateSnapshot | null
-): string | null {
-  const queue: Array<{ folder: ProtonRecursiveFolder; relativePath: string }> = [
-    { folder: remoteFolder, relativePath: remoteFolderPath }
-  ];
-
-  while (queue.length > 0) {
-    const item = queue.shift();
-    if (!item) {
-      continue;
-    }
-
-    for (const child of item.folder.children) {
-      const childPath = normalizePath(item.relativePath ? `${item.relativePath}/${child.name}` : child.name);
-      if (!childPath) {
-        continue;
-      }
-
-      if (child._tag === 'folder') {
-        queue.push({ folder: child, relativePath: childPath });
-        continue;
-      }
-
-      const remoteSha = Option.isSome(child.sha1) ? child.sha1.value : null;
-      const snapshotSha = getSnapshotSha(snapshot, childPath);
-      if (remoteSha === null || snapshotSha === null || snapshotSha === undefined || remoteSha !== snapshotSha) {
-        return childPath;
-      }
-    }
-  }
-
-  return null;
-}
-
-function findConflictingLocalPruneFilePath(
-  localFolder: VaultFolder,
-  snapshot: RemoteFileStateSnapshot | null
-): string | null {
-  const queue: Array<VaultFolder> = [localFolder];
-
-  while (queue.length > 0) {
-    const item = queue.shift();
-    if (!item) {
-      continue;
-    }
-
-    for (const child of item.children) {
-      if (child._type === 'folder') {
-        queue.push(child);
-        continue;
-      }
-
-      const snapshotSha = getSnapshotSha(snapshot, child.rawPath);
-      if (snapshotSha === null || snapshotSha === undefined || child.sha1 !== snapshotSha) {
-        return child.rawPath;
-      }
-    }
-  }
-
-  return null;
-}
-
-function inferMediaType(path: string): string {
-  const normalized = canonicalizePath(normalizePath(path));
-
-  const index = normalized.path.lastIndexOf('/');
-  if (index >= 0) {
-    const extension = normalized.path.slice(index + 1);
-
-    if (extension.endsWith('.md')) {
-      return 'text/markdown';
-    }
-
-    if (extension.endsWith('.json')) {
-      return 'application/json';
-    }
-  }
-
-  return 'application/octet-stream';
-}
-
-export type ConfigSyncError =
-  | InvalidConfigPathError
-  | VaultRootIdNotAvailableError
-  | SyncAlreadyInProgressError
-  | SyncCancelledError;
-
-export class InvalidConfigPathError extends Data.TaggedError('InvalidConfigPathError') {}
-export class VaultRootIdNotAvailableError extends Data.TaggedError('VaultRootIdNotAvailableError') {}
-export class SyncAlreadyInProgressError extends Data.TaggedError('SyncAlreadyInProgressError') {}
-export class SyncCancelledError extends Data.TaggedError('SyncCancelledError')<{ reason?: unknown }> {}
