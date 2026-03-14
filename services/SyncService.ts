@@ -774,6 +774,7 @@ class SyncService {
               localModifiedAt: localFile.modifiedAt,
               remoteModifiedAt: remoteChild.modifiedAt
             });
+            continue;
           }
 
           localFileWrites.set(localPath, {
