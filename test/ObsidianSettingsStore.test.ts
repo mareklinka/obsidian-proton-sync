@@ -8,6 +8,10 @@ import type { initObsidianSettingsStore } from '../services/ObsidianSettingsStor
 type SettingsStoreCallbacks = Parameters<typeof initObsidianSettingsStore>[1];
 type PersistedSettings = Parameters<SettingsStoreCallbacks['save']>[0];
 
+function createSnapshot(entries: Array<readonly [string, string | null]>): Record<string, string | null> {
+  return Object.fromEntries(entries);
+}
+
 function createCallbacks(loaded: Awaited<ReturnType<SettingsStoreCallbacks['load']>>): {
   load: Mock<SettingsStoreCallbacks['load']>;
   save: Mock<SettingsStoreCallbacks['save']>;
@@ -76,7 +80,11 @@ describe('ObsidianSettingsStore', () => {
       enableFileLogging: true,
       logLevel: mod.LogLevel.warn,
       remoteVaultRootPath: '',
-      ignoredPaths: ['.obsidian/cache']
+      ignoredPaths: ['.obsidian/cache'],
+      remoteFileStateSnapshot: createSnapshot([
+        ['docs/a.md', 'sha-a'],
+        ['docs/b.md', null]
+      ])
     });
 
     const store = mod.initObsidianSettingsStore('/remote-default', callbacks);
@@ -93,6 +101,12 @@ describe('ObsidianSettingsStore', () => {
     expect(store.get('logLevel')).toBe(mod.LogLevel.warn);
     expect(store.get('remoteVaultRootPath')).toBe('/remote-default');
     expect(store.get('ignoredPaths')).toEqual(['.obsidian/cache']);
+    expect(store.getRemoteFileStateSnapshot()).toEqual(
+      createSnapshot([
+        ['docs/a.md', 'sha-a'],
+        ['docs/b.md', null]
+      ])
+    );
 
     const eventId = store.get('latestEventId');
     expect(Option.isSome(eventId)).toBe(true);
@@ -118,7 +132,11 @@ describe('ObsidianSettingsStore', () => {
       enableFileLogging: true,
       logLevel: mod.LogLevel.warn,
       ignoredPaths: ['.obsidian/cache'],
-      remoteVaultRootPath: '/remote-default'
+      remoteVaultRootPath: '/remote-default',
+      remoteFileStateSnapshot: createSnapshot([
+        ['docs/a.md', 'sha-a'],
+        ['docs/b.md', null]
+      ])
     });
   });
 
@@ -135,11 +153,13 @@ describe('ObsidianSettingsStore', () => {
     expect(store.get('remoteVaultRootPath')).toBe('/default-root');
     expect(store.get('logLevel')).toBe(mod.LogLevel.info);
     expect(store.get('ignoredPaths')).toEqual([]);
+    expect(store.getRemoteFileStateSnapshot()).toBeNull();
 
     const persisted = getLastPersisted(callbacks);
     expect(persisted.remoteVaultRootPath).toBe('/default-root');
     expect(persisted.logLevel).toBe(mod.LogLevel.info);
     expect(persisted.ignoredPaths).toEqual([]);
+    expect(persisted.remoteFileStateSnapshot).toBeNull();
   });
 
   it('persists settings changes from set and session metadata updates', async () => {
@@ -153,6 +173,12 @@ describe('ObsidianSettingsStore', () => {
 
     store.set('accountEmail', 'new@example.com');
     store.set('ignoredPaths', ['private/', 'tmp/']);
+    store.setRemoteFileStateSnapshot(
+      createSnapshot([
+        ['docs/updated.md', 'sha-updated'],
+        ['docs/missing-sha.md', null]
+      ])
+    );
 
     const now = new Date('2026-03-06T12:00:00.000Z');
     const refreshed = new Date('2026-03-06T12:10:00.000Z');
@@ -179,6 +205,12 @@ describe('ObsidianSettingsStore', () => {
 
     expect(store.get('accountEmail')).toBe('new@example.com');
     expect(store.get('ignoredPaths')).toEqual(['private/', 'tmp/']);
+    expect(store.getRemoteFileStateSnapshot()).toEqual(
+      createSnapshot([
+        ['docs/updated.md', 'sha-updated'],
+        ['docs/missing-sha.md', null]
+      ])
+    );
     expect(store.get('lastLoginAt')?.toISOString()).toBe(now.toISOString());
     expect(store.get('lastRefreshAt')?.toISOString()).toBe(refreshed.toISOString());
     expect(store.get('sessionExpiresAt')?.toISOString()).toBe(expires.toISOString());
@@ -186,6 +218,12 @@ describe('ObsidianSettingsStore', () => {
     const persisted = getLastPersisted(callbacks);
     expect(persisted.accountEmail).toBe('new@example.com');
     expect(persisted.ignoredPaths).toEqual(['private/', 'tmp/']);
+    expect(persisted.remoteFileStateSnapshot).toEqual(
+      createSnapshot([
+        ['docs/updated.md', 'sha-updated'],
+        ['docs/missing-sha.md', null]
+      ])
+    );
     expect(persisted.lastLoginAt).toBe(now.getTime());
     expect(persisted.lastRefreshAt).toBe(refreshed.getTime());
     expect(persisted.sessionExpiresAt).toBe(expires.getTime());
@@ -205,7 +243,8 @@ describe('ObsidianSettingsStore', () => {
       enableFileLogging: false,
       logLevel: mod.LogLevel.error,
       ignoredPaths: ['keep/me'],
-      remoteVaultRootPath: '/custom-root'
+      remoteVaultRootPath: '/custom-root',
+      remoteFileStateSnapshot: createSnapshot([['keep/me/file.md', 'sha-keep']])
     });
 
     const store = mod.initObsidianSettingsStore('/default-root', callbacks);
@@ -223,6 +262,7 @@ describe('ObsidianSettingsStore', () => {
     expect(store.get('sessionExpiresAt')).toBeNull();
     expect(store.get('lastLoginError')).toBeNull();
     expect(Option.isNone(store.get('latestEventId'))).toBe(true);
+    expect(store.getRemoteFileStateSnapshot()).toBeNull();
 
     expect(store.get('ignoredPaths')).toEqual(['keep/me']);
     expect(store.get('remoteVaultRootPath')).toBe('/custom-root');
@@ -233,7 +273,66 @@ describe('ObsidianSettingsStore', () => {
     expect(persisted.sessionExpiresAt).toBeNull();
     expect(persisted.lastLoginError).toBeNull();
     expect(persisted.latestEventId).toBeNull();
+    expect(persisted.remoteFileStateSnapshot).toBeNull();
     expect(persisted.ignoredPaths).toEqual(['keep/me']);
     expect(persisted.remoteVaultRootPath).toBe('/custom-root');
+  });
+
+  it('clears snapshot when remote root path changes', async () => {
+    const mod = await import('../services/ObsidianSettingsStore');
+
+    const callbacks = createCallbacks({
+      accountEmail: 'user@example.com',
+      lastLoginAt: null,
+      lastRefreshAt: null,
+      sessionExpiresAt: null,
+      lastLoginError: null,
+      latestEventId: null,
+      vaultRootNodeUid: 'folder-456',
+      enableFileLogging: false,
+      logLevel: mod.LogLevel.info,
+      ignoredPaths: [],
+      remoteVaultRootPath: '/current-root',
+      remoteFileStateSnapshot: createSnapshot([['docs/a.md', 'sha-a']])
+    });
+
+    const store = mod.initObsidianSettingsStore('/default-root', callbacks);
+
+    await store.load();
+    callbacks.save.mockClear();
+
+    store.set('remoteVaultRootPath', '/next-root');
+
+    expect(store.getRemoteFileStateSnapshot()).toBeNull();
+    expect(getLastPersisted(callbacks).remoteFileStateSnapshot).toBeNull();
+  });
+
+  it('clears snapshot when ignored paths change', async () => {
+    const mod = await import('../services/ObsidianSettingsStore');
+
+    const callbacks = createCallbacks({
+      accountEmail: 'user@example.com',
+      lastLoginAt: null,
+      lastRefreshAt: null,
+      sessionExpiresAt: null,
+      lastLoginError: null,
+      latestEventId: null,
+      vaultRootNodeUid: 'folder-456',
+      enableFileLogging: false,
+      logLevel: mod.LogLevel.info,
+      ignoredPaths: ['private/**'],
+      remoteVaultRootPath: '/current-root',
+      remoteFileStateSnapshot: createSnapshot([['docs/a.md', 'sha-a']])
+    });
+
+    const store = mod.initObsidianSettingsStore('/default-root', callbacks);
+
+    await store.load();
+    callbacks.save.mockClear();
+
+    store.set('ignoredPaths', ['private/**', 'tmp/**']);
+
+    expect(store.getRemoteFileStateSnapshot()).toBeNull();
+    expect(getLastPersisted(callbacks).remoteFileStateSnapshot).toBeNull();
   });
 });

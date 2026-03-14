@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 import { Effect, Option } from 'effect';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -171,6 +172,7 @@ describe('SyncService', () => {
   const vault = { configDir: '.obsidian' };
 
   const settingsGetMock = vi.fn();
+  const settingsSetRemoteFileStateSnapshotMock = vi.fn();
 
   const getFileTreeMock = vi.fn();
   const readFileContentMock = vi.fn();
@@ -179,6 +181,7 @@ describe('SyncService', () => {
   const deleteFileMock = vi.fn();
   const deleteFolderMock = vi.fn();
 
+  const getFolderMock = vi.fn();
   const getFolderByNameMock = vi.fn();
   const createFolderMock = vi.fn();
   const getChildrenMock = vi.fn();
@@ -192,12 +195,14 @@ describe('SyncService', () => {
     vi.clearAllMocks();
 
     settingsGetMock.mockReset();
+    settingsSetRemoteFileStateSnapshotMock.mockReset();
     getFileTreeMock.mockReset();
     readFileContentMock.mockReset();
     ensureFolderMock.mockReset();
     writeFileContentMock.mockReset();
     deleteFileMock.mockReset();
     deleteFolderMock.mockReset();
+    getFolderMock.mockReset();
     getFolderByNameMock.mockReset();
     createFolderMock.mockReset();
     getChildrenMock.mockReset();
@@ -229,7 +234,10 @@ describe('SyncService', () => {
       return undefined;
     });
 
-    getObsidianSettingsStoreMock.mockReturnValue({ get: settingsGetMock });
+    getObsidianSettingsStoreMock.mockReturnValue({
+      get: settingsGetMock,
+      setRemoteFileStateSnapshot: settingsSetRemoteFileStateSnapshotMock
+    });
 
     getObsidianFileApiMock.mockReturnValue({
       getFileTree: getFileTreeMock,
@@ -241,6 +249,7 @@ describe('SyncService', () => {
     });
 
     getProtonDriveApiMock.mockReturnValue({
+      getFolder: getFolderMock,
       getFolderByName: getFolderByNameMock,
       createFolder: createFolderMock,
       getChildren: getChildrenMock,
@@ -250,6 +259,9 @@ describe('SyncService', () => {
       downloadFile: downloadFileMock
     });
 
+    getFolderMock.mockImplementation((folderId: ProtonFolderId) =>
+      Effect.succeed(Option.some(protonFolder(folderId.uid, 'root')))
+    );
     getFolderByNameMock.mockImplementation(() => Effect.succeed(Option.none()));
     createFolderMock.mockImplementation((_name: string, parentId: ProtonFolderId) =>
       Effect.succeed(protonFolder(`created-${parentId.uid}`, 'created', parentId))
@@ -367,6 +379,11 @@ describe('SyncService', () => {
 
     expect(readFileContentMock).toHaveBeenCalledWith('docs/new.md');
     expect(readFileContentMock).toHaveBeenCalledWith('update.md');
+    expect(settingsSetRemoteFileStateSnapshotMock).toHaveBeenCalledWith({
+      'docs/keep.md': 'sha-keep',
+      'docs/new.md': 'sha-new',
+      'update.md': 'sha-update-local'
+    });
 
     expect(sync.getState()).toEqual({ state: 'idle' });
   });
@@ -394,7 +411,7 @@ describe('SyncService', () => {
         return Effect.succeed([
           protonFolder('remote-docs', 'docs', new ProtonFolderId('vault-root')),
           protonFolder('remote-new-folder', 'remote-folder', new ProtonFolderId('vault-root')),
-          protonFile('remote-root-new', 'root-new.md', newer, 'sha-root-new', new ProtonFolderId('vault-root'))
+          protonFile('remote-root-new', 'root-new.md', newer, undefined, new ProtonFolderId('vault-root'))
         ]);
       }
 
@@ -419,6 +436,12 @@ describe('SyncService', () => {
     expect(writeFileContentMock).toHaveBeenCalledWith('remote-folder/nested.md', expect.any(ArrayBuffer), newer);
 
     expect(downloadFileMock).toHaveBeenCalledTimes(3);
+    expect(settingsSetRemoteFileStateSnapshotMock).toHaveBeenCalledWith({
+      'docs/keep.md': 'sha-keep',
+      'docs/remote-new.md': 'sha-doc-new',
+      'remote-folder/nested.md': 'sha-nested',
+      'root-new.md': null
+    });
 
     expect(deleteFileMock).toHaveBeenCalledWith('local-only.md');
     expect(deleteFolderMock).toHaveBeenCalledWith('local-only-folder');
@@ -440,6 +463,46 @@ describe('SyncService', () => {
     }
 
     expect(sync.getState()).toEqual({ state: 'idle' });
+  });
+
+  it('persists partially updated push snapshot when a later operation is cancelled', async () => {
+    const mod = await import('../services/SyncService');
+    const sync = mod.initSyncService(vault as never);
+
+    const now = new Date('2026-03-06T12:00:00.000Z');
+
+    getFileTreeMock.mockImplementation(() =>
+      Effect.succeed(vaultFolder('', [vaultFile('a.md', 'sha-a', now), vaultFile('b.md', 'sha-b', now)]))
+    );
+
+    getChildrenMock.mockImplementation((folderId: ProtonFolderId) => {
+      if (folderId.uid === 'vault-root') {
+        return Effect.succeed([]);
+      }
+
+      return Effect.succeed([]);
+    });
+
+    let uploadCount = 0;
+    uploadFileMock.mockImplementation(() => {
+      uploadCount += 1;
+      if (uploadCount === 1) {
+        return Effect.void;
+      }
+
+      return Effect.fail(new ProtonRequestCancelledError({ reason: 'stop' }));
+    });
+
+    const result = await Effect.runPromise(Effect.either(sync.push(false, createSignal())));
+
+    expect(result._tag).toBe('Left');
+    if (result._tag === 'Left') {
+      expect(result.left).toMatchObject({ _tag: 'SyncCancelledError', reason: 'stop' });
+    }
+
+    expect(settingsSetRemoteFileStateSnapshotMock).toHaveBeenCalledWith({
+      'a.md': 'sha-a'
+    });
   });
 
   it('blocks concurrent operations and allows cancelling through external signal', async () => {

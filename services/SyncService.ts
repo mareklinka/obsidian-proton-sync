@@ -22,6 +22,13 @@ import type {
 import { ProtonFolderId, TreeEventScopeId } from './proton-drive-types';
 import type { ProtonFile, ProtonFolder } from './ProtonDriveApi';
 import { getProtonDriveApi } from './ProtonDriveApi';
+import {
+  createRemoteFileStateSnapshot,
+  deleteRemoteFileStateSnapshotEntry,
+  deleteRemoteFolderStateSnapshotEntries,
+  type RemoteFileStateSnapshot,
+  setRemoteFileStateSnapshotEntry
+} from './RemoteFileStateSnapshot';
 
 const EXCLUDED_PLUGIN_CONFIG_RELATIVE_PATH = '/plugins/proton-drive-sync';
 const SYNC_TIMING_SCOPE = 'timing-metrics';
@@ -92,10 +99,12 @@ interface FileUpdate {
 
 interface FileDelete {
   id: ProtonFileId;
+  rawPath: string;
 }
 
 interface FolderDelete {
   id: ProtonFolderId;
+  rawPath: string;
 }
 
 interface LocalFolderCreate {
@@ -260,39 +269,52 @@ class SyncService {
         timingLogger,
         'Computed remote file tree',
         Effect.gen(this, function* () {
-          const remoteConfigRootFolder = yield* this.#getOrCreateRemoteRoot('/', vaultRootNodeId.value, signal);
-          return yield* this.#buildRemoteTree(remoteConfigRootFolder, signal);
+          const remoteConfigRootFolder = yield* this.#getRemoteRoot(vaultRootNodeId.value, signal);
+
+          if (Option.isNone(remoteConfigRootFolder)) {
+            return yield* new VaultRootIdNotAvailableError();
+          }
+
+          return yield* this.#buildRemoteTree(remoteConfigRootFolder.value, signal);
         })
       );
       yield* this.#ensureNotCancelled(signal);
 
-      this.#stateSubject.next({ state: 'pushing', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
+      const remoteFileStateSnapshot = createRemoteFileStateSnapshot(remoteRoot);
 
-      const syncOps = yield* this.#withTiming(
-        timingLogger,
-        'Computed push creation operations',
-        Effect.sync(() => this.#computePushCreationOperations(localRoot, remoteRoot, logger))
-      );
-      yield* this.#ensureNotCancelled(signal);
+      yield* Effect.gen(this, function* () {
+        this.#stateSubject.next({ state: 'pushing', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
 
-      if (prune) {
-        yield* this.#withTiming(
+        const syncOps = yield* this.#withTiming(
           timingLogger,
-          'Computed push prune operations',
-          Effect.sync(() => {
-            syncOps.push(...this.#computePushPruneOperations(localRoot, remoteRoot));
-          })
+          'Computed push creation operations',
+          Effect.sync(() => this.#computePushCreationOperations(localRoot, remoteRoot, logger))
         );
         yield* this.#ensureNotCancelled(signal);
-      }
 
-      yield* this.#withTiming(
-        timingLogger,
-        'Applied operations',
-        this.#applyPushOperations(syncOps, logger, driveApi, fileApi, signal)
+        if (prune) {
+          yield* this.#withTiming(
+            timingLogger,
+            'Computed push prune operations',
+            Effect.sync(() => {
+              syncOps.push(...this.#computePushPruneOperations(localRoot, remoteRoot));
+            })
+          );
+          yield* this.#ensureNotCancelled(signal);
+        }
+
+        yield* this.#withTiming(
+          timingLogger,
+          'Applied operations',
+          this.#applyPushOperations(syncOps, logger, driveApi, fileApi, remoteFileStateSnapshot, signal)
+        );
+
+        this.setIdleState();
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => getObsidianSettingsStore().setRemoteFileStateSnapshot(remoteFileStateSnapshot))
+        )
       );
-
-      this.setIdleState();
     });
   }
 
@@ -335,67 +357,80 @@ class SyncService {
         timingLogger,
         'Computed remote file tree',
         Effect.gen(this, function* () {
-          const remoteConfigRootFolder = yield* this.#getOrCreateRemoteRoot('/', vaultRootNodeId.value, signal);
-          return yield* this.#buildRemoteTree(remoteConfigRootFolder, signal);
+          const remoteConfigRootFolder = yield* this.#getRemoteRoot(vaultRootNodeId.value, signal);
+
+          if (Option.isNone(remoteConfigRootFolder)) {
+            return yield* new VaultRootIdNotAvailableError();
+          }
+
+          return yield* this.#buildRemoteTree(remoteConfigRootFolder.value, signal);
         })
       );
       yield* this.#ensureNotCancelled(signal);
 
-      this.#stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
+      const remoteFileStateSnapshot = createRemoteFileStateSnapshot(remoteRoot);
 
-      const { localFolderCreatePaths, localFileWrites } = yield* this.#withTiming(
-        timingLogger,
-        'Computed pull creation operations',
-        Effect.sync(() => this.#computePullCreationOperations(localRoot, remoteRoot, logger))
-      );
-      yield* this.#ensureNotCancelled(signal);
+      yield* Effect.gen(this, function* () {
+        this.#stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
 
-      const { localFileDeletePaths, localFolderDeletePaths } = yield* this.#withTiming(
-        timingLogger,
-        'Computed pull prune operations',
-        Effect.sync(() => this.#computePullPruneOperations(localRoot, remoteRoot, prune))
-      );
-      yield* this.#ensureNotCancelled(signal);
+        const { localFolderCreatePaths, localFileWrites } = yield* this.#withTiming(
+          timingLogger,
+          'Computed pull creation operations',
+          Effect.sync(() => this.#computePullCreationOperations(localRoot, remoteRoot, logger))
+        );
+        yield* this.#ensureNotCancelled(signal);
 
-      const keptFolderDeletes: Array<string> = [];
-      for (const folderPath of Array.from(localFolderDeletePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
-        if (
-          !keptFolderDeletes.some(parentPath => folderPath === parentPath || folderPath.startsWith(`${parentPath}/`))
-        ) {
-          keptFolderDeletes.push(folderPath);
+        const { localFileDeletePaths, localFolderDeletePaths } = yield* this.#withTiming(
+          timingLogger,
+          'Computed pull prune operations',
+          Effect.sync(() => this.#computePullPruneOperations(localRoot, remoteRoot, prune))
+        );
+        yield* this.#ensureNotCancelled(signal);
+
+        const keptFolderDeletes: Array<string> = [];
+        for (const folderPath of Array.from(localFolderDeletePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
+          if (
+            !keptFolderDeletes.some(parentPath => folderPath === parentPath || folderPath.startsWith(`${parentPath}/`))
+          ) {
+            keptFolderDeletes.push(folderPath);
+          }
         }
-      }
 
-      const keptFileDeletes = Array.from(localFileDeletePaths).filter(
-        filePath =>
-          !keptFolderDeletes.some(folderPath => filePath === folderPath || filePath.startsWith(`${folderPath}/`))
+        const keptFileDeletes = Array.from(localFileDeletePaths).filter(
+          filePath =>
+            !keptFolderDeletes.some(folderPath => filePath === folderPath || filePath.startsWith(`${folderPath}/`))
+        );
+
+        const pullOps: Array<PullSyncOperation> = [];
+
+        for (const folderPath of Array.from(localFolderCreatePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
+          pullOps.push({ type: 'createLocalFolder', details: { rawPath: folderPath } });
+        }
+
+        for (const writeOp of localFileWrites.values()) {
+          pullOps.push({ type: 'writeLocalFile', details: writeOp });
+        }
+
+        for (const filePath of keptFileDeletes) {
+          pullOps.push({ type: 'deleteLocalFile', details: { rawPath: filePath } });
+        }
+
+        for (const folderPath of keptFolderDeletes.sort((a, b) => pathDepth(b) - pathDepth(a))) {
+          pullOps.push({ type: 'deleteLocalFolder', details: { rawPath: folderPath } });
+        }
+
+        yield* this.#withTiming(
+          timingLogger,
+          'Applied operations',
+          this.#applyPullOperations(pullOps, logger, getProtonDriveApi(), fileApi, signal)
+        );
+
+        this.setIdleState();
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => getObsidianSettingsStore().setRemoteFileStateSnapshot(remoteFileStateSnapshot))
+        )
       );
-
-      const pullOps: Array<PullSyncOperation> = [];
-
-      for (const folderPath of Array.from(localFolderCreatePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
-        pullOps.push({ type: 'createLocalFolder', details: { rawPath: folderPath } });
-      }
-
-      for (const writeOp of localFileWrites.values()) {
-        pullOps.push({ type: 'writeLocalFile', details: writeOp });
-      }
-
-      for (const filePath of keptFileDeletes) {
-        pullOps.push({ type: 'deleteLocalFile', details: { rawPath: filePath } });
-      }
-
-      for (const folderPath of keptFolderDeletes.sort((a, b) => pathDepth(b) - pathDepth(a))) {
-        pullOps.push({ type: 'deleteLocalFolder', details: { rawPath: folderPath } });
-      }
-
-      yield* this.#withTiming(
-        timingLogger,
-        'Applied operations',
-        this.#applyPullOperations(pullOps, logger, getProtonDriveApi(), fileApi, signal)
-      );
-
-      this.setIdleState();
     });
   }
 
@@ -466,6 +501,7 @@ class SyncService {
     logger: ReturnType<typeof getLogger>,
     driveApi: ReturnType<typeof getProtonDriveApi>,
     fileApi: ReturnType<typeof getObsidianFileApi>,
+    remoteFileStateSnapshot: RemoteFileStateSnapshot,
     signal: AbortSignal
   ): Effect.Effect<
     void,
@@ -482,7 +518,7 @@ class SyncService {
     return Effect.gen(this, function* () {
       const totalOps = syncOps.length;
       let processedOps = 0;
-      const deleteNodeIds: Array<ProtonFileId | ProtonFolderId> = [];
+      const deleteOps: Array<Extract<PushSyncOperation, { type: 'deleteFile' | 'deleteFolder' }>> = [];
 
       while (syncOps.length > 0) {
         yield* this.#ensureNotCancelled(signal);
@@ -493,7 +529,7 @@ class SyncService {
         }
 
         if (op.type === 'deleteFile' || op.type === 'deleteFolder') {
-          deleteNodeIds.push(op.details.id);
+          deleteOps.push(op);
           continue;
         }
 
@@ -528,6 +564,7 @@ class SyncService {
               );
 
               yield* driveApi.uploadFile(op.details.name, data, metadata, op.details.parentId, signal);
+              setRemoteFileStateSnapshotEntry(remoteFileStateSnapshot, op.details.rawPath, op.details.sha1);
             }
             break;
           case 'updateFile':
@@ -541,12 +578,13 @@ class SyncService {
                 op.details.sha1
               );
               yield* driveApi.uploadRevision(op.details.id, data, metadata, signal);
+              setRemoteFileStateSnapshotEntry(remoteFileStateSnapshot, op.details.rawPath, op.details.sha1);
             }
             break;
         }
       }
 
-      if (deleteNodeIds.length > 0) {
+      if (deleteOps.length > 0) {
         yield* this.#ensureNotCancelled(signal);
 
         this.#stateSubject.next({
@@ -556,7 +594,18 @@ class SyncService {
           processedItems: processedOps
         });
 
-        yield* driveApi.trashNodes(deleteNodeIds, signal);
+        yield* driveApi.trashNodes(
+          deleteOps.map(op => op.details.id),
+          signal
+        );
+
+        for (const op of deleteOps) {
+          if (op.type === 'deleteFile') {
+            deleteRemoteFileStateSnapshotEntry(remoteFileStateSnapshot, op.details.rawPath);
+          } else {
+            deleteRemoteFolderStateSnapshotEntries(remoteFileStateSnapshot, op.details.rawPath);
+          }
+        }
       }
     });
   }
@@ -564,7 +613,9 @@ class SyncService {
   #computePushPruneOperations(localRoot: VaultFolder, remoteRoot: ProtonRecursiveFolder): Array<PushSyncOperation> {
     const syncOps: Array<PushSyncOperation> = [];
 
-    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder }> = [{ local: localRoot, remote: remoteRoot }];
+    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder; relativePath: string }> = [
+      { local: localRoot, remote: remoteRoot, relativePath: '' }
+    ];
     while (q.length > 0) {
       const item = q.shift();
       if (!item) {
@@ -572,17 +623,24 @@ class SyncService {
       }
 
       for (const remoteChild of item.remote.children) {
+        const remoteChildPath = normalizePath(
+          item.relativePath ? `${item.relativePath}/${remoteChild.name}` : remoteChild.name
+        );
+        if (!remoteChildPath) {
+          continue;
+        }
+
         if (remoteChild._tag === 'folder') {
           const localFolder = item.local.children.find(
             child => child._type === 'folder' && child.name === remoteChild.name
           ) as VaultFolder | undefined;
 
           if (!localFolder) {
-            syncOps.push({ type: 'deleteFolder', details: { id: remoteChild.id } });
+            syncOps.push({ type: 'deleteFolder', details: { id: remoteChild.id, rawPath: remoteChildPath } });
             continue;
           }
 
-          q.push({ local: localFolder, remote: remoteChild });
+          q.push({ local: localFolder, remote: remoteChild, relativePath: remoteChildPath });
           continue;
         } else {
           const localFile = item.local.children.find(
@@ -590,7 +648,7 @@ class SyncService {
           );
 
           if (!localFile) {
-            syncOps.push({ type: 'deleteFile', details: { id: remoteChild.id } });
+            syncOps.push({ type: 'deleteFile', details: { id: remoteChild.id, rawPath: remoteChildPath } });
           }
         }
       }
@@ -919,36 +977,10 @@ class SyncService {
     });
   }
 
-  #getOrCreateRemoteRoot(
-    configDir: string,
-    vaultRootId: ProtonFolderId,
-    signal?: AbortSignal
-  ): Effect.Effect<
-    ProtonFolder,
-    GenericProtonDriveError | InvalidNameError | ItemAlreadyExistsError | ProtonApiError | ProtonRequestCancelledError
-  > {
+  #getRemoteRoot(vaultRootId: ProtonFolderId, signal?: AbortSignal): Effect.Effect<Option.Option<ProtonFolder>> {
     return Effect.gen(this, function* () {
-      let currentFolder: ProtonFolder = {
-        id: vaultRootId,
-        name: '',
-        _tag: 'folder',
-        parentId: Option.none(),
-        treeEventScopeId: new TreeEventScopeId('')
-      };
       const driveApi = getProtonDriveApi();
-
-      for (const segment of configDir.split('/').filter(Boolean)) {
-        const remoteFolder = yield* driveApi.getFolderByName(segment, currentFolder.id, signal);
-
-        if (Option.isSome(remoteFolder)) {
-          return remoteFolder.value;
-        }
-
-        const created = yield* driveApi.createFolder(segment, currentFolder.id, signal);
-        currentFolder = created;
-      }
-
-      return currentFolder;
+      return yield* driveApi.getFolder(vaultRootId, signal).pipe(Effect.catchAll(() => Effect.succeed(Option.none())));
     });
   }
 

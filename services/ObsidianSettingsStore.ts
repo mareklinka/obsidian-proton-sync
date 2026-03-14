@@ -2,8 +2,11 @@ import { Option } from 'effect';
 import { BehaviorSubject } from 'rxjs';
 
 import { ProtonEventId, ProtonFolderId } from './proton-drive-types';
+import type { RemoteFileStateSnapshot } from './RemoteFileStateSnapshot';
 
 export const DEFAULT_SYNC_CONTAINER_NAME = 'obsidian-notes';
+
+type NonSnapshotPluginSettingsKeys = Exclude<keyof PluginSettings, 'remoteFileStateSnapshot'>;
 
 export const { init: initObsidianSettingsStore, get: getObsidianSettingsStore } = (function (): {
   init: (
@@ -50,7 +53,8 @@ class ObsidianSettingsStore {
     enableFileLogging: false,
     logLevel: LogLevel.info,
     ignoredPaths: [],
-    remoteVaultRootPath: ''
+    remoteVaultRootPath: '',
+    remoteFileStateSnapshot: null
   });
   public readonly settings$ = this.#settingsSubject.asObservable();
 
@@ -82,7 +86,8 @@ class ObsidianSettingsStore {
         remoteVaultRootPath:
           !loaded.remoteVaultRootPath || loaded.remoteVaultRootPath === ''
             ? this.defaultRemoteVaultRootPath
-            : loaded.remoteVaultRootPath
+            : loaded.remoteVaultRootPath,
+        remoteFileStateSnapshot: loaded.remoteFileStateSnapshot ?? null
       });
     } else {
       this.#settingsSubject.next({
@@ -103,20 +108,39 @@ class ObsidianSettingsStore {
         enableFileLogging: settings.enableFileLogging,
         logLevel: settings.logLevel,
         ignoredPaths: settings.ignoredPaths,
-        remoteVaultRootPath: settings.remoteVaultRootPath ?? null
+        remoteVaultRootPath: settings.remoteVaultRootPath ?? null,
+        remoteFileStateSnapshot: settings.remoteFileStateSnapshot
       });
     });
   }
 
-  public get<K extends keyof PluginSettings>(key: K): PluginSettings[K] {
+  public get<K extends NonSnapshotPluginSettingsKeys>(key: K): PluginSettings[K] {
     return this.#settingsSubject.getValue()[key];
   }
 
-  public set<K extends keyof PluginSettings>(key: K, value: PluginSettings[K]): void {
+  public set<K extends NonSnapshotPluginSettingsKeys>(key: K, value: PluginSettings[K]): void {
+    const currentSettings = this.#settingsSubject.getValue();
+    const nextSettings: PluginSettings = {
+      ...currentSettings,
+      [key]: value
+    };
+
+    if (this.#shouldClearRemoteFileStateSnapshot(key, currentSettings[key], value)) {
+      nextSettings.remoteFileStateSnapshot = null;
+    }
+
+    this.#settingsSubject.next(nextSettings);
+  }
+
+  public setRemoteFileStateSnapshot(snapshot: RemoteFileStateSnapshot | null): void {
     this.#settingsSubject.next({
       ...this.#settingsSubject.getValue(),
-      [key]: value
+      remoteFileStateSnapshot: snapshot ? { ...snapshot } : null
     });
+  }
+
+  public getRemoteFileStateSnapshot(): RemoteFileStateSnapshot | null {
+    return this.#settingsSubject.getValue().remoteFileStateSnapshot;
   }
 
   public reset(): void {
@@ -127,8 +151,36 @@ class ObsidianSettingsStore {
       lastLoginError: null,
       lastRefreshAt: null,
       sessionExpiresAt: null,
-      latestEventId: Option.none()
+      latestEventId: Option.none(),
+      remoteFileStateSnapshot: null
     });
+  }
+
+  #shouldClearRemoteFileStateSnapshot<K extends keyof PluginSettings>(
+    key: K,
+    previousValue: PluginSettings[K],
+    nextValue: PluginSettings[K]
+  ): boolean {
+    if (key === 'remoteFileStateSnapshot') {
+      return false;
+    }
+
+    if (key === 'remoteVaultRootPath') {
+      return previousValue !== nextValue;
+    }
+
+    if (key === 'ignoredPaths') {
+      return !isSameStringArray(previousValue as Array<string>, nextValue as Array<string>);
+    }
+
+    if (key === 'vaultRootNodeUid') {
+      return !isSameOptionalFolderId(
+        previousValue as PluginSettings['vaultRootNodeUid'],
+        nextValue as PluginSettings['vaultRootNodeUid']
+      );
+    }
+
+    return false;
   }
 }
 
@@ -144,6 +196,7 @@ interface PluginSettingsStorageModel {
   logLevel: LogLevel;
   ignoredPaths?: Array<string>;
   remoteVaultRootPath: string | null;
+  remoteFileStateSnapshot?: RemoteFileStateSnapshot | null;
 }
 
 export interface PluginSettings {
@@ -158,6 +211,7 @@ export interface PluginSettings {
   logLevel: LogLevel;
   ignoredPaths: Array<string>;
   remoteVaultRootPath: string;
+  remoteFileStateSnapshot: RemoteFileStateSnapshot | null;
 }
 
 export enum LogLevel {
@@ -165,4 +219,27 @@ export enum LogLevel {
   info = 'info',
   warn = 'warn',
   error = 'error'
+}
+
+function isSameOptionalFolderId(
+  left: PluginSettings['vaultRootNodeUid'],
+  right: PluginSettings['vaultRootNodeUid']
+): boolean {
+  if (Option.isNone(left) && Option.isNone(right)) {
+    return true;
+  }
+
+  if (Option.isSome(left) && Option.isSome(right)) {
+    return left.value.uid === right.value.uid;
+  }
+
+  return false;
+}
+
+function isSameStringArray(left: Array<string>, right: Array<string>): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
 }

@@ -4,7 +4,7 @@ import { APICodeError } from '@protontech/drive-sdk/dist/internal/apiService';
 import { Effect, Option } from 'effect';
 
 import { getProtonDriveClient } from '../proton/drive/ProtonDriveClient';
-import type { NotAFolderError } from './proton-drive-types';
+import { NotAFolderError } from './proton-drive-types';
 import {
   FileUploadError,
   GenericProtonDriveError,
@@ -126,6 +126,42 @@ class ProtonDriveApi {
       catch: error => {
         if (error instanceof ProtonRequestCancelledError || this.#isAbortError(error)) {
           return this.#toCancelledError(error);
+        }
+
+        return new GenericProtonDriveError();
+      }
+    });
+  }
+
+  public getFolder(
+    id: ProtonFolderId,
+    signal?: AbortSignal
+  ): Effect.Effect<
+    Option.Option<ProtonFolder>,
+    GenericProtonDriveError | ProtonRequestCancelledError | NotAFolderError
+  > {
+    return Effect.tryPromise({
+      try: async () => {
+        this.#throwIfCancelled(signal);
+
+        const node = await this.client.getNode(id.uid);
+        if (!node.ok) {
+          return Option.none();
+        }
+
+        if (node.value.type !== NodeType.Folder) {
+          throw new NotAFolderError();
+        }
+
+        return Option.some(ProtonDriveApi.#createFolderFromNode(node.value));
+      },
+      catch: error => {
+        if (error instanceof ProtonRequestCancelledError || this.#isAbortError(error)) {
+          return this.#toCancelledError(error);
+        }
+
+        if (error instanceof NotAFolderError) {
+          return error;
         }
 
         return new GenericProtonDriveError();
