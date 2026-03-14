@@ -492,12 +492,79 @@ describe('SyncService', () => {
     await Effect.runPromise(sync.push(false, createSignal()));
 
     expect(uploadRevisionMock).not.toHaveBeenCalled();
-    expect(loggerWarnMock).toHaveBeenCalledWith('Detected push conflict, skipping file', {
+    expect(loggerWarnMock).toHaveBeenCalledWith('Detected push conflict', {
       path: 'note.md',
       localSha1: 'sha-local',
       remoteSha1: 'sha-remote',
       snapshotSha1: 'sha-snapshot'
     });
+  });
+
+  it('overwrites remote file when push conflict resolver chooses overwrite', async () => {
+    const mod = await import('../services/SyncService');
+    const sync = mod.initSyncService(vault as never);
+
+    const now = new Date('2026-03-06T12:00:00.000Z');
+    const older = new Date('2026-03-06T11:00:00.000Z');
+    const resolveConflict = vi.fn(() => Effect.succeed({ action: 'overwrite' as const, applyToAll: false }));
+
+    getFileTreeMock.mockImplementation(() => Effect.succeed(vaultFolder('', [vaultFile('note.md', 'sha-local', now)])));
+    getChildrenMock.mockImplementation((folderId: ProtonFolderId) => {
+      if (folderId.uid === 'vault-root') {
+        return Effect.succeed([
+          protonFile('remote-note', 'note.md', older, 'sha-remote', new ProtonFolderId('vault-root'))
+        ]);
+      }
+
+      return Effect.succeed([]);
+    });
+    settingsGetRemoteFileStateSnapshotMock.mockReturnValue({
+      'note.md': 'sha-snapshot'
+    });
+
+    await Effect.runPromise(sync.push(false, createSignal(), resolveConflict));
+
+    expect(resolveConflict).toHaveBeenCalledTimes(1);
+    expect(resolveConflict).toHaveBeenCalledWith({
+      direction: 'push',
+      reason: 'contentChanged',
+      path: 'note.md'
+    });
+    expect(uploadRevisionMock).toHaveBeenCalledTimes(1);
+    expect(uploadRevisionMock.mock.calls[0]?.[0].uid).toBe('remote-note');
+  });
+
+  it('reuses remembered overwrite decision for subsequent push conflicts', async () => {
+    const mod = await import('../services/SyncService');
+    const sync = mod.initSyncService(vault as never);
+
+    const now = new Date('2026-03-06T12:00:00.000Z');
+    const older = new Date('2026-03-06T11:00:00.000Z');
+    const resolveConflict = vi.fn(() => Effect.succeed({ action: 'overwrite' as const, applyToAll: true }));
+
+    getFileTreeMock.mockImplementation(() =>
+      Effect.succeed(vaultFolder('', [vaultFile('a.md', 'sha-local-a', now), vaultFile('b.md', 'sha-local-b', now)]))
+    );
+    getChildrenMock.mockImplementation((folderId: ProtonFolderId) => {
+      if (folderId.uid === 'vault-root') {
+        return Effect.succeed([
+          protonFile('remote-a', 'a.md', older, 'sha-remote-a', new ProtonFolderId('vault-root')),
+          protonFile('remote-b', 'b.md', older, 'sha-remote-b', new ProtonFolderId('vault-root'))
+        ]);
+      }
+
+      return Effect.succeed([]);
+    });
+    settingsGetRemoteFileStateSnapshotMock.mockReturnValue({
+      'a.md': 'sha-snapshot-a',
+      'b.md': 'sha-snapshot-b'
+    });
+
+    await Effect.runPromise(sync.push(false, createSignal(), resolveConflict));
+
+    expect(resolveConflict).toHaveBeenCalledTimes(1);
+    expect(uploadRevisionMock).toHaveBeenCalledTimes(2);
+    expect(uploadRevisionMock.mock.calls.map(call => call[0].uid).sort()).toEqual(['remote-a', 'remote-b']);
   });
 
   it('logs and skips push prune conflicts when remote file diverged from snapshot', async () => {
@@ -524,7 +591,7 @@ describe('SyncService', () => {
     await Effect.runPromise(sync.push(true, createSignal()));
 
     expect(trashNodesMock).not.toHaveBeenCalled();
-    expect(loggerWarnMock).toHaveBeenCalledWith('Detected push conflict while pruning remote file, skipping file', {
+    expect(loggerWarnMock).toHaveBeenCalledWith('Detected push conflict while pruning remote file', {
       path: 'stale.md',
       remoteSha1: 'sha-remote',
       snapshotSha1: 'sha-snapshot'
@@ -560,7 +627,7 @@ describe('SyncService', () => {
     await Effect.runPromise(sync.push(true, createSignal()));
 
     expect(trashNodesMock).not.toHaveBeenCalled();
-    expect(loggerWarnMock).toHaveBeenCalledWith('Detected push conflict while pruning remote folder, skipping folder', {
+    expect(loggerWarnMock).toHaveBeenCalledWith('Detected push conflict while pruning remote folder', {
       path: 'orphan-folder',
       conflictingPath: 'orphan-folder/child.md'
     });
@@ -881,12 +948,46 @@ describe('SyncService', () => {
     await Effect.runPromise(sync.pull(false, createSignal()));
 
     expect(downloadFileMock).not.toHaveBeenCalled();
-    expect(loggerWarnMock).toHaveBeenCalledWith('Detected pull conflict, skipping file', {
+    expect(loggerWarnMock).toHaveBeenCalledWith('Detected pull conflict', {
       path: 'note.md',
       localSha1: 'sha-local',
       remoteSha1: 'sha-remote',
       snapshotSha1: 'sha-snapshot'
     });
+  });
+
+  it('overwrites local file when pull conflict resolver chooses overwrite', async () => {
+    const mod = await import('../services/SyncService');
+    const sync = mod.initSyncService(vault as never);
+
+    const now = new Date('2026-03-06T12:00:00.000Z');
+    const newer = new Date('2026-03-06T13:00:00.000Z');
+    const resolveConflict = vi.fn(() => Effect.succeed({ action: 'overwrite' as const, applyToAll: false }));
+
+    getFileTreeMock.mockImplementation(() => Effect.succeed(vaultFolder('', [vaultFile('note.md', 'sha-local', now)])));
+    getChildrenMock.mockImplementation((folderId: ProtonFolderId) => {
+      if (folderId.uid === 'vault-root') {
+        return Effect.succeed([
+          protonFile('remote-note', 'note.md', newer, 'sha-remote', new ProtonFolderId('vault-root'))
+        ]);
+      }
+
+      return Effect.succeed([]);
+    });
+    settingsGetRemoteFileStateSnapshotMock.mockReturnValue({
+      'note.md': 'sha-snapshot'
+    });
+
+    await Effect.runPromise(sync.pull(false, createSignal(), resolveConflict));
+
+    expect(resolveConflict).toHaveBeenCalledTimes(1);
+    expect(resolveConflict).toHaveBeenCalledWith({
+      direction: 'pull',
+      reason: 'contentChanged',
+      path: 'note.md'
+    });
+    expect(downloadFileMock).toHaveBeenCalledTimes(1);
+    expect(writeFileContentMock).toHaveBeenCalledWith('note.md', expect.any(ArrayBuffer), newer);
   });
 
   it('logs and skips pull prune conflicts when local file diverged from snapshot', async () => {
@@ -906,7 +1007,7 @@ describe('SyncService', () => {
     await Effect.runPromise(sync.pull(true, createSignal()));
 
     expect(deleteFileMock).not.toHaveBeenCalled();
-    expect(loggerWarnMock).toHaveBeenCalledWith('Detected pull conflict while pruning local file, skipping file', {
+    expect(loggerWarnMock).toHaveBeenCalledWith('Detected pull conflict while pruning local file', {
       path: 'stale.md',
       localSha1: 'sha-local',
       snapshotSha1: 'sha-snapshot'
@@ -932,7 +1033,7 @@ describe('SyncService', () => {
     await Effect.runPromise(sync.pull(true, createSignal()));
 
     expect(deleteFolderMock).not.toHaveBeenCalled();
-    expect(loggerWarnMock).toHaveBeenCalledWith('Detected pull conflict while pruning local folder, skipping folder', {
+    expect(loggerWarnMock).toHaveBeenCalledWith('Detected pull conflict while pruning local folder', {
       path: 'orphan-folder',
       conflictingPath: 'orphan-folder/child.md'
     });

@@ -223,6 +223,40 @@ export const en = {
       autoCloseMessage: (secondsRemaining: number): string =>
         `All changes have been processed. This dialog will close in ${secondsRemaining} ${secondsRemaining === 1 ? 'second' : 'seconds'}.`
     },
+    conflictResolution: {
+      title: 'Sync conflict detected',
+      affectedPathLabel: 'Affected path',
+      conflictingPathLabel: 'Conflicting path',
+      applyToAllLabel: 'Apply to all subsequent conflicts',
+      applyToAllDescription: 'Reuse this decision for the rest of the current sync operation.',
+      skipButton: 'Skip',
+      overwriteRemoteButton: 'Overwrite remote',
+      overwriteLocalButton: 'Overwrite local',
+      contentChangedPush: 'The local file and the remote file both changed since the last sync.',
+      contentChangedPull: 'The remote file and the local file both changed since the last sync.',
+      missingSnapshotBaselinePush:
+        'The remote file differs from the local file, but the last synced remote baseline is unavailable.',
+      missingSnapshotBaselinePull:
+        'The remote file differs from the local file, but the last synced remote baseline is unavailable.',
+      localFolderRemoteFileTypeMismatch: 'A local folder conflicts with a remote file at the same path.',
+      localFileRemoteFolderTypeMismatch: 'A local file conflicts with a remote folder at the same path.',
+      remoteFolderLocalFileTypeMismatch: 'A remote folder conflicts with a local file at the same path.',
+      remoteFileLocalFolderTypeMismatch: 'A remote file conflicts with a local folder at the same path.',
+      pruneFileChangedPush: 'The remote file is missing locally, but the remote version changed since the last sync.',
+      pruneFileChangedPull: 'The local file is missing remotely, but the local version changed since the last sync.',
+      pruneFileMissingSnapshotBaselinePush:
+        'The remote file is missing locally, but the last synced remote baseline is unavailable.',
+      pruneFileMissingSnapshotBaselinePull:
+        'The local file is missing remotely, but the last synced remote baseline is unavailable.',
+      pruneFolderChangedPush:
+        'The remote folder is missing locally, but an item inside it changed since the last sync.',
+      pruneFolderChangedPull:
+        'The local folder is missing remotely, but an item inside it changed since the last sync.',
+      pruneRemoteFolderLocalFileTypeMismatch:
+        'A remote folder conflicts with a local file at the same path while pruning.',
+      pruneRemoteFileLocalFolderTypeMismatch:
+        'A remote file conflicts with a local folder at the same path while pruning.'
+    },
     confirm: {
       cancelTooltip: 'Cancel'
     }

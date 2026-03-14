@@ -100,11 +100,15 @@ interface FileUpdate {
 interface FileDelete {
   id: ProtonFileId;
   rawPath: string;
+  // immediate is used during conflict resolution, deferred is for pruning
+  applyMode?: 'immediate' | 'deferred';
 }
 
 interface FolderDelete {
   id: ProtonFolderId;
   rawPath: string;
+  // immediate is used during conflict resolution, deferred is for pruning
+  applyMode?: 'immediate' | 'deferred';
 }
 
 interface LocalFolderCreate {
@@ -125,6 +129,13 @@ interface LocalFolderDelete {
   rawPath: string;
 }
 
+interface PullCreationPlan {
+  localFolderCreatePaths: Set<string>;
+  localFileWrites: Map<string, LocalFileWrite>;
+  replacementFileDeletePaths: Set<string>;
+  replacementFolderDeletePaths: Set<string>;
+}
+
 type PushSyncOperation =
   | { type: 'createFolder'; details: FolderCreate }
   | { type: 'uploadFile'; details: FileUpload }
@@ -137,6 +148,39 @@ type PullSyncOperation =
   | { type: 'writeLocalFile'; details: LocalFileWrite }
   | { type: 'deleteLocalFile'; details: LocalFileDelete }
   | { type: 'deleteLocalFolder'; details: LocalFolderDelete };
+
+export type SyncConflictAction = 'overwrite' | 'skip';
+
+export type SyncConflictReason =
+  | 'contentChanged'
+  | 'missingSnapshotBaseline'
+  | 'localFolderRemoteFileTypeMismatch'
+  | 'localFileRemoteFolderTypeMismatch'
+  | 'remoteFolderLocalFileTypeMismatch'
+  | 'remoteFileLocalFolderTypeMismatch'
+  | 'pruneFileChanged'
+  | 'pruneFileMissingSnapshotBaseline'
+  | 'pruneFolderChanged'
+  | 'pruneRemoteFolderLocalFileTypeMismatch'
+  | 'pruneRemoteFileLocalFolderTypeMismatch';
+
+export interface SyncConflict {
+  direction: 'push' | 'pull';
+  reason: SyncConflictReason;
+  path: string;
+  conflictingPath?: string;
+}
+
+export interface SyncConflictDecision {
+  action: SyncConflictAction;
+  applyToAll: boolean;
+}
+
+export type SyncConflictResolver = (conflict: SyncConflict) => Effect.Effect<SyncConflictDecision, never, never>;
+
+type ConflictActionResolver = (
+  conflict: Omit<SyncConflict, 'direction'>
+) => Effect.Effect<SyncConflictAction, never, never>;
 
 class SyncService {
   readonly #logger = getLogger('SyncService');
@@ -159,7 +203,8 @@ class SyncService {
 
   public push(
     prune: boolean,
-    signal: AbortSignal
+    signal: AbortSignal,
+    conflictResolver?: SyncConflictResolver
   ): Effect.Effect<
     void,
     | SyncAlreadyInProgressError
@@ -183,7 +228,7 @@ class SyncService {
         this.setIdleState();
       });
 
-      yield* this.#pushImpl(prune, signal).pipe(
+      yield* this.#pushImpl(prune, signal, conflictResolver).pipe(
         Effect.catchTag('ProtonRequestCancelledError', error =>
           Effect.fail(new SyncCancelledError({ reason: error.reason }))
         ),
@@ -194,7 +239,8 @@ class SyncService {
 
   public pull(
     prune: boolean,
-    signal: AbortSignal
+    signal: AbortSignal,
+    conflictResolver?: SyncConflictResolver
   ): Effect.Effect<
     void,
     | SyncAlreadyInProgressError
@@ -216,7 +262,7 @@ class SyncService {
         this.setIdleState();
       });
 
-      yield* this.#pullImpl(prune, signal).pipe(
+      yield* this.#pullImpl(prune, signal, conflictResolver).pipe(
         Effect.catchTag('ProtonRequestCancelledError', error =>
           Effect.fail(new SyncCancelledError({ reason: error.reason }))
         ),
@@ -227,7 +273,8 @@ class SyncService {
 
   #pushImpl(
     prune: boolean,
-    signal: AbortSignal
+    signal: AbortSignal,
+    conflictResolver?: SyncConflictResolver
   ): Effect.Effect<
     undefined,
     | VaultRootIdNotAvailableError
@@ -245,6 +292,7 @@ class SyncService {
     return Effect.gen(this, function* () {
       const logger = this.#logger.withScope('push');
       const timingLogger = logger.withScope(SYNC_TIMING_SCOPE);
+      const resolveConflict = this.#createConflictResolver('push', conflictResolver, logger);
       logger.info('Starting config push');
 
       yield* this.#ensureNotCancelled(signal);
@@ -289,22 +337,29 @@ class SyncService {
         const syncOps = yield* this.#withTiming(
           timingLogger,
           'Computed push creation operations',
-          Effect.sync(() =>
-            this.#computePushCreationOperations(localRoot, remoteRoot, storedRemoteFileStateSnapshot, logger)
+          this.#computePushCreationOperations(
+            localRoot,
+            remoteRoot,
+            storedRemoteFileStateSnapshot,
+            logger,
+            resolveConflict
           )
         );
         yield* this.#ensureNotCancelled(signal);
 
         if (prune) {
-          yield* this.#withTiming(
+          const pruneOps = yield* this.#withTiming(
             timingLogger,
             'Computed push prune operations',
-            Effect.sync(() => {
-              syncOps.push(
-                ...this.#computePushPruneOperations(localRoot, remoteRoot, storedRemoteFileStateSnapshot, logger)
-              );
-            })
+            this.#computePushPruneOperations(
+              localRoot,
+              remoteRoot,
+              storedRemoteFileStateSnapshot,
+              logger,
+              resolveConflict
+            )
           );
+          syncOps.push(...pruneOps);
           yield* this.#ensureNotCancelled(signal);
         }
 
@@ -325,7 +380,8 @@ class SyncService {
 
   #pullImpl(
     prune: boolean,
-    signal: AbortSignal
+    signal: AbortSignal,
+    conflictResolver?: SyncConflictResolver
   ): Effect.Effect<
     undefined,
     | VaultRootIdNotAvailableError
@@ -341,6 +397,7 @@ class SyncService {
     return Effect.gen(this, function* () {
       const logger = this.#logger.withScope('pull');
       const timingLogger = logger.withScope(SYNC_TIMING_SCOPE);
+      const resolveConflict = this.#createConflictResolver('pull', conflictResolver, logger);
       logger.info('Starting config pull', { deleteLocalOrphans: prune });
 
       yield* this.#ensureNotCancelled(signal);
@@ -379,20 +436,30 @@ class SyncService {
         this.#stateSubject.next({ state: 'pulling', subState: 'diffComputation', totalItems: 0, processedItems: 0 });
         const storedRemoteFileStateSnapshot = getObsidianSettingsStore().getRemoteFileStateSnapshot();
 
-        const { localFolderCreatePaths, localFileWrites } = yield* this.#withTiming(
-          timingLogger,
-          'Computed pull creation operations',
-          Effect.sync(() =>
-            this.#computePullCreationOperations(localRoot, remoteRoot, storedRemoteFileStateSnapshot, logger)
-          )
-        );
+        const { localFolderCreatePaths, localFileWrites, replacementFileDeletePaths, replacementFolderDeletePaths } =
+          yield* this.#withTiming(
+            timingLogger,
+            'Computed pull creation operations',
+            this.#computePullCreationOperations(
+              localRoot,
+              remoteRoot,
+              storedRemoteFileStateSnapshot,
+              logger,
+              resolveConflict
+            )
+          );
         yield* this.#ensureNotCancelled(signal);
 
         const { localFileDeletePaths, localFolderDeletePaths } = yield* this.#withTiming(
           timingLogger,
           'Computed pull prune operations',
-          Effect.sync(() =>
-            this.#computePullPruneOperations(localRoot, remoteRoot, prune, storedRemoteFileStateSnapshot, logger)
+          this.#computePullPruneOperations(
+            localRoot,
+            remoteRoot,
+            prune,
+            storedRemoteFileStateSnapshot,
+            logger,
+            resolveConflict
           )
         );
         yield* this.#ensureNotCancelled(signal);
@@ -412,6 +479,14 @@ class SyncService {
         );
 
         const pullOps: Array<PullSyncOperation> = [];
+
+        for (const folderPath of Array.from(replacementFolderDeletePaths).sort((a, b) => pathDepth(b) - pathDepth(a))) {
+          pullOps.push({ type: 'deleteLocalFolder', details: { rawPath: folderPath } });
+        }
+
+        for (const filePath of replacementFileDeletePaths) {
+          pullOps.push({ type: 'deleteLocalFile', details: { rawPath: filePath } });
+        }
 
         for (const folderPath of Array.from(localFolderCreatePaths).sort((a, b) => pathDepth(a) - pathDepth(b))) {
           pullOps.push({ type: 'createLocalFolder', details: { rawPath: folderPath } });
@@ -538,7 +613,7 @@ class SyncService {
           continue;
         }
 
-        if (op.type === 'deleteFile' || op.type === 'deleteFolder') {
+        if ((op.type === 'deleteFile' || op.type === 'deleteFolder') && op.details.applyMode !== 'immediate') {
           deleteOps.push(op);
           continue;
         }
@@ -551,6 +626,20 @@ class SyncService {
         });
 
         switch (op.type) {
+          case 'deleteFile':
+            {
+              logger.debug('Deleting remote file', { path: op.details.rawPath });
+              yield* driveApi.trashNodes([op.details.id], signal);
+              deleteRemoteFileStateSnapshotEntry(remoteFileStateSnapshot, op.details.rawPath);
+            }
+            break;
+          case 'deleteFolder':
+            {
+              logger.debug('Deleting remote folder', { path: op.details.rawPath });
+              yield* driveApi.trashNodes([op.details.id], signal);
+              deleteRemoteFolderStateSnapshotEntries(remoteFileStateSnapshot, op.details.rawPath);
+            }
+            break;
           case 'createFolder':
             {
               logger.debug('Creating folder', { name: op.details.name, parentId: op.details.parentId.uid });
@@ -624,54 +713,68 @@ class SyncService {
     localRoot: VaultFolder,
     remoteRoot: ProtonRecursiveFolder,
     storedRemoteFileStateSnapshot: RemoteFileStateSnapshot | null,
-    logger: ReturnType<typeof getLogger>
-  ): Array<PushSyncOperation> {
-    const syncOps: Array<PushSyncOperation> = [];
+    logger: ReturnType<typeof getLogger>,
+    resolveConflict: ConflictActionResolver
+  ): Effect.Effect<Array<PushSyncOperation>, never, never> {
+    return Effect.gen(this, function* () {
+      const syncOps: Array<PushSyncOperation> = [];
 
-    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder; relativePath: string }> = [
-      { local: localRoot, remote: remoteRoot, relativePath: '' }
-    ];
-    while (q.length > 0) {
-      const item = q.shift();
-      if (!item) {
-        continue;
-      }
-
-      for (const remoteChild of item.remote.children) {
-        const remoteChildPath = normalizePath(
-          item.relativePath ? `${item.relativePath}/${remoteChild.name}` : remoteChild.name
-        );
-        if (!remoteChildPath) {
+      const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder; relativePath: string }> = [
+        { local: localRoot, remote: remoteRoot, relativePath: '' }
+      ];
+      while (q.length > 0) {
+        const item = q.shift();
+        if (!item) {
           continue;
         }
 
-        if (remoteChild._tag === 'folder') {
-          const localFolder = item.local.children.find(
-            child => child._type === 'folder' && child.name === remoteChild.name
-          ) as VaultFolder | undefined;
+        for (const remoteChild of item.remote.children) {
+          const remoteChildPath = normalizePath(
+            item.relativePath ? `${item.relativePath}/${remoteChild.name}` : remoteChild.name
+          );
+          if (!remoteChildPath) {
+            continue;
+          }
 
-          if (!localFolder) {
-            const conflictingRemoteFilePath = findConflictingRemotePruneFilePath(
-              remoteChild,
-              remoteChildPath,
-              storedRemoteFileStateSnapshot
-            );
+          if (remoteChild._tag === 'folder') {
+            const localFolder = item.local.children.find(
+              child => child._type === 'folder' && child.name === remoteChild.name
+            ) as VaultFolder | undefined;
 
-            if (conflictingRemoteFilePath) {
-              logger.warn('Detected push conflict while pruning remote folder, skipping folder', {
-                path: remoteChildPath,
-                conflictingPath: conflictingRemoteFilePath
+            if (!localFolder) {
+              const conflictingRemoteFilePath = findConflictingRemotePruneFilePath(
+                remoteChild,
+                remoteChildPath,
+                storedRemoteFileStateSnapshot
+              );
+
+              if (conflictingRemoteFilePath) {
+                logger.warn('Detected push conflict while pruning remote folder', {
+                  path: remoteChildPath,
+                  conflictingPath: conflictingRemoteFilePath
+                });
+                const action = yield* resolveConflict({
+                  reason: 'pruneFolderChanged',
+                  path: remoteChildPath,
+                  conflictingPath: conflictingRemoteFilePath
+                });
+
+                if (action === 'skip') {
+                  continue;
+                }
+              }
+
+              syncOps.push({
+                type: 'deleteFolder',
+                details: { id: remoteChild.id, rawPath: remoteChildPath, applyMode: 'deferred' }
               });
               continue;
             }
 
-            syncOps.push({ type: 'deleteFolder', details: { id: remoteChild.id, rawPath: remoteChildPath } });
+            q.push({ local: localFolder, remote: remoteChild, relativePath: remoteChildPath });
             continue;
           }
 
-          q.push({ local: localFolder, remote: remoteChild, relativePath: remoteChildPath });
-          continue;
-        } else {
           const localFile = item.local.children.find(
             child => child._type === 'file' && child.name === remoteChild.name
           );
@@ -681,120 +784,205 @@ class SyncService {
             const snapshotSha = getSnapshotSha(storedRemoteFileStateSnapshot, remoteChildPath);
 
             if (remoteSha === null || snapshotSha === null || snapshotSha === undefined) {
-              logger.warn(
-                'Detected push conflict while pruning remote file without a usable snapshot baseline, skipping file',
-                {
-                  path: remoteChildPath,
-                  remoteSha1: remoteSha,
-                  snapshotSha1: snapshotSha
-                }
-              );
-              continue;
-            }
-
-            if (remoteSha !== snapshotSha) {
-              logger.warn('Detected push conflict while pruning remote file, skipping file', {
+              logger.warn('Detected push conflict while pruning remote file without a usable snapshot baseline', {
                 path: remoteChildPath,
                 remoteSha1: remoteSha,
                 snapshotSha1: snapshotSha
               });
-              continue;
+              const action = yield* resolveConflict({
+                reason: 'pruneFileMissingSnapshotBaseline',
+                path: remoteChildPath
+              });
+
+              if (action === 'skip') {
+                continue;
+              }
+            } else if (remoteSha !== snapshotSha) {
+              logger.warn('Detected push conflict while pruning remote file', {
+                path: remoteChildPath,
+                remoteSha1: remoteSha,
+                snapshotSha1: snapshotSha
+              });
+              const action = yield* resolveConflict({ reason: 'pruneFileChanged', path: remoteChildPath });
+
+              if (action === 'skip') {
+                continue;
+              }
             }
 
-            syncOps.push({ type: 'deleteFile', details: { id: remoteChild.id, rawPath: remoteChildPath } });
+            syncOps.push({
+              type: 'deleteFile',
+              details: { id: remoteChild.id, rawPath: remoteChildPath, applyMode: 'deferred' }
+            });
           }
         }
       }
-    }
 
-    return syncOps;
+      return syncOps;
+    });
   }
 
   #computePushCreationOperations(
     localRoot: VaultFolder,
     remoteRoot: ProtonRecursiveFolder,
     storedRemoteFileStateSnapshot: RemoteFileStateSnapshot | null,
-    logger: ReturnType<typeof getLogger>
-  ): Array<PushSyncOperation> {
-    const syncOps: Array<PushSyncOperation> = [];
+    logger: ReturnType<typeof getLogger>,
+    resolveConflict: ConflictActionResolver
+  ): Effect.Effect<Array<PushSyncOperation>, never, never> {
+    return Effect.gen(this, function* () {
+      const syncOps: Array<PushSyncOperation> = [];
 
-    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder }> = [{ local: localRoot, remote: remoteRoot }];
-    while (q.length > 0) {
-      const item = q.shift();
+      const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder }> = [
+        { local: localRoot, remote: remoteRoot }
+      ];
+      while (q.length > 0) {
+        const item = q.shift();
 
-      if (!item) {
-        continue;
-      }
-
-      for (const child of item.local.children) {
-        if (this.#isExcluded(child.rawPath)) {
+        if (!item) {
           continue;
         }
 
-        if (child._type === 'folder') {
-          const remoteFile = item.remote.children.find(c => c._tag === 'file' && c.name === child.name) as
-            | ProtonFile
-            | undefined;
-
-          if (remoteFile) {
-            logger.warn('Detected push conflict due to local folder and remote file type mismatch, skipping item', {
-              path: child.rawPath
-            });
+        for (const child of item.local.children) {
+          if (this.#isExcluded(child.rawPath)) {
             continue;
           }
 
-          let remoteFolder = item.remote.children.find(c => c._tag === 'folder' && c.name === child.name) as
-            | ProtonRecursiveFolder
-            | undefined;
+          if (child._type === 'folder') {
+            const remoteFile = item.remote.children.find(c => c._tag === 'file' && c.name === child.name) as
+              | ProtonFile
+              | undefined;
 
-          if (!remoteFolder) {
-            const id = new ProtonFolderId('temp-id-' + Math.random().toString(16).slice(2));
-            syncOps.push({ type: 'createFolder', details: { id, name: child.name, parentId: item.remote.id } });
+            if (remoteFile) {
+              logger.warn('Detected push conflict due to local folder and remote file type mismatch', {
+                path: child.rawPath
+              });
+              const action = yield* resolveConflict({
+                reason: 'localFolderRemoteFileTypeMismatch',
+                path: child.rawPath
+              });
 
-            remoteFolder = {
-              id,
-              name: child.name,
-              parentId: Option.some(item.remote.id),
-              treeEventScopeId: new TreeEventScopeId('temp-scope-' + Math.random().toString(16).slice(2)),
-              _tag: 'folder',
-              children: []
-            };
+              if (action === 'skip') {
+                continue;
+              }
 
-            item.remote.children.push(remoteFolder);
-          }
+              syncOps.push({
+                type: 'deleteFile',
+                details: { id: remoteFile.id, rawPath: child.rawPath, applyMode: 'immediate' }
+              });
+              item.remote.children = item.remote.children.filter(candidate => candidate !== remoteFile);
+            }
 
-          q.push({ local: child, remote: remoteFolder });
-        } else {
-          const remoteFolder = item.remote.children.find(c => c._tag === 'folder' && c.name === child.name) as
-            | ProtonRecursiveFolder
-            | undefined;
+            let remoteFolder = item.remote.children.find(c => c._tag === 'folder' && c.name === child.name) as
+              | ProtonRecursiveFolder
+              | undefined;
 
-          if (remoteFolder) {
-            logger.warn('Detected push conflict due to local file and remote folder type mismatch, skipping item', {
-              path: child.rawPath
-            });
-            continue;
-          }
+            if (!remoteFolder) {
+              const id = new ProtonFolderId('temp-id-' + Math.random().toString(16).slice(2));
+              syncOps.push({ type: 'createFolder', details: { id, name: child.name, parentId: item.remote.id } });
 
-          const remoteFile = item.remote.children.find(c => c._tag === 'file' && c.name === child.name) as
-            | ProtonFile
-            | undefined;
+              remoteFolder = {
+                id,
+                name: child.name,
+                parentId: Option.some(item.remote.id),
+                treeEventScopeId: new TreeEventScopeId('temp-scope-' + Math.random().toString(16).slice(2)),
+                _tag: 'folder',
+                children: []
+              };
 
-          if (remoteFile && Option.isSome(remoteFile.sha1) && remoteFile.sha1.value === child.sha1) {
-            logger.debug('Skipping upload for same file', {
-              path: child.rawPath,
-              localModifiedAt: child.modifiedAt,
-              remoteModifiedAt: remoteFile?.modifiedAt
-            });
+              item.remote.children.push(remoteFolder);
+            }
 
-            continue;
-          }
+            q.push({ local: child, remote: remoteFolder });
+          } else {
+            const remoteFolder = item.remote.children.find(c => c._tag === 'folder' && c.name === child.name) as
+              | ProtonRecursiveFolder
+              | undefined;
 
-          if (remoteFile) {
-            const remoteSha = Option.isSome(remoteFile.sha1) ? remoteFile.sha1.value : null;
-            const snapshotSha = getSnapshotSha(storedRemoteFileStateSnapshot, child.rawPath);
+            if (remoteFolder) {
+              logger.warn('Detected push conflict due to local file and remote folder type mismatch', {
+                path: child.rawPath
+              });
+              const action = yield* resolveConflict({
+                reason: 'localFileRemoteFolderTypeMismatch',
+                path: child.rawPath
+              });
 
-            if (remoteSha !== null && snapshotSha !== null && snapshotSha !== undefined && remoteSha === snapshotSha) {
+              if (action === 'skip') {
+                continue;
+              }
+
+              syncOps.push({
+                type: 'deleteFolder',
+                details: { id: remoteFolder.id, rawPath: child.rawPath, applyMode: 'immediate' }
+              });
+              item.remote.children = item.remote.children.filter(candidate => candidate !== remoteFolder);
+            }
+
+            const remoteFile = item.remote.children.find(c => c._tag === 'file' && c.name === child.name) as
+              | ProtonFile
+              | undefined;
+
+            if (remoteFile && Option.isSome(remoteFile.sha1) && remoteFile.sha1.value === child.sha1) {
+              logger.debug('Skipping upload for same file', {
+                path: child.rawPath,
+                localModifiedAt: child.modifiedAt,
+                remoteModifiedAt: remoteFile?.modifiedAt
+              });
+
+              continue;
+            }
+
+            if (remoteFile) {
+              const remoteSha = Option.isSome(remoteFile.sha1) ? remoteFile.sha1.value : null;
+              const snapshotSha = getSnapshotSha(storedRemoteFileStateSnapshot, child.rawPath);
+
+              if (
+                remoteSha !== null &&
+                snapshotSha !== null &&
+                snapshotSha !== undefined &&
+                remoteSha === snapshotSha
+              ) {
+                syncOps.push({
+                  type: 'updateFile',
+                  details: {
+                    id: remoteFile.id,
+                    rawPath: child.rawPath,
+                    modifiedAt: child.modifiedAt,
+                    sha1: child.sha1
+                  }
+                });
+                continue;
+              }
+
+              if (remoteSha === null || snapshotSha === null || snapshotSha === undefined) {
+                logger.warn('Detected push conflict without a usable remote snapshot baseline', {
+                  path: child.rawPath,
+                  localSha1: child.sha1,
+                  remoteSha1: remoteSha,
+                  snapshotSha1: snapshotSha
+                });
+                const action = yield* resolveConflict({
+                  reason: 'missingSnapshotBaseline',
+                  path: child.rawPath
+                });
+
+                if (action === 'skip') {
+                  continue;
+                }
+              } else {
+                logger.warn('Detected push conflict', {
+                  path: child.rawPath,
+                  localSha1: child.sha1,
+                  remoteSha1: remoteSha,
+                  snapshotSha1: snapshotSha
+                });
+                const action = yield* resolveConflict({ reason: 'contentChanged', path: child.rawPath });
+
+                if (action === 'skip') {
+                  continue;
+                }
+              }
+
               syncOps.push({
                 type: 'updateFile',
                 details: {
@@ -807,168 +995,187 @@ class SyncService {
               continue;
             }
 
-            if (remoteSha === null || snapshotSha === null || snapshotSha === undefined) {
-              logger.warn('Detected push conflict without a usable remote snapshot baseline, skipping file', {
-                path: child.rawPath,
-                localSha1: child.sha1,
-                remoteSha1: remoteSha,
-                snapshotSha1: snapshotSha
-              });
-              continue;
-            }
-
-            logger.warn('Detected push conflict, skipping file', {
-              path: child.rawPath,
-              localSha1: child.sha1,
-              remoteSha1: remoteSha,
-              snapshotSha1: snapshotSha
+            syncOps.push({
+              type: 'uploadFile',
+              details: {
+                name: child.name,
+                rawPath: child.rawPath,
+                parentId: item.remote.id,
+                modifiedAt: child.modifiedAt,
+                sha1: child.sha1
+              }
             });
-            continue;
           }
-
-          syncOps.push({
-            type: 'uploadFile',
-            details: {
-              name: child.name,
-              rawPath: child.rawPath,
-              parentId: item.remote.id,
-              modifiedAt: child.modifiedAt,
-              sha1: child.sha1
-            }
-          });
         }
       }
-    }
 
-    return syncOps;
+      return syncOps;
+    });
   }
 
   #computePullCreationOperations(
     localRoot: VaultFolder,
     remoteRoot: ProtonRecursiveFolder,
     storedRemoteFileStateSnapshot: RemoteFileStateSnapshot | null,
-    logger: ReturnType<typeof getLogger>
-  ): { localFolderCreatePaths: Set<string>; localFileWrites: Map<string, LocalFileWrite> } {
-    const localFolderCreatePaths = new Set<string>();
-    const localFileWrites = new Map<string, LocalFileWrite>();
+    logger: ReturnType<typeof getLogger>,
+    resolveConflict: ConflictActionResolver
+  ): Effect.Effect<PullCreationPlan, never, never> {
+    return Effect.gen(this, function* () {
+      const localFolderCreatePaths = new Set<string>();
+      const localFileWrites = new Map<string, LocalFileWrite>();
+      const replacementFileDeletePaths = new Set<string>();
+      const replacementFolderDeletePaths = new Set<string>();
 
-    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder; relativePath: string }> = [
-      { local: localRoot, remote: remoteRoot, relativePath: '' }
-    ];
+      const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder; relativePath: string }> = [
+        { local: localRoot, remote: remoteRoot, relativePath: '' }
+      ];
 
-    while (q.length > 0) {
-      const item = q.shift();
-      if (!item) {
-        continue;
-      }
-
-      const localChildren = item.local.children.filter(child => !this.#isExcluded(child.rawPath));
-      const localFoldersByName = new Map<string, VaultFolder>();
-      const localFilesByName = new Map<string, (typeof localChildren)[number]>();
-
-      for (const child of localChildren) {
-        if (child._type === 'folder') {
-          localFoldersByName.set(child.name, child);
-        } else {
-          localFilesByName.set(child.name, child);
-        }
-      }
-
-      for (const remoteChild of item.remote.children) {
-        const localPath = normalizePath(
-          item.relativePath ? `${item.relativePath}/${remoteChild.name}` : remoteChild.name
-        );
-        if (!localPath) {
+      while (q.length > 0) {
+        const item = q.shift();
+        if (!item) {
           continue;
         }
 
-        if (remoteChild._tag === 'folder') {
-          const localFile = localFilesByName.get(remoteChild.name);
+        const localChildren = item.local.children.filter(child => !this.#isExcluded(child.rawPath));
+        const localFoldersByName = new Map<string, VaultFolder>();
+        const localFilesByName = new Map<string, (typeof localChildren)[number]>();
 
-          if (localFile && localFile._type === 'file') {
-            logger.warn('Detected pull conflict due to remote folder and local file type mismatch, skipping item', {
-              path: localPath
-            });
-            continue;
-          }
-
-          const localFolder = localFoldersByName.get(remoteChild.name);
-
-          if (!localFolder) {
-            localFolderCreatePaths.add(localPath);
-            q.push({
-              local: {
-                _type: 'folder',
-                name: remoteChild.name,
-                rawPath: localPath,
-                path: canonicalizePath(localPath),
-                children: []
-              },
-              remote: remoteChild,
-              relativePath: localPath
-            });
+        for (const child of localChildren) {
+          if (child._type === 'folder') {
+            localFoldersByName.set(child.name, child);
           } else {
-            q.push({ local: localFolder, remote: remoteChild, relativePath: localPath });
+            localFilesByName.set(child.name, child);
           }
-        } else {
-          const localFolder = localFoldersByName.get(remoteChild.name);
+        }
 
-          if (localFolder) {
-            logger.warn('Detected pull conflict due to remote file and local folder type mismatch, skipping item', {
-              path: localPath
-            });
+        for (const remoteChild of item.remote.children) {
+          const localPath = normalizePath(
+            item.relativePath ? `${item.relativePath}/${remoteChild.name}` : remoteChild.name
+          );
+          if (!localPath) {
             continue;
           }
 
-          const localFile = localFilesByName.get(remoteChild.name);
+          if (remoteChild._tag === 'folder') {
+            const localFile = localFilesByName.get(remoteChild.name);
 
-          if (!localFile || localFile._type !== 'file') {
+            if (localFile && localFile._type === 'file') {
+              logger.warn('Detected pull conflict due to remote folder and local file type mismatch', {
+                path: localPath
+              });
+              const action = yield* resolveConflict({
+                reason: 'remoteFolderLocalFileTypeMismatch',
+                path: localPath
+              });
+
+              if (action === 'skip') {
+                continue;
+              }
+
+              replacementFileDeletePaths.add(localPath);
+            }
+
+            const localFolder = localFoldersByName.get(remoteChild.name);
+
+            if (!localFolder) {
+              localFolderCreatePaths.add(localPath);
+              q.push({
+                local: {
+                  _type: 'folder',
+                  name: remoteChild.name,
+                  rawPath: localPath,
+                  path: canonicalizePath(localPath),
+                  children: []
+                },
+                remote: remoteChild,
+                relativePath: localPath
+              });
+            } else {
+              q.push({ local: localFolder, remote: remoteChild, relativePath: localPath });
+            }
+          } else {
+            const localFolder = localFoldersByName.get(remoteChild.name);
+
+            if (localFolder) {
+              logger.warn('Detected pull conflict due to remote file and local folder type mismatch', {
+                path: localPath
+              });
+              const action = yield* resolveConflict({
+                reason: 'remoteFileLocalFolderTypeMismatch',
+                path: localPath
+              });
+
+              if (action === 'skip') {
+                continue;
+              }
+
+              replacementFolderDeletePaths.add(localPath);
+            }
+
+            const localFile = localFilesByName.get(remoteChild.name);
+
+            if (!localFile || localFile._type !== 'file' || replacementFolderDeletePaths.has(localPath)) {
+              localFileWrites.set(localPath, {
+                rawPath: localPath,
+                remoteId: remoteChild.id,
+                remoteModifiedAt: remoteChild.modifiedAt
+              });
+              continue;
+            }
+
+            if (Option.isSome(remoteChild.sha1) && remoteChild.sha1.value === localFile.sha1) {
+              logger.debug('Local file is identical by SHA1, skipping download', { path: localFile.rawPath });
+              continue;
+            }
+
+            const remoteSha = Option.isSome(remoteChild.sha1) ? remoteChild.sha1.value : null;
+            const snapshotSha = getSnapshotSha(storedRemoteFileStateSnapshot, localPath);
+
+            if (remoteSha === null || snapshotSha === null || snapshotSha === undefined) {
+              logger.warn('Detected pull conflict without a usable remote snapshot baseline', {
+                path: localFile.rawPath,
+                localSha1: localFile.sha1,
+                remoteSha1: remoteSha,
+                snapshotSha1: snapshotSha
+              });
+              const action = yield* resolveConflict({
+                reason: 'missingSnapshotBaseline',
+                path: localPath
+              });
+
+              if (action === 'skip') {
+                continue;
+              }
+            } else if (localFile.sha1 !== snapshotSha) {
+              logger.warn('Detected pull conflict', {
+                path: localFile.rawPath,
+                localSha1: localFile.sha1,
+                remoteSha1: remoteSha,
+                snapshotSha1: snapshotSha
+              });
+              const action = yield* resolveConflict({ reason: 'contentChanged', path: localPath });
+
+              if (action === 'skip') {
+                continue;
+              }
+            }
+
             localFileWrites.set(localPath, {
               rawPath: localPath,
               remoteId: remoteChild.id,
               remoteModifiedAt: remoteChild.modifiedAt
             });
-            continue;
           }
-
-          if (Option.isSome(remoteChild.sha1) && remoteChild.sha1.value === localFile.sha1) {
-            logger.debug('Local file is identical by SHA1, skipping download', { path: localFile.rawPath });
-            continue;
-          }
-
-          const remoteSha = Option.isSome(remoteChild.sha1) ? remoteChild.sha1.value : null;
-          const snapshotSha = getSnapshotSha(storedRemoteFileStateSnapshot, localPath);
-
-          if (remoteSha === null || snapshotSha === null || snapshotSha === undefined) {
-            logger.warn('Detected pull conflict without a usable remote snapshot baseline, skipping file', {
-              path: localFile.rawPath,
-              localSha1: localFile.sha1,
-              remoteSha1: remoteSha,
-              snapshotSha1: snapshotSha
-            });
-            continue;
-          }
-
-          if (localFile.sha1 !== snapshotSha) {
-            logger.warn('Detected pull conflict, skipping file', {
-              path: localFile.rawPath,
-              localSha1: localFile.sha1,
-              remoteSha1: remoteSha,
-              snapshotSha1: snapshotSha
-            });
-            continue;
-          }
-
-          localFileWrites.set(localPath, {
-            rawPath: localPath,
-            remoteId: remoteChild.id,
-            remoteModifiedAt: remoteChild.modifiedAt
-          });
         }
       }
-    }
 
-    return { localFolderCreatePaths, localFileWrites };
+      return {
+        localFolderCreatePaths,
+        localFileWrites,
+        replacementFileDeletePaths,
+        replacementFolderDeletePaths
+      };
+    });
   }
 
   #computePullPruneOperations(
@@ -976,115 +1183,184 @@ class SyncService {
     remoteRoot: ProtonRecursiveFolder,
     prune: boolean,
     storedRemoteFileStateSnapshot: RemoteFileStateSnapshot | null,
-    logger: ReturnType<typeof getLogger>
-  ): { localFileDeletePaths: Set<string>; localFolderDeletePaths: Set<string> } {
-    const localFileDeletePaths = new Set<string>();
-    const localFolderDeletePaths = new Set<string>();
+    logger: ReturnType<typeof getLogger>,
+    resolveConflict: ConflictActionResolver
+  ): Effect.Effect<{ localFileDeletePaths: Set<string>; localFolderDeletePaths: Set<string> }, never, never> {
+    return Effect.gen(this, function* () {
+      const localFileDeletePaths = new Set<string>();
+      const localFolderDeletePaths = new Set<string>();
 
-    if (!prune) {
-      return { localFileDeletePaths, localFolderDeletePaths };
-    }
-
-    const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder }> = [{ local: localRoot, remote: remoteRoot }];
-
-    while (q.length > 0) {
-      const item = q.shift();
-      if (!item) {
-        continue;
+      if (!prune) {
+        return { localFileDeletePaths, localFolderDeletePaths };
       }
 
-      const localChildren = item.local.children.filter(child => !this.#isExcluded(child.rawPath));
-      const localFoldersByName = new Map<string, VaultFolder>();
-      const localFilesByName = new Map<string, (typeof localChildren)[number]>();
+      const q: Array<{ local: VaultFolder; remote: ProtonRecursiveFolder }> = [
+        { local: localRoot, remote: remoteRoot }
+      ];
 
-      for (const child of localChildren) {
-        if (child._type === 'folder') {
-          localFoldersByName.set(child.name, child);
-        } else {
-          localFilesByName.set(child.name, child);
-        }
-      }
-
-      for (const remoteChild of item.remote.children) {
-        if (remoteChild._tag === 'folder') {
-          const matchingLocalFolder = localFoldersByName.get(remoteChild.name);
-          const localFile = localFilesByName.get(remoteChild.name);
-
-          if (localFile && localFile._type === 'file') {
-            logger.warn('Detected pull conflict due to remote folder and local file type mismatch, skipping prune', {
-              path: localFile.rawPath
-            });
-          }
-
-          if (matchingLocalFolder) {
-            q.push({ local: matchingLocalFolder, remote: remoteChild });
-          }
-
+      while (q.length > 0) {
+        const item = q.shift();
+        if (!item) {
           continue;
         }
 
-        const localFolder = localFoldersByName.get(remoteChild.name);
-        if (localFolder) {
-          logger.warn('Detected pull conflict due to remote file and local folder type mismatch, skipping prune', {
-            path: localFolder.rawPath
-          });
-        }
-      }
+        const localChildren = item.local.children.filter(child => !this.#isExcluded(child.rawPath));
+        const localFoldersByName = new Map<string, VaultFolder>();
+        const localFilesByName = new Map<string, (typeof localChildren)[number]>();
 
-      for (const localChild of localChildren) {
-        const remoteMatch = item.remote.children.find(
-          remoteChild =>
-            remoteChild.name === localChild.name &&
-            ((remoteChild._tag === 'folder' && localChild._type === 'folder') ||
-              (remoteChild._tag === 'file' && localChild._type === 'file'))
-        );
-
-        if (remoteMatch) {
-          continue;
+        for (const child of localChildren) {
+          if (child._type === 'folder') {
+            localFoldersByName.set(child.name, child);
+          } else {
+            localFilesByName.set(child.name, child);
+          }
         }
 
-        if (localChild._type === 'folder') {
-          const conflictingLocalFilePath = findConflictingLocalPruneFilePath(localChild, storedRemoteFileStateSnapshot);
+        for (const remoteChild of item.remote.children) {
+          if (remoteChild._tag === 'folder') {
+            const matchingLocalFolder = localFoldersByName.get(remoteChild.name);
+            const localFile = localFilesByName.get(remoteChild.name);
 
-          if (conflictingLocalFilePath) {
-            logger.warn('Detected pull conflict while pruning local folder, skipping folder', {
-              path: localChild.rawPath,
-              conflictingPath: conflictingLocalFilePath
-            });
+            if (localFile && localFile._type === 'file') {
+              logger.warn('Detected pull conflict due to remote folder and local file type mismatch while pruning', {
+                path: localFile.rawPath
+              });
+              const action = yield* resolveConflict({
+                reason: 'pruneRemoteFolderLocalFileTypeMismatch',
+                path: localFile.rawPath
+              });
+
+              if (action === 'overwrite') {
+                localFileDeletePaths.add(localFile.rawPath);
+              }
+            }
+
+            if (matchingLocalFolder) {
+              q.push({ local: matchingLocalFolder, remote: remoteChild });
+            }
+
             continue;
           }
 
-          localFolderDeletePaths.add(localChild.rawPath);
-        } else {
-          const snapshotSha = getSnapshotSha(storedRemoteFileStateSnapshot, localChild.rawPath);
+          const localFolder = localFoldersByName.get(remoteChild.name);
+          if (localFolder) {
+            logger.warn('Detected pull conflict due to remote file and local folder type mismatch while pruning', {
+              path: localFolder.rawPath
+            });
+            const action = yield* resolveConflict({
+              reason: 'pruneRemoteFileLocalFolderTypeMismatch',
+              path: localFolder.rawPath
+            });
 
-          if (snapshotSha === null || snapshotSha === undefined) {
-            logger.warn(
-              'Detected pull conflict while pruning local file without a usable snapshot baseline, skipping file',
-              {
+            if (action === 'overwrite') {
+              localFolderDeletePaths.add(localFolder.rawPath);
+            }
+          }
+        }
+
+        for (const localChild of localChildren) {
+          const remoteMatch = item.remote.children.find(
+            remoteChild =>
+              remoteChild.name === localChild.name &&
+              ((remoteChild._tag === 'folder' && localChild._type === 'folder') ||
+                (remoteChild._tag === 'file' && localChild._type === 'file'))
+          );
+
+          if (remoteMatch) {
+            continue;
+          }
+
+          if (localChild._type === 'folder') {
+            const conflictingLocalFilePath = findConflictingLocalPruneFilePath(
+              localChild,
+              storedRemoteFileStateSnapshot
+            );
+
+            if (conflictingLocalFilePath) {
+              logger.warn('Detected pull conflict while pruning local folder', {
+                path: localChild.rawPath,
+                conflictingPath: conflictingLocalFilePath
+              });
+              const action = yield* resolveConflict({
+                reason: 'pruneFolderChanged',
+                path: localChild.rawPath,
+                conflictingPath: conflictingLocalFilePath
+              });
+
+              if (action === 'skip') {
+                continue;
+              }
+            }
+
+            localFolderDeletePaths.add(localChild.rawPath);
+          } else {
+            const snapshotSha = getSnapshotSha(storedRemoteFileStateSnapshot, localChild.rawPath);
+
+            if (snapshotSha === null || snapshotSha === undefined) {
+              logger.warn('Detected pull conflict while pruning local file without a usable snapshot baseline', {
                 path: localChild.rawPath,
                 localSha1: localChild.sha1,
                 snapshotSha1: snapshotSha
+              });
+              const action = yield* resolveConflict({
+                reason: 'pruneFileMissingSnapshotBaseline',
+                path: localChild.rawPath
+              });
+
+              if (action === 'skip') {
+                continue;
               }
-            );
-            continue;
-          }
+            } else if (localChild.sha1 !== snapshotSha) {
+              logger.warn('Detected pull conflict while pruning local file', {
+                path: localChild.rawPath,
+                localSha1: localChild.sha1,
+                snapshotSha1: snapshotSha
+              });
+              const action = yield* resolveConflict({ reason: 'pruneFileChanged', path: localChild.rawPath });
 
-          if (localChild.sha1 !== snapshotSha) {
-            logger.warn('Detected pull conflict while pruning local file, skipping file', {
-              path: localChild.rawPath,
-              localSha1: localChild.sha1,
-              snapshotSha1: snapshotSha
-            });
-            continue;
-          }
+              if (action === 'skip') {
+                continue;
+              }
+            }
 
-          localFileDeletePaths.add(localChild.rawPath);
+            localFileDeletePaths.add(localChild.rawPath);
+          }
         }
       }
-    }
 
-    return { localFileDeletePaths, localFolderDeletePaths };
+      return { localFileDeletePaths, localFolderDeletePaths };
+    });
+  }
+
+  #createConflictResolver(
+    direction: 'push' | 'pull',
+    conflictResolver: SyncConflictResolver | undefined,
+    logger: ReturnType<typeof getLogger>
+  ): ConflictActionResolver {
+    let rememberedAction: SyncConflictAction | null = null;
+
+    return conflict =>
+      Effect.gen(function* () {
+        if (rememberedAction) {
+          logger.info('Reusing remembered conflict resolution', {
+            direction,
+            path: conflict.path,
+            action: rememberedAction
+          });
+          return rememberedAction;
+        }
+
+        if (!conflictResolver) {
+          return 'skip';
+        }
+
+        const decision = yield* conflictResolver({ direction, ...conflict });
+        if (decision.applyToAll) {
+          rememberedAction = decision.action;
+        }
+
+        return decision.action;
+      });
   }
 
   #buildRemoteTree(

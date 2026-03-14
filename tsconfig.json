@@ -24,5 +24,13 @@
       }
     ]
   },
-  "include": ["main.ts", "types/**/*.d.ts"]
+  "include": [
+    "*.ts",
+    "i18n/**/*.ts",
+    "polyfills/**/*.ts",
+    "proton/**/*.ts",
+    "services/**/*.ts",
+    "types/**/*.d.ts",
+    "ui/**/*.ts"
+  ]
 }

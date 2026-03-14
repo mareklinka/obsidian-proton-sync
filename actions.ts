@@ -22,9 +22,15 @@ import { initProtonCloudObserver } from './services/ProtonCloudObserver';
 import type { ProtonFolder } from './services/ProtonDriveApi';
 import { getProtonDriveApi, initProtonDriveApi } from './services/ProtonDriveApi';
 import { beginSyncOperationCancellation, clearSyncOperationCancellation } from './services/SyncOperationCancellation';
-import { getSyncService, SyncAlreadyInProgressError, SyncCancelledError } from './services/SyncService';
+import {
+  getSyncService,
+  SyncAlreadyInProgressError,
+  SyncCancelledError,
+  type SyncConflictResolver
+} from './services/SyncService';
 import { promptFromModal } from './ui/modal-prompt';
 import { ProtonDriveConfirmModal } from './ui/modals/confirm-modal';
+import { ProtonDriveConflictResolutionModal } from './ui/modals/conflict-resolution-modal';
 import type { MasterPasswordModalMode } from './ui/modals/master-password-modal';
 import { ProtonDriveMasterPasswordModal } from './ui/modals/master-password-modal';
 import { getSyncProgressModal } from './ui/modals/sync-progress-modal';
@@ -62,7 +68,7 @@ export function pushVault(app: App): Effect.Effect<void, never, never> {
 
     new Notice(t.actions.notices.pushingStarted);
 
-    yield* syncService.push(confirmation.prune, operationController.signal).pipe(
+    yield* syncService.push(confirmation.prune, operationController.signal, createSyncConflictResolver(app)).pipe(
       Effect.tap(() =>
         Effect.sync(() => {
           progressModal.markCompleted();
@@ -145,7 +151,7 @@ export function pullVault(app: App): Effect.Effect<void, never, never> {
 
     new Notice(t.actions.notices.pullStarted);
 
-    yield* syncService.pull(confirmation.prune, operationController.signal).pipe(
+    yield* syncService.pull(confirmation.prune, operationController.signal, createSyncConflictResolver(app)).pipe(
       Effect.tap(() =>
         Effect.sync(() => {
           progressModal.markCompleted();
@@ -208,6 +214,19 @@ function confirmOperation(
 
     return { confirmed: confirmation.value.confirmed, prune: confirmation.value.toggleValue };
   });
+}
+
+function createSyncConflictResolver(app: App): SyncConflictResolver {
+  return conflict =>
+    Effect.gen(function* () {
+      const resolution = yield* promptFromModal(app, _ => new ProtonDriveConflictResolutionModal(_, conflict));
+
+      if (Option.isNone(resolution)) {
+        return { action: 'skip' as const, applyToAll: false };
+      }
+
+      return resolution.value;
+    });
 }
 
 function prepareSyncOperation(app: App, signal: AbortSignal): Effect.Effect<boolean, never, never> {
