@@ -5,7 +5,7 @@ import { Subject } from 'rxjs';
 
 import type { ProtonSession } from '../proton/auth/ProtonSession';
 import { getLogger } from './ConsoleLogger';
-import { bcryptBase64Encode, bcryptHashWithSalt } from './CryptoHelpers';
+import { bcryptBase64Encode, bcryptHashWithSalt, randomBytes } from './CryptoHelpers';
 import { getObsidianSecretStore, type ObsidianSecretKey } from './ObsidianSecretStore';
 
 const ENCRYPTION_VERSION = 1;
@@ -433,12 +433,6 @@ async function deriveAesKey(masterPassword: string, saltBytes: Uint8Array): Prom
   const rawKey = Uint8Array.from(sha256(new TextEncoder().encode(bcryptOutput)));
 
   return globalThis.crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
-}
-
-function randomBytes(byteLength: number): Uint8Array {
-  const bytes = new Uint8Array(byteLength);
-  globalThis.crypto.getRandomValues(bytes);
-  return bytes;
 }
 
 function toBase64(bytes: Uint8Array): string {

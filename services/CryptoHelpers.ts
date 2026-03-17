@@ -49,3 +49,9 @@ export function bcryptHashWithSalt(password: string, salt: string, rounds: numbe
     return bcrypt.hashSync(password, `$2b$${roundsToken}$${salt}`);
   }
 }
+
+export function randomBytes(byteLength: number): Uint8Array {
+  const bytes = new Uint8Array(byteLength);
+  globalThis.crypto.getRandomValues(bytes);
+  return bytes;
+}

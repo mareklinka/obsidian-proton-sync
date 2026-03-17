@@ -477,7 +477,7 @@ class ProtonSessionService {
     return Effect.gen(this, function* () {
       const mailboxPassword = yield* requestMailboxPassword();
       if (Option.isNone(mailboxPassword) || !mailboxPassword.value.trim()) {
-        return yield* Effect.fail(new EncryptionPasswordRequiredError());
+        return yield* new EncryptionPasswordRequiredError();
       }
 
       return mailboxPassword.value;

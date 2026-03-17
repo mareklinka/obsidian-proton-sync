@@ -4,7 +4,7 @@ import { sha512 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import * as openpgp from 'openpgp';
 
-import { bcryptBase64Encode, bcryptHashWithSalt } from '../../services/CryptoHelpers';
+import { bcryptBase64Encode, bcryptHashWithSalt, randomBytes } from '../../services/CryptoHelpers';
 
 export interface ProtonAuthInfo {
   Version: number;
@@ -285,12 +285,6 @@ function generateClientSecret(bitLength: number, modulus: bigint): bigint {
       return candidate;
     }
   }
-}
-
-function randomBytes(byteLength: number): Uint8Array {
-  const bytes = new Uint8Array(byteLength);
-  globalThis.crypto.getRandomValues(bytes);
-  return bytes;
 }
 
 function computeMultiplier(bitLength: number, generator: bigint, modulus: bigint): bigint {
