@@ -25,7 +25,7 @@ export const { init: initProtonDriveClient, get: getProtonDriveClient } = (funct
         openPGPCryptoModule: createOpenPgpCrypto(),
         srpModule: new PlaceholderSrpModule(),
         latestEventIdProvider: {
-          getLatestEventId: (): string | null =>
+          getLatestEventId: async (): Promise<string | null> =>
             Option.match(getObsidianSettingsStore().get('latestEventId'), {
               onSome: latestEventId => latestEventId.eventId,
               onNone: () => null
