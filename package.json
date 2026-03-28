@@ -32,7 +32,7 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",
-    "@protontech/drive-sdk": "^0.14.0",
+    "@protontech/drive-sdk": "^0.14.1",
     "bcryptjs": "^3.0.3",
     "buffer": "^6.0.3",
     "effect": "^3.21.0",
@@ -41,13 +41,13 @@
     "rxjs": "^7.8.2"
   },
   "devDependencies": {
-    "@effect/language-service": "^0.82.0",
+    "@effect/language-service": "^0.84.1",
     "@eslint/js": "10.0.1",
     "@openpgp/web-stream-tools": "^0.3.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^25.5.0",
     "@types/picomatch": "^4.0.2",
-    "@vitest/coverage-v8": "^4.1.1",
+    "@vitest/coverage-v8": "^4.1.2",
     "esbuild": "^0.27.4",
     "eslint": "10.1.0",
     "eslint-config-prettier": "^10.1.8",
@@ -60,6 +60,6 @@
     "prettier": "^3.8.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.2",
-    "vitest": "^4.1.1"
+    "vitest": "^4.1.2"
   }
 }
