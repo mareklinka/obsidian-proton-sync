@@ -284,7 +284,7 @@ class OpenPgpCryptoProxy implements OpenPGPCryptoProxy {
     armoredSignature?: string;
     binarySignature?: Uint8Array<ArrayBuffer>;
     verificationKeys: PublicKey | Array<PublicKey>;
-    signatureContext?: { critical: boolean; value: string };
+    signatureContext?: { required: boolean; value: string };
   }): Promise<{ verificationStatus: VERIFICATION_STATUS; errors?: Array<Error> }> {
     const message = await openpgp.createMessage({ binary: options.binaryData });
     const signature = options.armoredSignature

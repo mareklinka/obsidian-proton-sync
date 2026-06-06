@@ -42,7 +42,7 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     super(plugin.app, plugin);
   }
 
-  public async display(): Promise<void> {
+  public override async display(): Promise<void> {
     const settingsStore = getObsidianSettingsStore();
     const { containerEl } = this;
 
