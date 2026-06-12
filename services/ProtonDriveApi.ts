@@ -1,4 +1,4 @@
-import type { MaybeNode, ProtonDriveClient, UploadMetadata } from '@protontech/drive-sdk';
+import type { NodeEntity, NodeResult, ProtonDriveClient, UploadMetadata } from '@protontech/drive-sdk';
 import { NodeType, ValidationError } from '@protontech/drive-sdk';
 import { APICodeError } from '@protontech/drive-sdk/dist/internal/apiService';
 import { Effect, Option } from 'effect';
@@ -60,16 +60,16 @@ class ProtonDriveApi {
 
   public getRootFolder(): Effect.Effect<ProtonFolder, MyFilesRootFilesNotFound | GenericProtonDriveError> {
     return Effect.gen(this, function* () {
-      const node = yield* Effect.tryPromise<MaybeNode, GenericProtonDriveError>({
+      const node = yield* Effect.tryPromise<NodeEntity, GenericProtonDriveError>({
         try: async () => await this.client.getMyFilesRootFolder(),
         catch: () => new GenericProtonDriveError()
       });
 
-      if (!node.ok) {
+      if (!node.name.ok) {
         throw new MyFilesRootFilesNotFound();
       }
 
-      return ProtonDriveApi.#createFolderFromNode(node.value);
+      return ProtonDriveApi.#createFolderFromNode({ ...node, name: node.name });
     });
   }
 
@@ -77,16 +77,17 @@ class ProtonDriveApi {
     return Effect.tryPromise({
       try: async () => {
         const shares: Array<ProtonFolder> = [];
-        for await (const share of this.client.iterateSharedNodesWithMe()) {
-          if (!share.ok) {
+        for await (const shareUid of this.client.iterateSharedWithMeNodeUids()) {
+          const share = await this.client.getNode(shareUid);
+          if (!share.name.ok) {
             continue;
           }
 
-          if (share.value.type !== NodeType.Folder) {
+          if (share.type !== NodeType.Folder) {
             continue;
           }
 
-          shares.push(ProtonDriveApi.#createFolderFromNode(share.value));
+          shares.push(ProtonDriveApi.#createFolderFromNode({ ...share, name: share.name }));
         }
 
         return shares;
@@ -107,17 +108,24 @@ class ProtonDriveApi {
         this.#throwIfCancelled(signal);
 
         const children: Array<ProtonFile | ProtonFolder> = [];
-        for await (const child of this.client.iterateFolderChildren(folderId.uid, undefined, signal)) {
+        for await (const childUid of this.client.iterateFolderChildrenNodeUids(folderId.uid, undefined, signal)) {
           this.#throwIfCancelled(signal);
 
-          if (!child.ok) {
+          const child = await this.client.getNode(childUid);
+
+          if (!child.name.ok) {
             continue;
           }
 
-          if (child.value.type === NodeType.Folder) {
-            children.push(ProtonDriveApi.#createFolderFromNode(child.value));
-          } else if (child.value.type === NodeType.File) {
-            children.push(ProtonDriveApi.#createFileFromNode(child.value));
+          if (child.type === NodeType.Folder) {
+            children.push(ProtonDriveApi.#createFolderFromNode({ ...child, name: child.name }));
+          } else if (child.type === NodeType.File) {
+            if (child.activeRevision !== undefined && !child.activeRevision.ok) {
+              continue;
+            }
+            children.push(
+              ProtonDriveApi.#createFileFromNode({ ...child, name: child.name, activeRevision: child.activeRevision })
+            );
           }
         }
 
@@ -145,15 +153,16 @@ class ProtonDriveApi {
         this.#throwIfCancelled(signal);
 
         const node = await this.client.getNode(id.uid);
-        if (!node.ok) {
-          return Option.none();
-        }
 
-        if (node.value.type !== NodeType.Folder) {
+        if (node.type !== NodeType.Folder) {
           throw new NotAFolderError();
         }
 
-        return Option.some(ProtonDriveApi.#createFolderFromNode(node.value));
+        if (!node.name.ok) {
+          return Option.none();
+        }
+
+        return Option.some(ProtonDriveApi.#createFolderFromNode({ ...node, name: node.name }));
       },
       catch: error => {
         if (error instanceof ProtonRequestCancelledError || this.#isAbortError(error)) {
@@ -181,12 +190,12 @@ class ProtonDriveApi {
         for await (const child of this.client.iterateFolderChildren(parentId.uid, { type: NodeType.Folder }, signal)) {
           this.#throwIfCancelled(signal);
 
-          if (!child.ok) {
+          if (!child.name.ok) {
             continue;
           }
 
-          if (child.value.name === name) {
-            return Option.some(ProtonDriveApi.#createFolderFromNode(child.value));
+          if (child.name.value === name) {
+            return Option.some(ProtonDriveApi.#createFolderFromNode({ ...child, name: child.name }));
           }
         }
 
@@ -216,11 +225,11 @@ class ProtonDriveApi {
 
         const result = await this.client.createFolder(parentId.uid, name, new Date());
 
-        if (!result.ok) {
+        if (!result.name.ok) {
           throw new GenericProtonDriveError();
         }
 
-        return ProtonDriveApi.#createFolderFromNode(result.value);
+        return ProtonDriveApi.#createFolderFromNode({ ...result, name: result.name });
       },
       catch: error => {
         if (error instanceof ProtonRequestCancelledError || this.#isAbortError(error)) {
@@ -409,7 +418,7 @@ class ProtonDriveApi {
   }
 
   async #consumeAllResults(
-    generator: AsyncGenerator<{ uid: string; ok: boolean; error?: string }>,
+    generator: AsyncGenerator<NodeResult>,
     signal?: AbortSignal
   ): Promise<Array<{ uid: string; ok: boolean; error?: string }>> {
     const results: Array<{ uid: string; ok: boolean; error?: string }> = [];
@@ -422,7 +431,15 @@ class ProtonDriveApi {
         break;
       }
 
-      results.push(next.value);
+      results.push({
+        ok: next.value.ok,
+        uid: next.value.uid,
+        error: next.value.ok
+          ? undefined
+          : next.value.error instanceof Error
+            ? next.value.error.message
+            : String(next.value.error)
+      });
     }
 
     await generator.return(undefined);
@@ -453,14 +470,14 @@ class ProtonDriveApi {
   }
 
   static #createFolderFromNode(node: {
-    name: string;
+    name: { ok: true; value: string };
     uid: string;
     treeEventScopeId: string;
     parentUid?: string;
   }): ProtonFolder {
     return {
       _tag: 'folder',
-      name: node.name,
+      name: node.name.value,
       id: new ProtonFolderId(node.uid),
       treeEventScopeId: new TreeEventScopeId(node.treeEventScopeId),
       parentId: node.parentUid ? Option.some(new ProtonFolderId(node.parentUid)) : Option.none()
@@ -468,24 +485,20 @@ class ProtonDriveApi {
   }
 
   static #createFileFromNode(node: {
-    name: string;
+    name: { ok: true; value: string };
     uid: string;
     treeEventScopeId: string;
     modificationTime: Date;
     parentUid?: string;
-    activeRevision?: {
-      claimedDigests?: {
-        sha1?: string;
-      };
-    };
+    activeRevision?: { ok: true; value: { claimedDigests?: { sha1?: string } } };
   }): ProtonFile {
     return {
       _tag: 'file',
-      name: node.name,
+      name: node.name.value,
       id: new ProtonFileId(node.uid),
       modifiedAt: node.modificationTime,
       parentId: node.parentUid ? Option.some(new ProtonFolderId(node.parentUid)) : Option.none(),
-      sha1: Option.fromNullable(node.activeRevision?.claimedDigests?.sha1)
+      sha1: Option.fromNullable(node.activeRevision?.value?.claimedDigests?.sha1)
     };
   }
 }
