@@ -1,0 +1,79 @@
+name: proton-drive-sync-opencode
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    volumes:
+      - proton-drive-sync-opencode-data:/root/.local/share/opencode
+      # mount the source code into the container for live development
+      - ../../:/source
+      # these are security features
+      # mount the .git directory read-only to prevent the model from tampering with the git history
+      - ../../.git:/source/.git:ro
+      # same thing for the opencode configuration file
+      - ../opencode.base.json:/source/.opencode/opencode.json:ro
+      - ../opencode.local.json:/home/root/.config/opencode/local/opencode.json:ro
+      # and this hides the whole .opencode/container config from the model
+      - ./nonexistent:/source/.opencode/container:ro
+    working_dir: /source
+    stdin_open: true
+    tty: true
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ['opencode', 'web', '--port', '10000', '--hostname', '0.0.0.0', '--print-logs']
+    # some sensitive environment variables are passed via an .env file, which is not checked into source control
+    # these include
+    #  - NUGET_API_KEY (to allow non-interactive nuget restore)
+    #  - ADO_MCP_AUTH_TOKEN (for ADO MCP server)
+    environment:
+      # Route all HTTP/HTTPS traffic through the proxy
+      - HTTP_PROXY=http://web-proxy:3128
+      - HTTPS_PROXY=http://web-proxy:3128
+      - NO_PROXY=127.0.0.1,localhost,*.local,host-proxy
+      - OPENCODE_CONFIG_DIR=/home/root/.config/opencode/local
+      - OPENCODE_DISABLE_MODELS_FETCH=1
+    networks:
+      - internal
+    depends_on:
+      - web-proxy
+      - host-proxy
+
+  # Outbound HTTP/HTTPS proxy with domain whitelisting
+  web-proxy:
+    image: ubuntu/squid
+    init: true
+    volumes:
+      - ./squid.conf:/etc/squid/squid.conf:ro
+    networks:
+      - internal
+      - bridge_host # proxy bridges internal ↔ host for backend traffic
+
+  host-proxy:
+    image: nginx:alpine
+    ports:
+      - '10000:10000'
+    volumes:
+      - ./nginx.conf.template:/etc/nginx/conf.d/default.conf.template:ro
+      - ./nginx-entrypoint.sh:/etc/nginx/conf.d/entrypoint.sh:ro
+    environment:
+      - LOCAL_LLM_HOST_PORT=${LOCAL_LLM_HOST_PORT}
+    entrypoint:
+      - /bin/sh
+      - /etc/nginx/conf.d/entrypoint.sh
+    init: true
+    networks:
+      - internal
+      - bridge_host
+
+networks:
+  internal:
+    internal: true
+  bridge_host:
+    driver: bridge
+
+volumes:
+  proton-drive-sync-opencode-data:

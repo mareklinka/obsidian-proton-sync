@@ -3,3 +3,6 @@ main.js
 main.js.map
 data.json
 coverage/
+.opencode/opencode.local.json
+.opencode/opencode.json
+.opencode/container/.env

@@ -1,0 +1,50 @@
+events {}
+
+http {
+    upstream opencode {
+        server dev:10000;
+    }
+
+    server {
+        listen 10000;
+        server_name _;
+
+        location / {
+            proxy_pass http://opencode;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+            # WebSocket / SSE support
+            proxy_buffering off;
+            proxy_read_timeout 86400s;
+            proxy_send_timeout 86400s;
+        }
+    }
+
+    server {
+        # only listen on the LLM port if actually provided - handled by the entrypoint script
+        ${LLM_LISTEN_DIRECTIVE}
+
+        server_name _;
+
+        resolver ${NGINX_RESOLVER} valid=30s;
+
+        location / {
+            proxy_pass http://${HOST_GATEWAY}:$server_port;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+            proxy_buffering off;
+            proxy_read_timeout 86400s;
+            proxy_send_timeout 86400s;
+        }
+    }
+}
