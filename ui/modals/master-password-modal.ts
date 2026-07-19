@@ -1,4 +1,5 @@
 import type { App } from 'obsidian';
+import type { ButtonComponent } from 'obsidian';
 import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
@@ -15,6 +16,7 @@ export class ProtonDriveMasterPasswordModal extends Modal {
 
   #masterPassword = '';
   #didResolve = false;
+  #submitButton: ButtonComponent | null = null;
 
   public constructor(
     app: App,
@@ -67,20 +69,20 @@ export class ProtonDriveMasterPasswordModal extends Modal {
         text.onChange(value => {
           this.#masterPassword = value;
         });
+        text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (e.key === 'Enter') {
+            this.#submit();
+          }
+        });
       });
 
-    new Setting(contentEl).addButton(button =>
+    new Setting(contentEl).addButton(button => {
+      this.#submitButton = button;
       button
         .setButtonText(submitButtonText)
         .setCta()
-        .onClick(() => {
-          this.#didResolve = true;
-          button.setButtonText(t.modals.masterPassword.processingButton).setDisabled(true);
-          this.#submittedSubject.next(this.#masterPassword);
-          this.#clearSensitiveInputs();
-          this.close();
-        })
-    );
+        .onClick(() => this.#submit());
+    });
   }
 
   public override onClose(): void {
@@ -89,6 +91,17 @@ export class ProtonDriveMasterPasswordModal extends Modal {
     }
 
     this.#clearSensitiveInputs();
+  }
+
+  #submit(): void {
+    this.#didResolve = true;
+    if (this.#submitButton) {
+      const { t } = getI18n();
+      this.#submitButton.setButtonText(t.modals.masterPassword.processingButton).setDisabled(true);
+    }
+    this.#submittedSubject.next(this.#masterPassword);
+    this.#clearSensitiveInputs();
+    this.close();
   }
 
   #clearSensitiveInputs(): void {

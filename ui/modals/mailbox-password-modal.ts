@@ -38,18 +38,18 @@ export class ProtonDriveMailboxPasswordModal extends Modal {
         text.onChange(value => {
           this.#mailboxPassword = value;
         });
+        text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (e.key === 'Enter') {
+            this.#submit();
+          }
+        });
       });
 
     new Setting(contentEl).addButton(button =>
       button
         .setButtonText(t.modals.mailboxPassword.submit)
         .setCta()
-        .onClick(() => {
-          this.#didResolve = true;
-          this.#submittedSubject.next(this.#mailboxPassword);
-          this.#clearSensitiveInputs();
-          this.close();
-        })
+        .onClick(() => this.#submit())
     );
   }
 
@@ -59,6 +59,13 @@ export class ProtonDriveMailboxPasswordModal extends Modal {
     }
 
     this.#clearSensitiveInputs();
+  }
+
+  #submit(): void {
+    this.#didResolve = true;
+    this.#submittedSubject.next(this.#mailboxPassword);
+    this.#clearSensitiveInputs();
+    this.close();
   }
 
   #clearSensitiveInputs(): void {

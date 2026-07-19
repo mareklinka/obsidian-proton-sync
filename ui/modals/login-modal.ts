@@ -41,6 +41,11 @@ export class ProtonDriveLoginModal extends Modal {
           .onChange(value => {
             this.#email = value.trim();
           })
+          .inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+              this.#submit();
+            }
+          })
       );
 
     new Setting(contentEl)
@@ -57,19 +62,21 @@ export class ProtonDriveLoginModal extends Modal {
       button
         .setButtonText(t.modals.login.submit)
         .setCta()
-        .onClick(async () => {
-          this.#loginSubject.next({
-            email: this.#email,
-            password: this.#password
-          });
-          this.#clearSensitiveInputs();
-          this.close();
-        })
+        .onClick(() => this.#submit())
     );
   }
 
   public override onClose(): void {
     this.#clearSensitiveInputs();
+  }
+
+  #submit(): void {
+    this.#loginSubject.next({
+      email: this.#email,
+      password: this.#password
+    });
+    this.#clearSensitiveInputs();
+    this.close();
   }
 
   #clearSensitiveInputs(): void {

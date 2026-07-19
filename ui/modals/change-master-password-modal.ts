@@ -1,4 +1,5 @@
 import type { App } from 'obsidian';
+import type { ButtonComponent } from 'obsidian';
 import { Modal, Notice, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
@@ -16,6 +17,7 @@ export class ProtonDriveChangeMasterPasswordModal extends Modal {
   #currentPassword = '';
   #newPassword = '';
   #confirmPassword = '';
+  #submitButton: ButtonComponent | null = null;
 
   public constructor(app: App) {
     super(app);
@@ -39,6 +41,11 @@ export class ProtonDriveChangeMasterPasswordModal extends Modal {
       text.onChange(value => {
         this.#currentPassword = value;
       });
+      text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+          this.#submit();
+        }
+      });
     });
 
     new Setting(contentEl)
@@ -49,6 +56,11 @@ export class ProtonDriveChangeMasterPasswordModal extends Modal {
         text.onChange(value => {
           this.#newPassword = value;
         });
+        text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+          if (e.key === 'Enter') {
+            this.#submit();
+          }
+        });
       });
 
     new Setting(contentEl).setName(t.modals.changeMasterPassword.confirmPasswordName).addText(text => {
@@ -56,41 +68,53 @@ export class ProtonDriveChangeMasterPasswordModal extends Modal {
       text.onChange(value => {
         this.#confirmPassword = value;
       });
+      text.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+          this.#submit();
+        }
+      });
     });
 
-    new Setting(contentEl).addButton(button =>
+    new Setting(contentEl).addButton(button => {
+      this.#submitButton = button;
       button
         .setButtonText(t.modals.changeMasterPassword.submitButton)
         .setCta()
-        .onClick(() => {
-          if (!this.#currentPassword.trim() || !this.#newPassword.trim() || !this.#confirmPassword.trim()) {
-            new Notice(t.modals.changeMasterPassword.validationRequired);
-            return;
-          }
-
-          if (this.#newPassword !== this.#confirmPassword) {
-            new Notice(t.modals.changeMasterPassword.validationMismatch);
-            return;
-          }
-
-          if (this.#currentPassword === this.#newPassword) {
-            new Notice(t.modals.changeMasterPassword.validationSamePassword);
-            return;
-          }
-
-          button.setButtonText(t.modals.changeMasterPassword.processingButton).setDisabled(true);
-          this.#submittedSubject.next({
-            currentPassword: this.#currentPassword,
-            newPassword: this.#newPassword
-          });
-          this.#clearSensitiveInputs();
-          this.close();
-        })
-    );
+        .onClick(() => this.#submit());
+    });
   }
 
   public override onClose(): void {
     this.#clearSensitiveInputs();
+  }
+
+  #submit(): void {
+    const { t } = getI18n();
+
+    if (!this.#currentPassword.trim() || !this.#newPassword.trim() || !this.#confirmPassword.trim()) {
+      new Notice(t.modals.changeMasterPassword.validationRequired);
+      return;
+    }
+
+    if (this.#newPassword !== this.#confirmPassword) {
+      new Notice(t.modals.changeMasterPassword.validationMismatch);
+      return;
+    }
+
+    if (this.#currentPassword === this.#newPassword) {
+      new Notice(t.modals.changeMasterPassword.validationSamePassword);
+      return;
+    }
+
+    if (this.#submitButton) {
+      this.#submitButton.setButtonText(t.modals.changeMasterPassword.processingButton).setDisabled(true);
+    }
+    this.#submittedSubject.next({
+      currentPassword: this.#currentPassword,
+      newPassword: this.#newPassword
+    });
+    this.#clearSensitiveInputs();
+    this.close();
   }
 
   #clearSensitiveInputs(): void {

@@ -34,21 +34,23 @@ export class ProtonDriveTwoFactorModal extends Modal {
       .setName(t.modals.twoFactor.codeName)
       .setDesc(t.modals.twoFactor.codeDescription)
       .addText(text =>
-        text.setPlaceholder(t.modals.twoFactor.codePlaceholder).onChange(value => {
-          this.#twoFactorCode = value.trim();
-        })
+        text
+          .setPlaceholder(t.modals.twoFactor.codePlaceholder)
+          .onChange(value => {
+            this.#twoFactorCode = value.trim();
+          })
+          .inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+            if (e.key === 'Enter') {
+              this.#submit();
+            }
+          })
       );
 
     new Setting(contentEl).addButton(button =>
       button
         .setButtonText(t.modals.twoFactor.submit)
         .setCta()
-        .onClick(() => {
-          this.#didResolve = true;
-          this.#submittedSubject.next(this.#twoFactorCode);
-          this.#clearSensitiveInputs();
-          this.close();
-        })
+        .onClick(() => this.#submit())
     );
   }
 
@@ -58,6 +60,13 @@ export class ProtonDriveTwoFactorModal extends Modal {
     }
 
     this.#clearSensitiveInputs();
+  }
+
+  #submit(): void {
+    this.#didResolve = true;
+    this.#submittedSubject.next(this.#twoFactorCode);
+    this.#clearSensitiveInputs();
+    this.close();
   }
 
   #clearSensitiveInputs(): void {

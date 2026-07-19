@@ -30,6 +30,12 @@ export class ProtonDriveConfirmModal extends Modal {
 
     contentEl.createEl('h2', { text: this.title });
 
+    contentEl.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        this.#submit();
+      }
+    });
+
     let setting: Setting | null = null;
 
     new Setting(contentEl)
@@ -55,6 +61,12 @@ export class ProtonDriveConfirmModal extends Modal {
     }
   }
 
+  #submit(): void {
+    this.#didResolve = true;
+    this.#submittedSubject.next({ confirmed: true, toggleValue: this.#toggleValue });
+    this.close();
+  }
+
   #createButtons(setting: Setting, warn: boolean): void {
     const { t } = getI18n();
     const buttonFormat = warn
@@ -63,11 +75,7 @@ export class ProtonDriveConfirmModal extends Modal {
 
     setting
       .addButton(b => {
-        b.setButtonText(this.confirmLabel).onClick(() => {
-          this.#didResolve = true;
-          this.#submittedSubject.next({ confirmed: true, toggleValue: this.#toggleValue });
-          this.close();
-        });
+        b.setButtonText(this.confirmLabel).onClick(() => this.#submit());
         buttonFormat(b);
       })
       .addExtraButton(button =>
