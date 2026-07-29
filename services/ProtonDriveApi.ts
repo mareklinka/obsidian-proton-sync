@@ -120,7 +120,7 @@ class ProtonDriveApi {
           if (child.type === NodeType.Folder) {
             children.push(ProtonDriveApi.#createFolderFromNode({ ...child, name: child.name }));
           } else if (child.type === NodeType.File) {
-            if (child.activeRevision !== undefined && !child.activeRevision.ok) {
+            if ((child.errors?.length ?? 0) > 0 || child.activeRevision === undefined) {
               continue;
             }
             children.push(
@@ -490,7 +490,7 @@ class ProtonDriveApi {
     treeEventScopeId: string;
     modificationTime: Date;
     parentUid?: string;
-    activeRevision?: { ok: true; value: { claimedDigests?: { sha1?: string } } };
+    activeRevision?: { claimedDigests?: { sha1?: string } };
   }): ProtonFile {
     return {
       _tag: 'file',
@@ -498,7 +498,7 @@ class ProtonDriveApi {
       id: new ProtonFileId(node.uid),
       modifiedAt: node.modificationTime,
       parentId: node.parentUid ? Option.some(new ProtonFolderId(node.parentUid)) : Option.none(),
-      sha1: Option.fromNullable(node.activeRevision?.value?.claimedDigests?.sha1)
+      sha1: Option.fromNullable(node.activeRevision?.claimedDigests?.sha1)
     };
   }
 }
