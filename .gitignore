@@ -6,3 +6,5 @@ coverage/
 .opencode/opencode.local.json
 .opencode/opencode.json
 .opencode/container/.env
+.opencode/container/squid/squid-cert/squid-cert.pem
+.opencode/container/squid/squid-cert/squid-key.pem
