@@ -64,7 +64,7 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     };
 
     if (request.method === 'POST') {
-      getLogger('ObsidianHttpClient').debug('Making POST request', request, h);
+      getLogger('ObsidianHttpClient').debug('Making POST request', request, this.#redactHeaders(h));
     }
 
     const response = await requestUrl(r);
@@ -146,6 +146,17 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     headers.forEach((value, key) => {
       output[key] = value;
     });
+    return output;
+  }
+
+  #redactHeaders(headers: Record<string, string>): Record<string, string> {
+    const redactedKeys = new Set(['authorization', 'x-pm-uid']);
+    const output: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(headers)) {
+      output[key] = redactedKeys.has(key.toLowerCase()) ? '[REDACTED]' : value;
+    }
+
     return output;
   }
 }
