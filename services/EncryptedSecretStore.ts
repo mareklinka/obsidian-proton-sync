@@ -125,48 +125,9 @@ class EncryptedSecretStore {
     return Effect.gen(this, function* () {
       this.#logger.info('Changing master password for persisted session data');
 
-      const storedSession = this.baseStore.get(SESSION_STORAGE_KEY);
-      const storedSaltedPassphrases = this.baseStore.get(SALTED_PASSPHRASES_SECRET_KEY);
+      const data = yield* this.#readPersistedSessionData(currentMasterPassword);
 
-      if (
-        !storedSession ||
-        storedSession.trim() === '' ||
-        !storedSaltedPassphrases ||
-        storedSaltedPassphrases.trim() === ''
-      ) {
-        return yield* new PersistedSecretsInvalidFormatError();
-      }
-
-      if (!this.#isEncryptedEnvelopeJson(storedSession) || !this.#isEncryptedEnvelopeJson(storedSaltedPassphrases)) {
-        yield* this.clearSessionData();
-        return yield* new PersistedSecretsInvalidFormatError();
-      }
-
-      const decryptedSession = yield* this.#decryptSecretJson('session', storedSession, currentMasterPassword);
-      const decryptedSaltedPassphrases = yield* this.#decryptSecretJson(
-        'salted-passphrases',
-        storedSaltedPassphrases,
-        currentMasterPassword
-      );
-
-      const parsedSession = yield* parseSessionJson(decryptedSession);
-      const parsedSaltedPassphrases = yield* parseSaltedPassphrasesJson(decryptedSaltedPassphrases);
-
-      const session: ProtonSession = {
-        ...parsedSession,
-        createdAt: new Date(parsedSession.createdAt),
-        updatedAt: new Date(parsedSession.updatedAt),
-        expiresAt: new Date(parsedSession.expiresAt),
-        lastRefreshAt: new Date(parsedSession.lastRefreshAt)
-      };
-
-      yield* this.persistSessionData(
-        {
-          session,
-          saltedPassphrases: parsedSaltedPassphrases
-        },
-        newMasterPassword
-      );
+      yield* this.persistSessionData(data, newMasterPassword);
     });
   }
 
@@ -179,6 +140,19 @@ class EncryptedSecretStore {
         return this.#unlockedSessionData.value;
       }
 
+      const data = yield* this.#readPersistedSessionData(masterPassword);
+
+      this.#unlockedSessionData = Option.some(data);
+      this.cancelScheduledLock();
+
+      return data;
+    });
+  }
+
+  #readPersistedSessionData(
+    masterPassword: string
+  ): Effect.Effect<EncryptedPersistedSessionData, PersistedSecretsInvalidFormatError | SecretDecryptionFailedError> {
+    return Effect.gen(this, function* () {
       const storedSession = this.baseStore.get(SESSION_STORAGE_KEY);
       const storedSaltedPassphrases = this.baseStore.get(SALTED_PASSPHRASES_SECRET_KEY);
 
@@ -204,20 +178,17 @@ class EncryptedSecretStore {
       );
 
       const parsedSession = yield* parseSessionJson(decryptedSession);
-      const session = {
+      const saltedPassphrases = yield* parseSaltedPassphrasesJson(decryptedSaltedPassphrases);
+
+      const session: ProtonSession = {
         ...parsedSession,
         createdAt: new Date(parsedSession.createdAt),
         updatedAt: new Date(parsedSession.updatedAt),
         expiresAt: new Date(parsedSession.expiresAt),
         lastRefreshAt: new Date(parsedSession.lastRefreshAt)
       };
-      const saltedPassphrases = yield* parseSaltedPassphrasesJson(decryptedSaltedPassphrases);
 
-      const data = { session, saltedPassphrases };
-      this.#unlockedSessionData = Option.some(data);
-      this.cancelScheduledLock();
-
-      return data;
+      return { session, saltedPassphrases };
     });
   }
 

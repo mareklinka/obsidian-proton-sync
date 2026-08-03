@@ -187,8 +187,14 @@ class ProtonDriveApi {
       try: async () => {
         this.#throwIfCancelled(signal);
 
-        for await (const child of this.client.iterateFolderChildren(parentId.uid, { type: NodeType.Folder }, signal)) {
+        for await (const childUid of this.client.iterateFolderChildrenNodeUids(
+          parentId.uid,
+          { type: NodeType.Folder },
+          signal
+        )) {
           this.#throwIfCancelled(signal);
+
+          const child = await this.client.getNode(childUid);
 
           if (!child.name.ok) {
             continue;

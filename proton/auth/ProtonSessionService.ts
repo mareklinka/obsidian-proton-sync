@@ -327,14 +327,20 @@ class ProtonSessionService {
         Scope: session.scope
       };
 
-      const response = yield* this.#request<ProtonAuthResponse>('/auth/v4/refresh', body, {
-        'x-pm-uid': session.uid,
-        authorization: `Bearer ${session.accessToken}`
+      const response = yield* Effect.tryPromise({
+        try: () =>
+          postJson<ProtonAuthResponse>(
+            '/auth/v4/refresh',
+            { uid: session.uid, accessToken: session.accessToken },
+            this.appVersionHeader,
+            body
+          ),
+        catch: () => new ProtonApiCommunicationError()
       });
 
       const refreshedAt = new Date();
 
-      const x: ProtonSession = {
+      return {
         ...session,
         uid: response.UID || session.uid,
         accessToken: response.AccessToken,
@@ -344,8 +350,6 @@ class ProtonSessionService {
         expiresAt: new Date(refreshedAt.getTime() + response.ExpiresIn * 1000),
         lastRefreshAt: refreshedAt
       };
-
-      return x;
     });
   }
 

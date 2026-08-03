@@ -66,17 +66,15 @@ export async function buildSrpProofsFromParams(
   password: string,
   username?: string
 ): Promise<ProtonSrpProofsBase64> {
-  const modulusBytes = await decodeModulus(modulus);
-  const saltBytes = decodeBase64(salt);
-  const serverEphemeralBytes = decodeBase64(serverEphemeral);
-
   if (authVersion < 3 && !username) {
     throw new Error('Username is required for legacy SRP versions');
   }
 
-  const hashedPassword = hashPassword(authVersion, username ?? '', password, saltBytes, modulusBytes);
-
-  const proofs = generateProofs(modulusBytes, serverEphemeralBytes, hashedPassword);
+  const proofs = await buildSrpProofs(
+    { Version: authVersion, Modulus: modulus, ServerEphemeral: serverEphemeral, Salt: salt, SRPSession: '' },
+    username ?? '',
+    password
+  );
 
   return {
     clientProof: encodeBase64(proofs.clientProof),
