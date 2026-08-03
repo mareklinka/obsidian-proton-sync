@@ -1,24 +1,26 @@
 import type { CachedCryptoMaterial } from '@protontech/drive-sdk';
 import { MemoryCache, ProtonDriveClient, type ProtonDriveClientContructorParameters } from '@protontech/drive-sdk';
 import { Option } from 'effect';
+import type { Vault } from 'obsidian';
 
 import { getObsidianSettingsStore } from '../../services/ObsidianSettingsStore';
 import { buildSrpProofsFromParams } from '../auth/ProtonSrp';
 import { getProtonHttpClient } from './ObsidianHttpClient';
+import { PersistentEntitiesCache } from './PersistentEntitiesCache';
 import { getProtonAccount } from './ProtonAccount';
 import { createOpenPgpCrypto } from './ProtonOpenPgp';
 
 export const { init: initProtonDriveClient, get: getProtonDriveClient } = (function (): {
-  init: (this: void) => ProtonDriveClient;
+  init: (this: void, vault: Vault) => ProtonDriveClient;
   get: (this: void) => ProtonDriveClient;
 } {
   let instance: ProtonDriveClient | null = null;
 
   return {
-    init: function (this: void): ProtonDriveClient {
+    init: function (this: void, vault: Vault): ProtonDriveClient {
       return (instance ??= new ProtonDriveClient({
         httpClient: getProtonHttpClient(),
-        entitiesCache: new MemoryCache<string>(),
+        entitiesCache: new PersistentEntitiesCache(vault),
         cryptoCache: new MemoryCache<CachedCryptoMaterial>(),
         account: getProtonAccount(),
         // eslint-disable-next-line @typescript-eslint/naming-convention

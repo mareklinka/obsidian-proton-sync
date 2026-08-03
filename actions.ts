@@ -255,7 +255,7 @@ function prepareSyncOperation(app: App, signal: AbortSignal): Effect.Effect<bool
 
     initProtonAccount();
     initProtonHttpClient();
-    initProtonDriveClient();
+    initProtonDriveClient(app.vault);
     initProtonDriveApi();
 
     yield* ensureNotCancelled(signal);
