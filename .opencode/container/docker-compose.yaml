@@ -6,10 +6,11 @@ services:
       dockerfile: ./dev/Dockerfile
     volumes:
       - proton-drive-sync-opencode-data:/root/.local/share/opencode
+      - proton-drive-sync-claude-data:/claude
       # mount the source code into the container for live development
       - ../../:/source
       # mount the proxy CA cert so the dev container trusts SSL-bumped traffic
-      - ./squid/squid-cert.pem:/usr/local/share/ca-certificates/squid-cert.crt:ro
+      - ./squid/squid-cert/squid-cert.pem:/usr/local/share/ca-certificates/squid-cert.crt:ro
       # these are security features
       # mount the .git directory read-only to prevent the model from tampering with the git history
       - ../../.git:/source/.git:ro
@@ -45,6 +46,7 @@ services:
       - NO_PROXY=127.0.0.1,localhost,*.local,host-proxy
       - OPENCODE_CONFIG_DIR=/home/root/.config/opencode/local
       - OPENCODE_DISABLE_MODELS_FETCH=1
+      - CLAUDE_CONFIG_DIR=/claude
     networks:
       internal:
         ipv4_address: 172.4.1.1
@@ -59,8 +61,8 @@ services:
     init: true
     volumes:
       - ./squid/squid.conf:/etc/squid/squid.conf:ro
-      - ./squid/squid-cert.pem:/etc/squid/ssl_cert/squid-cert.pem:ro
-      - ./squid/squid-key.pem:/etc/squid/ssl_cert/squid-key.pem:ro
+      - ./squid/squid-cert/squid-cert.pem:/etc/squid/ssl_cert/squid-cert.pem:ro
+      - ./squid/squid-cert/squid-key.pem:/etc/squid/ssl_cert/squid-key.pem:ro
       - squid-ssl-db:/squid-data
     networks:
       internal:
@@ -99,4 +101,5 @@ networks:
 
 volumes:
   proton-drive-sync-opencode-data:
+  proton-drive-sync-claude-data:
   squid-ssl-db:
