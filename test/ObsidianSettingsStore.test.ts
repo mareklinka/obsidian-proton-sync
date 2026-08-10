@@ -98,6 +98,8 @@ describe('ObsidianSettingsStore', () => {
     expect(store.get('lastRefreshAt')?.toISOString()).toBe(new Date(lastRefreshAt).toISOString());
     expect(store.get('sessionExpiresAt')?.toISOString()).toBe(new Date(sessionExpiresAt).toISOString());
     expect(store.get('enableFileLogging')).toBe(true);
+    // Not present in the stored model: persisting the cache stays opt-in after an upgrade.
+    expect(store.get('enablePersistentCache')).toBe(false);
     expect(store.get('logLevel')).toBe(mod.LogLevel.warn);
     expect(store.get('remoteVaultRootPath')).toBe('/remote-default');
     expect(store.get('ignoredPaths')).toEqual(['.obsidian/cache']);
@@ -130,6 +132,7 @@ describe('ObsidianSettingsStore', () => {
       latestEventId: 'evt-123',
       vaultRootNodeUid: 'folder-456',
       enableFileLogging: true,
+      enablePersistentCache: false,
       logLevel: mod.LogLevel.warn,
       ignoredPaths: ['.obsidian/cache'],
       remoteVaultRootPath: '/remote-default',

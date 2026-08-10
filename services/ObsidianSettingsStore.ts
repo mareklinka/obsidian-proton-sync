@@ -51,6 +51,7 @@ class ObsidianSettingsStore {
     latestEventId: Option.none(),
     vaultRootNodeUid: Option.none(),
     enableFileLogging: false,
+    enablePersistentCache: false,
     logLevel: LogLevel.info,
     ignoredPaths: [],
     remoteVaultRootPath: '',
@@ -81,6 +82,7 @@ class ObsidianSettingsStore {
           ? Option.some(new ProtonFolderId(loaded.vaultRootNodeUid))
           : Option.none(),
         enableFileLogging: loaded.enableFileLogging,
+        enablePersistentCache: loaded.enablePersistentCache ?? false,
         logLevel: loaded.logLevel ?? LogLevel.info,
         ignoredPaths: loaded.ignoredPaths ?? [],
         remoteVaultRootPath:
@@ -106,6 +108,7 @@ class ObsidianSettingsStore {
         latestEventId: Option.isSome(settings.latestEventId) ? settings.latestEventId.value.eventId : null,
         vaultRootNodeUid: Option.isSome(settings.vaultRootNodeUid) ? settings.vaultRootNodeUid.value.uid : null,
         enableFileLogging: settings.enableFileLogging,
+        enablePersistentCache: settings.enablePersistentCache,
         logLevel: settings.logLevel,
         ignoredPaths: settings.ignoredPaths,
         remoteVaultRootPath: settings.remoteVaultRootPath ?? null,
@@ -193,6 +196,7 @@ interface PluginSettingsStorageModel {
   latestEventId: string | null;
   vaultRootNodeUid: string | null;
   enableFileLogging: boolean;
+  enablePersistentCache?: boolean;
   logLevel: LogLevel;
   ignoredPaths?: Array<string>;
   remoteVaultRootPath: string | null;
@@ -208,6 +212,7 @@ export interface PluginSettings {
   latestEventId: Option.Option<ProtonEventId>;
   vaultRootNodeUid: Option.Option<ProtonFolderId>;
   enableFileLogging: boolean;
+  enablePersistentCache: boolean;
   logLevel: LogLevel;
   ignoredPaths: Array<string>;
   remoteVaultRootPath: string;

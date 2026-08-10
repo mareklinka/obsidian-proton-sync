@@ -5,6 +5,7 @@ import { type Subscription } from 'rxjs';
 import { pullVault, pushVault } from './actions';
 import { getI18n, initI18n } from './i18n';
 import { getProtonSessionService, initProtonSessionService } from './proton/auth/ProtonSessionService';
+import { getPersistentEntitiesCache, initPersistentEntitiesCache } from './proton/drive/PersistentEntitiesCache';
 import { getLogger } from './services/ConsoleLogger';
 import { getEncryptedSecretStore } from './services/EncryptedSecretStore';
 import { initObsidianFileApi } from './services/ObsidianFileApi';
@@ -54,6 +55,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
     initVaultLogSink(this.app.vault);
 
     initProtonSessionService(`external-drive-obsidiansync@${this.manifest.version}`);
+
+    initPersistentEntitiesCache(this.app.vault, settings.get('enablePersistentCache'));
+    await this.#enforceCacheSessionBinding();
 
     const syncService = initSyncService(this.app.vault);
     initSyncProgressModal(this.app);
@@ -146,15 +150,30 @@ export default class ProtonDriveSyncPlugin extends Plugin {
 
     this.#logger.info('Disconnecting from Proton Drive');
 
+    // Local session state (and, via sessionCleared$, the entities cache) is torn down by the service.
     await Effect.runPromise(Effect.either(getProtonSessionService().signOut()));
 
-    const settingsStore = getObsidianSettingsStore();
-    settingsStore.set('lastLoginAt', null);
-    settingsStore.set('lastRefreshAt', null);
-    settingsStore.set('sessionExpiresAt', null);
-    settingsStore.set('vaultRootNodeUid', Option.none());
-
     new Notice(t.main.notices.disconnected);
+  }
+
+  /**
+   * The persisted entities cache is only ever allowed to exist alongside a session.
+   * Anything else - a crash mid-disconnect, secrets cleared outside the plugin, a
+   * logout path that predates this hook - is swept up on load.
+   */
+  async #enforceCacheSessionBinding(): Promise<void> {
+    const encryptedSecretStore = getEncryptedSecretStore();
+
+    this.#subscriptions.push(
+      encryptedSecretStore.sessionCleared$.subscribe(() => {
+        this.#logger.info('Session cleared, destroying persisted entities cache');
+        void getPersistentEntitiesCache().destroy();
+      })
+    );
+
+    if (!encryptedSecretStore.hasPersistedSessionData()) {
+      await getPersistentEntitiesCache().destroy();
+    }
   }
 
   public async changeMasterPassword(credentials: { currentPassword: string; newPassword: string }): Promise<void> {

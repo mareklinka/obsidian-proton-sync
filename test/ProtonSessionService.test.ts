@@ -203,4 +203,81 @@ describe('ProtonSessionService', () => {
       expect(result.left).toMatchObject({ _tag: 'MasterPasswordRequiredError' });
     }
   });
+
+  it('signs out locally when Proton rejects the refresh token', async () => {
+    const mod = await import('../proton/auth/ProtonSessionService');
+
+    await persistEncryptedSessionData(storedSession, { keyA: 'salted-passphrase-a' });
+
+    requestUrlMock.mockResolvedValue({
+      status: 401,
+      json: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention
+        Code: 10013,
+        // eslint-disable-next-line @typescript-eslint/naming-convention
+        Error: 'Invalid refresh token'
+      }
+    });
+
+    const service = mod.initProtonSessionService('test-app-version');
+
+    const result = await Effect.runPromise(
+      Effect.either(service.activatePersistedSession(() => Effect.succeed(Option.some(MASTER_PASSWORD))))
+    );
+
+    expect(result._tag).toBe('Left');
+    if (result._tag === 'Left') {
+      expect(result.left).toMatchObject({ _tag: 'SessionInvalidatedError' });
+    }
+
+    // The dead session must not survive locally.
+    expect(secretData.get(SESSION_STORAGE_KEY)).toBe('');
+    expect(secretData.get(SALTED_PASSPHRASES_SECRET_KEY)).toBe('');
+    expect(Option.isNone(service.getCurrentSession())).toBe(true);
+  });
+
+  it('keeps the persisted session when the refresh call fails for transport reasons', async () => {
+    const mod = await import('../proton/auth/ProtonSessionService');
+
+    await persistEncryptedSessionData(storedSession, { keyA: 'salted-passphrase-a' });
+
+    requestUrlMock.mockResolvedValue({
+      status: 503,
+      json: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention
+        Error: 'Service unavailable'
+      }
+    });
+
+    const service = mod.initProtonSessionService('test-app-version');
+
+    const result = await Effect.runPromise(
+      Effect.either(service.activatePersistedSession(() => Effect.succeed(Option.some(MASTER_PASSWORD))))
+    );
+
+    expect(result._tag).toBe('Left');
+    if (result._tag === 'Left') {
+      expect(result.left).toMatchObject({ _tag: 'ProtonApiCommunicationError' });
+    }
+
+    expect(secretData.get(SESSION_STORAGE_KEY)).not.toBe('');
+  });
+
+  it('clears local session state and the event cursor on sign-out', async () => {
+    const mod = await import('../proton/auth/ProtonSessionService');
+
+    const settingsSet = vi.fn();
+    getObsidianSettingsStoreMock.mockReturnValue({ set: settingsSet });
+
+    await persistEncryptedSessionData(storedSession, { keyA: 'salted-passphrase-a' });
+
+    const service = mod.initProtonSessionService('test-app-version');
+    await Effect.runPromise(service.signOut());
+
+    expect(secretData.get(SESSION_STORAGE_KEY)).toBe('');
+    expect(settingsSet).toHaveBeenCalledWith('accountEmail', '');
+    expect(settingsSet).toHaveBeenCalledWith('latestEventId', Option.none());
+    expect(settingsSet).toHaveBeenCalledWith('vaultRootNodeUid', Option.none());
+    expect(settingsSet).toHaveBeenCalledWith('sessionExpiresAt', null);
+  });
 });

@@ -5,9 +5,11 @@ import { normalizePath, Notice } from 'obsidian';
 import { getI18n } from './i18n';
 import { getProtonSessionService } from './proton/auth/ProtonSessionService';
 import { initProtonHttpClient } from './proton/drive/ObsidianHttpClient';
+import { getPersistentEntitiesCache } from './proton/drive/PersistentEntitiesCache';
 import { initProtonAccount } from './proton/drive/ProtonAccount';
 import { initProtonDriveClient } from './proton/drive/ProtonDriveClient';
 import { getLogger } from './services/ConsoleLogger';
+import { sha256Hex } from './services/CryptoHelpers';
 import { getEncryptedSecretStore } from './services/EncryptedSecretStore';
 import { getObsidianSettingsStore } from './services/ObsidianSettingsStore';
 import type {
@@ -251,11 +253,17 @@ function prepareSyncOperation(app: App, signal: AbortSignal): Effect.Effect<bool
     if (Option.isSome(currentSession)) {
       settingsStore.set('lastRefreshAt', currentSession.value.lastRefreshAt);
       settingsStore.set('sessionExpiresAt', currentSession.value.expiresAt);
+
+      // Binding before the SDK touches the cache guarantees data cached for another
+      // account is discarded rather than served to the one signing in now.
+      yield* Effect.promise(() =>
+        getPersistentEntitiesCache().bindToAccount(sha256Hex(currentSession.value.userId ?? currentSession.value.uid))
+      );
     }
 
     initProtonAccount();
     initProtonHttpClient();
-    initProtonDriveClient(app.vault);
+    initProtonDriveClient();
     initProtonDriveApi();
 
     yield* ensureNotCancelled(signal);
@@ -276,6 +284,9 @@ function prepareSyncOperation(app: App, signal: AbortSignal): Effect.Effect<bool
             break;
           case 'PersistedSessionNotFoundError':
             new Notice(t.actions.notices.signInRequired);
+            break;
+          case 'SessionInvalidatedError':
+            new Notice(t.actions.notices.sessionInvalidated);
             break;
           case 'PersistedSecretsInvalidFormatError':
             new Notice(t.actions.notices.sessionDataInvalid);

@@ -61,10 +61,24 @@ async function getProtonApiJson<T>(
   });
 
   if (response.status >= 400) {
-    throw new Error(extractApiError(response.json) ?? `Proton API request failed (${response.status}).`);
+    throw new ProtonApiHttpError(
+      response.status,
+      extractApiError(response.json) ?? `Proton API request failed (${response.status}).`
+    );
   }
 
   return response.json as T;
+}
+
+/** Error carrying the HTTP status so callers can tell an invalidated session from a transport failure. */
+export class ProtonApiHttpError extends Error {
+  public constructor(
+    public readonly status: number,
+    message: string
+  ) {
+    super(message);
+    this.name = 'ProtonApiHttpError';
+  }
 }
 
 function extractApiError(payload: unknown): string | null {

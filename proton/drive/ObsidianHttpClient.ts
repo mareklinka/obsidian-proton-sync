@@ -3,13 +3,15 @@ import type {
   ProtonDriveHTTPClientBlobRequest,
   ProtonDriveHTTPClientJsonRequest
 } from '@protontech/drive-sdk';
-import { Option } from 'effect';
+import { Effect, Option } from 'effect';
 import type { RequestUrlParam } from 'obsidian';
 import { requestUrl } from 'obsidian';
 
 import { getLogger } from '../../services/ConsoleLogger';
 import type { ProtonSession } from '../auth/ProtonSession';
 import { getProtonSessionService } from '../auth/ProtonSessionService';
+
+const UNAUTHORIZED_STATUS = 401;
 
 export const { init: initProtonHttpClient, get: getProtonHttpClient } = (function (): {
   init: (this: void) => ObsidianHttpClient;
@@ -68,6 +70,13 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     }
 
     const response = await requestUrl(r);
+
+    if (response.status === UNAUTHORIZED_STATUS) {
+      // Proton no longer accepts this session - tear the local one down so the
+      // persisted session data and the entities cache don't outlive it.
+      getLogger('ObsidianHttpClient').warn('Proton rejected the session (401), signing out');
+      await Effect.runPromise(this.#sessionService.forceSignOut());
+    }
 
     if (isJson) {
       return new Response(response.text, {

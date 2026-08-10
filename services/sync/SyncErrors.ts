@@ -1,10 +1,7 @@
 import { Data } from 'effect';
 
 export type ConfigSyncError =
-  | InvalidConfigPathError
-  | VaultRootIdNotAvailableError
-  | SyncAlreadyInProgressError
-  | SyncCancelledError;
+  InvalidConfigPathError | VaultRootIdNotAvailableError | SyncAlreadyInProgressError | SyncCancelledError;
 
 export class InvalidConfigPathError extends Data.TaggedError('InvalidConfigPathError') {}
 export class VaultRootIdNotAvailableError extends Data.TaggedError('VaultRootIdNotAvailableError') {}

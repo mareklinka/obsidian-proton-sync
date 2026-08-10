@@ -132,3 +132,9 @@
 .proton-sync-full-width {
   width: 100%;
 }
+
+.proton-sync-setting-warning {
+  margin-top: 4px;
+  font-weight: 600;
+  color: var(--text-warning);
+}

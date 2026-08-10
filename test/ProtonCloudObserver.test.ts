@@ -82,8 +82,7 @@ describe('ProtonCloudObserver', () => {
     expect(subscribeToTreeEventsMock).toHaveBeenCalledWith('scope-123', expect.any(Function));
 
     const callback = subscribeToTreeEventsMock.mock.calls[0]?.[1] as
-      | ((event: { eventId: string }) => Promise<void>)
-      | undefined;
+      ((event: { eventId: string }) => Promise<void>) | undefined;
     if (!callback) {
       throw new Error('Expected tree event callback to be registered.');
     }

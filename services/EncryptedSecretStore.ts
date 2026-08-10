@@ -73,6 +73,10 @@ class EncryptedSecretStore {
   readonly #sessionLockedSubject = new Subject<void>();
   public readonly sessionLocked$ = this.#sessionLockedSubject.asObservable();
 
+  /** Emits when persisted session data is destroyed, i.e. the user is no longer signed in. */
+  readonly #sessionClearedSubject = new Subject<void>();
+  public readonly sessionCleared$ = this.#sessionClearedSubject.asObservable();
+
   public constructor(private readonly baseStore: ReturnType<typeof getObsidianSecretStore>) {}
 
   public hasPersistedSessionData(): boolean {
@@ -216,6 +220,7 @@ class EncryptedSecretStore {
       this.lockSession();
       this.baseStore.clear(SESSION_STORAGE_KEY);
       this.baseStore.clear(SALTED_PASSPHRASES_SECRET_KEY);
+      this.#sessionClearedSubject.next();
     });
   }
 

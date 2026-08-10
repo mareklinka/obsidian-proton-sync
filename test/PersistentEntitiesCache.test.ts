@@ -75,6 +75,7 @@ class InMemoryAdapter {
   readonly #dirs = new Set<string>();
   public readonly mkdirCalls: Array<string> = [];
   public readonly writeCalls: Array<string> = [];
+  public readonly removeCalls: Array<string> = [];
 
   public async exists(path: string): Promise<boolean> {
     const normalized = this.#normalize(path);
@@ -93,6 +94,12 @@ class InMemoryAdapter {
     const normalized = this.#normalize(path);
     this.#files.set(normalized, data);
     this.writeCalls.push(normalized);
+  }
+
+  public async remove(path: string): Promise<void> {
+    const normalized = this.#normalize(path);
+    this.#files.delete(normalized);
+    this.removeCalls.push(normalized);
   }
 
   public async mkdir(path: string): Promise<void> {
@@ -215,8 +222,9 @@ describe('PersistentEntitiesCache', () => {
     expect(adapter.writeCalls).toHaveLength(0);
 
     await vi.runAllTimersAsync();
+    // The debounced write compresses off the timer queue, so wait for it to land.
+    await vi.waitFor(() => expect(adapter.writeCalls).toHaveLength(1));
 
-    expect(adapter.writeCalls).toHaveLength(1);
     const persisted = JSON.parse((await adapter.readGunzipped(CACHE_PATH)) ?? '{}');
     expect(persisted.entities).toEqual(
       Object.fromEntries([
@@ -294,6 +302,8 @@ describe('PersistentEntitiesCache', () => {
     await cache.flush();
 
     const rawJson = JSON.stringify({
+      version: 1,
+      accountFingerprint: null,
       entities: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`node-${index}`, repetitiveValue])),
       entitiesByTag: Object.fromEntries([['parentUid:root', Array.from({ length: 20 }, (_, index) => `node-${index}`)]])
     });
@@ -303,5 +313,185 @@ describe('PersistentEntitiesCache', () => {
 
     const roundTripped = await adapter.readGunzipped(CACHE_PATH);
     expect(JSON.parse(roundTripped ?? '{}')).toEqual(JSON.parse(rawJson));
+  });
+
+  describe('persistence setting', () => {
+    it('never touches disk while persistence is disabled', async () => {
+      const adapter = new InMemoryAdapter();
+      const cache = new PersistentEntitiesCache(createVault(adapter), false);
+
+      await cache.setEntity('node-1', 'value-1');
+      await vi.runAllTimersAsync();
+      await cache.flush();
+
+      expect(adapter.writeCalls).toHaveLength(0);
+      // Still a working in-memory cache for the rest of the session.
+      await expect(cache.getEntity('node-1')).resolves.toBe('value-1');
+    });
+
+    it('removes a cache file left behind by a previous run when persistence is disabled', async () => {
+      const adapter = new InMemoryAdapter();
+      await adapter.seedGzipped(
+        CACHE_PATH,
+        JSON.stringify({
+          entities: Object.fromEntries([['node-1', 'value-1']]),
+          entitiesByTag: {}
+        })
+      );
+
+      const cache = new PersistentEntitiesCache(createVault(adapter), false);
+
+      await expect(cache.getEntity('node-1')).rejects.toThrowError(/entity not found/i);
+      expect(adapter.removeCalls).toEqual([CACHE_PATH]);
+      expect(await adapter.exists(CACHE_PATH)).toBe(false);
+    });
+
+    it('destroys the persisted file when persistence is turned off', async () => {
+      const adapter = new InMemoryAdapter();
+      const cache = new PersistentEntitiesCache(createVault(adapter), true);
+
+      await cache.setEntity('node-1', 'value-1');
+      await cache.flush();
+      expect(await adapter.exists(CACHE_PATH)).toBe(true);
+
+      await cache.setPersistenceEnabled(false);
+
+      expect(await adapter.exists(CACHE_PATH)).toBe(false);
+      await expect(cache.getEntity('node-1')).rejects.toThrowError(/entity not found/i);
+    });
+
+    it('resumes persisting when the setting is turned back on', async () => {
+      const adapter = new InMemoryAdapter();
+      const cache = new PersistentEntitiesCache(createVault(adapter), false);
+
+      await cache.setEntity('node-1', 'value-1');
+      await cache.setPersistenceEnabled(true);
+      await cache.flush();
+
+      const persisted = JSON.parse((await adapter.readGunzipped(CACHE_PATH)) ?? '{}');
+      expect(persisted.entities).toEqual(Object.fromEntries([['node-1', 'value-1']]));
+    });
+
+    it('discards a cache file written in an unsupported format', async () => {
+      const adapter = new InMemoryAdapter();
+      await adapter.seedGzipped(
+        CACHE_PATH,
+        JSON.stringify({ version: 99, entities: Object.fromEntries([['node-1', 'value-1']]), entitiesByTag: {} })
+      );
+
+      const cache = new PersistentEntitiesCache(createVault(adapter), true);
+
+      await expect(cache.getEntity('node-1')).rejects.toThrowError(/entity not found/i);
+      expect(await adapter.exists(CACHE_PATH)).toBe(false);
+    });
+  });
+
+  describe('destroy', () => {
+    it('drops cached data and removes the persisted file', async () => {
+      const adapter = new InMemoryAdapter();
+      const cache = new PersistentEntitiesCache(createVault(adapter), true);
+
+      await cache.setEntity('node-1', 'value-1', ['parentUid:root']);
+      await cache.flush();
+
+      await cache.destroy();
+
+      expect(await adapter.exists(CACHE_PATH)).toBe(false);
+      await expect(cache.getEntity('node-1')).rejects.toThrowError(/entity not found/i);
+      await expect(collectAsync(cache.iterateEntitiesByTag('parentUid:root'))).resolves.toEqual([]);
+    });
+
+    it('a pending debounced write cannot resurrect the file after destroy', async () => {
+      const adapter = new InMemoryAdapter();
+      const cache = new PersistentEntitiesCache(createVault(adapter), true);
+
+      await cache.setEntity('node-1', 'value-1');
+      await cache.destroy();
+
+      await vi.runAllTimersAsync();
+      await cache.flush();
+
+      expect(await adapter.exists(CACHE_PATH)).toBe(false);
+    });
+
+    it('keeps the file destroyed while the SDK keeps writing to a sealed cache', async () => {
+      const adapter = new InMemoryAdapter();
+      const cache = new PersistentEntitiesCache(createVault(adapter), true);
+
+      await cache.setEntity('node-1', 'value-1');
+      await cache.flush();
+      await cache.destroy();
+
+      // The SDK may still hold the instance after a forced sign-out.
+      await cache.setEntity('node-2', 'value-2');
+      await vi.runAllTimersAsync();
+      await cache.flush();
+
+      expect(await adapter.exists(CACHE_PATH)).toBe(false);
+    });
+  });
+
+  describe('account binding', () => {
+    it('persists the bound account fingerprint', async () => {
+      const adapter = new InMemoryAdapter();
+      const cache = new PersistentEntitiesCache(createVault(adapter), true);
+
+      await cache.bindToAccount('fingerprint-a');
+      await cache.setEntity('node-1', 'value-1');
+      await cache.flush();
+
+      const persisted = JSON.parse((await adapter.readGunzipped(CACHE_PATH)) ?? '{}');
+      expect(persisted.accountFingerprint).toBe('fingerprint-a');
+    });
+
+    it('discards data cached for a different account', async () => {
+      const adapter = new InMemoryAdapter();
+      await adapter.seedGzipped(
+        CACHE_PATH,
+        JSON.stringify({
+          version: 1,
+          accountFingerprint: 'fingerprint-a',
+          entities: Object.fromEntries([['node-1', 'value-1']]),
+          entitiesByTag: {}
+        })
+      );
+
+      const cache = new PersistentEntitiesCache(createVault(adapter), true);
+      await cache.bindToAccount('fingerprint-b');
+
+      await expect(cache.getEntity('node-1')).rejects.toThrowError(/entity not found/i);
+    });
+
+    it('keeps data cached for the same account', async () => {
+      const adapter = new InMemoryAdapter();
+      await adapter.seedGzipped(
+        CACHE_PATH,
+        JSON.stringify({
+          version: 1,
+          accountFingerprint: 'fingerprint-a',
+          entities: Object.fromEntries([['node-1', 'value-1']]),
+          entitiesByTag: {}
+        })
+      );
+
+      const cache = new PersistentEntitiesCache(createVault(adapter), true);
+      await cache.bindToAccount('fingerprint-a');
+
+      await expect(cache.getEntity('node-1')).resolves.toBe('value-1');
+    });
+
+    it('reopens a cache sealed by a previous sign-out when a new session binds', async () => {
+      const adapter = new InMemoryAdapter();
+      const cache = new PersistentEntitiesCache(createVault(adapter), true);
+
+      await cache.destroy();
+      await cache.bindToAccount('fingerprint-a');
+
+      await cache.setEntity('node-1', 'value-1');
+      await cache.flush();
+
+      const persisted = JSON.parse((await adapter.readGunzipped(CACHE_PATH)) ?? '{}');
+      expect(persisted.entities).toEqual(Object.fromEntries([['node-1', 'value-1']]));
+    });
   });
 });

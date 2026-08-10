@@ -1,3 +1,4 @@
+import { sha256 } from '@noble/hashes/sha2.js';
 import bcrypt from 'bcryptjs';
 
 const BCRYPT_BASE64_ALPHABET = './ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -48,6 +49,12 @@ export function bcryptHashWithSalt(password: string, salt: string, rounds: numbe
   } catch {
     return bcrypt.hashSync(password, `$2b$${roundsToken}$${salt}`);
   }
+}
+
+export function sha256Hex(value: string): string {
+  return Array.from(sha256(new TextEncoder().encode(value)))
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 export function randomBytes(byteLength: number): Uint8Array {

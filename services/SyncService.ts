@@ -602,8 +602,7 @@ class SyncService {
 
           if (child._type === 'folder') {
             const remoteFile = item.remote.children.find(c => c._tag === 'file' && c.name === child.name) as
-              | ProtonFile
-              | undefined;
+              ProtonFile | undefined;
 
             if (remoteFile) {
               logger.warn('Detected push conflict due to local folder and remote file type mismatch', {
@@ -626,8 +625,7 @@ class SyncService {
             }
 
             let remoteFolder = item.remote.children.find(c => c._tag === 'folder' && c.name === child.name) as
-              | ProtonRecursiveFolder
-              | undefined;
+              ProtonRecursiveFolder | undefined;
 
             if (!remoteFolder) {
               const id = new ProtonFolderId('temp-id-' + Math.random().toString(16).slice(2));
@@ -648,8 +646,7 @@ class SyncService {
             q.push({ local: child, remote: remoteFolder });
           } else {
             const remoteFolder = item.remote.children.find(c => c._tag === 'folder' && c.name === child.name) as
-              | ProtonRecursiveFolder
-              | undefined;
+              ProtonRecursiveFolder | undefined;
 
             if (remoteFolder) {
               logger.warn('Detected push conflict due to local file and remote folder type mismatch', {
@@ -672,8 +669,7 @@ class SyncService {
             }
 
             const remoteFile = item.remote.children.find(c => c._tag === 'file' && c.name === child.name) as
-              | ProtonFile
-              | undefined;
+              ProtonFile | undefined;
 
             if (remoteFile && Option.isSome(remoteFile.sha1) && remoteFile.sha1.value === child.sha1) {
               logger.debug('Skipping upload for same file', {

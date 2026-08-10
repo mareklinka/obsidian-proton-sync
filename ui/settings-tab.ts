@@ -5,6 +5,7 @@ import { combineLatest, Subject, take } from 'rxjs';
 import { getI18n } from '../i18n';
 import type ProtonDriveSyncPlugin from '../main';
 import { type ProtonAuthStatus } from '../proton/auth/ProtonSessionService';
+import { getPersistentEntitiesCache } from '../proton/drive/PersistentEntitiesCache';
 import { getLogger } from '../services/ConsoleLogger';
 import { getEncryptedSecretStore } from '../services/EncryptedSecretStore';
 import type { PluginSettings } from '../services/ObsidianSettingsStore';
@@ -160,6 +161,16 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
         });
 
       new Setting(containerEl)
+        .setName(t.settings.persistentCache.name)
+        .setDesc(this.#buildPersistentCacheDescriptionFragment())
+        .addToggle(toggle => {
+          toggle.setValue(settings.enablePersistentCache).onChange(value => {
+            settingsStore.set('enablePersistentCache', value);
+            void getPersistentEntitiesCache().setPersistenceEnabled(value);
+          });
+        });
+
+      new Setting(containerEl)
         .setName(t.settings.fileLogging.name)
         .setDesc(t.settings.fileLogging.description)
         .addToggle(toggle => {
@@ -237,6 +248,27 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
     }
 
     fragment.appendChild(list);
+
+    return fragment;
+  }
+
+  #buildPersistentCacheDescriptionFragment(): DocumentFragment {
+    const { t } = getI18n();
+    const fragment = document.createDocumentFragment();
+
+    const description = document.createElement('div');
+    description.textContent = t.settings.persistentCache.description;
+
+    const warning = document.createElement('div');
+    warning.className = 'proton-sync-setting-warning';
+    warning.textContent = t.settings.persistentCache.warning;
+
+    const lifecycle = document.createElement('div');
+    lifecycle.textContent = t.settings.persistentCache.lifecycle;
+
+    fragment.appendChild(description);
+    fragment.appendChild(warning);
+    fragment.appendChild(lifecycle);
 
     return fragment;
   }

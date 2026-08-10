@@ -115,4 +115,27 @@ describe('EncryptedSecretStore', () => {
 
     expect(Option.some(loadedWithOldPassword.saltedPassphrases)).toEqual(Option.some({ keyA: 'salted-a' }));
   });
+
+  it('emits sessionCleared$ when persisted session data is destroyed', async () => {
+    const mod = await import('../services/EncryptedSecretStore');
+    const store = mod.getEncryptedSecretStore();
+
+    let clearedCount = 0;
+    store.sessionCleared$.subscribe(() => {
+      clearedCount += 1;
+    });
+
+    await Effect.runPromise(
+      store.persistSessionData({ session: storedSession, saltedPassphrases: { keyA: 'salted-a' } }, OLD_MASTER_PASSWORD)
+    );
+
+    // Locking only drops the in-memory copy; the session itself is still there.
+    store.lockSession();
+    expect(clearedCount).toBe(0);
+
+    await Effect.runPromise(store.clearSessionData());
+
+    expect(clearedCount).toBe(1);
+    expect(store.hasPersistedSessionData()).toBe(false);
+  });
 });

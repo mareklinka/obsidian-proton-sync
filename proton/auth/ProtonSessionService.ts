@@ -14,7 +14,7 @@ import { getObsidianSettingsStore } from '../../services/ObsidianSettingsStore';
 import type { CaptchaVerification } from '../../ui/modals/captcha-modal';
 import type { MasterPasswordModalMode } from '../../ui/modals/master-password-modal';
 import { PROTON_BASE_URL } from '../Constants';
-import { deleteJson, getJson, postJson } from '../ProtonApiClient';
+import { deleteJson, getJson, postJson, ProtonApiHttpError } from '../ProtonApiClient';
 import type { ProtonSession } from './ProtonSession';
 import type { ProtonAuthInfo, ProtonSrpProofs } from './ProtonSrp';
 import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64 } from './ProtonSrp';
@@ -248,13 +248,36 @@ class ProtonSessionService {
     return Effect.gen(this, function* () {
       const currentSession = this.getCurrentSession();
 
-      yield* this.#encryptedSecretStore.clearSessionData();
-      this.#authStatusSubject.next('disconnected');
-      getObsidianSettingsStore().set('accountEmail', '');
+      yield* this.#clearLocalSessionState();
 
       if (Option.isSome(currentSession)) {
         yield* this.#destroySession(currentSession.value);
       }
+    });
+  }
+
+  /**
+   * Drops all local session state without calling Proton. Used when the server has
+   * already invalidated the session (rejected refresh token, 401 from the Drive API),
+   * so the plugin state matches reality instead of holding on to dead credentials.
+   */
+  public forceSignOut(): Effect.Effect<void> {
+    return this.#clearLocalSessionState();
+  }
+
+  #clearLocalSessionState(): Effect.Effect<void> {
+    return Effect.gen(this, function* () {
+      yield* this.#encryptedSecretStore.clearSessionData();
+      this.#authStatusSubject.next('disconnected');
+
+      const settingsStore = getObsidianSettingsStore();
+      settingsStore.set('accountEmail', '');
+      settingsStore.set('lastLoginAt', null);
+      settingsStore.set('lastRefreshAt', null);
+      settingsStore.set('sessionExpiresAt', null);
+      // The event cursor and the entities cache are one snapshot - neither outlives the session.
+      settingsStore.set('latestEventId', Option.none());
+      settingsStore.set('vaultRootNodeUid', Option.none());
     });
   }
 
@@ -273,6 +296,7 @@ class ProtonSessionService {
     | SecretDecryptionFailedError
     | ProtonApiCommunicationError
     | SecretEncryptionFailedError
+    | SessionInvalidatedError
   > {
     return Effect.gen(this, function* () {
       this.#authStatusSubject.next('connecting');
@@ -298,7 +322,15 @@ class ProtonSessionService {
       let session = unlockedSessionData.session;
 
       if (session.expiresAt.getTime() - Date.now() < 10 * 60 * 1000) {
-        session = yield* this.#refreshSession(session);
+        session = yield* this.#refreshSession(session).pipe(
+          Effect.catchTag('SessionInvalidatedError', error =>
+            Effect.gen(this, function* () {
+              // Proton refused the refresh token - the session is gone server-side, so drop it here too.
+              yield* this.forceSignOut();
+              return yield* error;
+            })
+          )
+        );
         yield* this.#persistEncryptedSessionData(
           session,
           unlockedSessionData.saltedPassphrases,
@@ -313,7 +345,9 @@ class ProtonSessionService {
     });
   }
 
-  #refreshSession(session: ProtonSession): Effect.Effect<ProtonSession, ProtonApiCommunicationError> {
+  #refreshSession(
+    session: ProtonSession
+  ): Effect.Effect<ProtonSession, ProtonApiCommunicationError | SessionInvalidatedError> {
     return Effect.gen(this, function* () {
       const state = encodeBase64(this.#randomToken(32));
       const body = {
@@ -335,7 +369,7 @@ class ProtonSessionService {
             this.appVersionHeader,
             body
           ),
-        catch: () => new ProtonApiCommunicationError()
+        catch: error => (isSessionRejection(error) ? new SessionInvalidatedError() : new ProtonApiCommunicationError())
       });
 
       const refreshedAt = new Date();
@@ -633,7 +667,15 @@ export type ProtonSessionError =
   | PersistedSessionNotFoundError
   | PersistedSecretsInvalidFormatError
   | SecretEncryptionFailedError
-  | SecretDecryptionFailedError;
+  | SecretDecryptionFailedError
+  | SessionInvalidatedError;
+
+/** Statuses Proton returns when it no longer accepts the session's credentials. */
+const SESSION_REJECTION_STATUSES = new Set([401, 422]);
+
+function isSessionRejection(error: unknown): boolean {
+  return error instanceof ProtonApiHttpError && SESSION_REJECTION_STATUSES.has(error.status);
+}
 
 export class ProtonApiCommunicationError extends Data.TaggedError('ProtonApiCommunicationError') {}
 export class CryptographyError extends Data.TaggedError('CryptographyError') {}
@@ -643,3 +685,4 @@ export class MasterPasswordRequiredError extends Data.TaggedError('MasterPasswor
 export class CaptchaRequiredError extends Data.TaggedError('CaptchaRequiredError') {}
 export class CaptchaDataNotProvidedError extends Data.TaggedError('CaptchaDataNotProvidedError') {}
 export class PersistedSessionNotFoundError extends Data.TaggedError('PersistedSessionNotFoundError') {}
+export class SessionInvalidatedError extends Data.TaggedError('SessionInvalidatedError') {}

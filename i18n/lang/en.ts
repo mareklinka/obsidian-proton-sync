@@ -52,6 +52,7 @@ export const en = {
       pullCompleted: 'Pull completed.',
       signInRequired: 'Please sign in to Proton Drive before syncing.',
       sessionActivationFailed: 'Saved session could not be activated. Please sign in again.',
+      sessionInvalidated: 'Your Proton session is no longer valid and has been signed out. Please sign in again.',
       sessionDataInvalid: 'Saved session data is invalid and has been cleared. Please sign in again.',
       masterPasswordRequired: 'Master password is required to activate the saved session.',
       masterPasswordInvalid: 'Master password is invalid or saved encrypted data is corrupted.',
@@ -110,6 +111,15 @@ export const en = {
       description2: 'To use a folder shared with you, use the format:',
       description3: '$shared$/[shared folder name]/[rest of path]',
       placeholder: 'e.g. obsidian-notes/my-vault'
+    },
+    persistentCache: {
+      name: 'Cache remote metadata on this device',
+      description:
+        'Speeds up repeated syncs by keeping Proton Drive file metadata on disk instead of re-fetching and re-decrypting it every time.',
+      warning:
+        '⚠️ The cache stores your remote folder structure, file names, authors, sizes and timestamps unencrypted inside your vault. Only enable this on a device you trust.',
+      lifecycle:
+        'The cache is never uploaded to Proton Drive, and it is destroyed whenever you are signed out or you turn this setting off.'
     },
     fileLogging: {
       name: 'File logging',
