@@ -17,6 +17,9 @@ export const en = {
         captchaDataNotProvided: 'Captcha data was not provided. Login aborted.',
         captchaRequired: 'Captcha is required to login. Login aborted.',
         twoFactorRequired: 'Two-factor code is required to login. Login aborted.',
+        unsupportedTwoFactor:
+          'Password-based sign-in supports authenticator codes. For security keys, use browser sign-in. ' +
+          'Keep your security key enabled and use Sign in in browser instead.',
         mailboxPasswordRequired: 'Mailbox password is required to login. Login aborted.',
         masterPasswordRequired: 'Master password is required to protect your session. Login aborted.',
         secureStorageFailed: 'Failed to securely persist encrypted credentials. Login aborted.',
@@ -99,6 +102,7 @@ export const en = {
     disclosureCredentials:
       'You will be asked to enter your credentials into this plugin. Passwords or other sensitive information are never stored or logged.',
     connectionStatus: {
+      browserButton: 'Sign in in browser (security key)',
       name: 'Connection status',
       connectButton: 'Connect',
       connectingButton: 'Connecting...',
@@ -151,6 +155,18 @@ export const en = {
     }
   },
   modals: {
+    browserSignIn: {
+      title: 'Sign in with Proton in your browser',
+      preparing: 'Preparing a private sign-in link…',
+      help:
+        'Open Proton Account and sign in with your security key or passkey. ' +
+        'Your Proton password and security-key verification stay on Proton’s website.',
+      openBrowser: 'Open Proton sign-in',
+      waiting:
+        'Keep this dialog and Obsidian open. After you approve sign-in, return here. ' +
+        'The plugin will ask for a local master password to protect your saved session. ' +
+        'This link expires after 10 minutes. Do not share or copy it into chat.'
+    },
     shared: {
       credentialsDisclosure: '⚠️ Your credentials are never stored or logged.'
     },
@@ -209,7 +225,13 @@ export const en = {
     },
     captcha: {
       title: 'CAPTCHA verification required',
-      help: 'Solve the CAPTCHA challenge. The dialog will close automatically once the challenge is successfully completed.',
+      help:
+        'Open Proton verification in your browser and complete the CAPTCHA there. ' +
+        'Then return to Obsidian and choose Continue. Keep this dialog open while verifying.',
+      openBrowser: 'Open CAPTCHA in browser',
+      continueButton: 'I completed verification — Continue',
+      invalidUrl:
+        'Proton did not provide a supported verification link. Cancel and reconnect to request a fresh challenge.',
       iframeTitle: 'Proton CAPTCHA challenge',
       reload: 'Reload CAPTCHA'
     },

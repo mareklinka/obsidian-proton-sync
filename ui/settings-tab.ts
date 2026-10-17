@@ -27,6 +27,9 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
   }>();
   public readonly login$ = this.#loginSubject.asObservable();
 
+  readonly #browserLoginSubject = new Subject<void>();
+  public readonly browserLogin$ = this.#browserLoginSubject.asObservable();
+
   readonly #loggingChangedSubject = new Subject<{ isEnabled: boolean; minLevel: LogLevel }>();
   public readonly loggingChanged$ = this.#loggingChangedSubject.asObservable();
 
@@ -84,6 +87,12 @@ export class ProtonDriveSyncSettingTab extends PluginSettingTab {
             })
         );
       } else {
+        connectionSetting.addButton(button =>
+          button
+            .setButtonText(t.settings.connectionStatus.browserButton)
+            .setDisabled(authStatus === 'connecting')
+            .onClick(() => this.#browserLoginSubject.next())
+        );
         connectionSetting.addButton(button =>
           button
             .setButtonText(

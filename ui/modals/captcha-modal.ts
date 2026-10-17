@@ -3,21 +3,12 @@ import { Modal, Setting } from 'obsidian';
 import { Subject } from 'rxjs';
 
 import { getI18n } from '../../i18n';
+import { getExternalCaptchaUrl } from '../../proton/auth/CaptchaChallenge';
 
 export interface CaptchaVerification {
   token: string;
   verificationMethod: string;
 }
-
-interface CaptchaResultMessage {
-  type: string;
-  payload: {
-    token: string;
-    type: string;
-  };
-}
-
-const EXPECTED_MESSAGE_TYPE = 'HUMAN_VERIFICATION_SUCCESS';
 
 export class ProtonDriveCaptchaModal extends Modal {
   readonly #submittedSubject = new Subject<CaptchaVerification>();
@@ -27,7 +18,6 @@ export class ProtonDriveCaptchaModal extends Modal {
   public readonly canceled$ = this.#canceledSubject.asObservable();
 
   #didResolve = false;
-  #iframeEl: HTMLIFrameElement | null = null;
 
   public constructor(
     app: App,
@@ -39,84 +29,56 @@ export class ProtonDriveCaptchaModal extends Modal {
   public override onOpen(): void {
     const { t } = getI18n();
     const { contentEl } = this;
-
     contentEl.empty();
-
     contentEl.createEl('h2', { text: t.modals.captcha.title });
 
-    contentEl.createEl('p', {
-      cls: 'proton-sync-captcha-help',
-      text: t.modals.captcha.help
-    });
+    const externalUrl = getExternalCaptchaUrl(this.captchaUrl);
+    if (!externalUrl) {
+      contentEl.createEl('p', { text: t.modals.captcha.invalidUrl });
+      new Setting(contentEl).addButton(button => button.setButtonText(t.common.cancel).onClick(() => this.close()));
+      return;
+    }
 
-    const frameWrapper = contentEl.createEl('div', { cls: 'proton-sync-captcha-frame-wrapper' });
-    this.#iframeEl = frameWrapper.createEl('iframe', {
-      cls: 'proton-sync-captcha-frame',
-      attr: {
-        src: this.captchaUrl,
-        title: t.modals.captcha.iframeTitle,
-        sandbox: 'allow-forms allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox',
-        referrerpolicy: 'no-referrer'
-      }
-    });
+    contentEl.createEl('p', { text: t.modals.captcha.help });
 
-    window.addEventListener('message', this.#onMessage, false);
+    // A normal Obsidian external link opens the user's browser. No credentials,
+    // session tokens, local server, script injection, or iframe policy bypass.
+    const link = contentEl.createEl('a', {
+      text: t.modals.captcha.openBrowser,
+      cls: 'external-link',
+      attr: { href: externalUrl.toString(), target: '_blank', rel: 'noopener noreferrer' }
+    });
 
     new Setting(contentEl)
-      .addButton(button =>
-        button.setButtonText(t.modals.captcha.reload).onClick(() => {
-          this.#reloadIframe();
-        })
-      )
-      .addExtraButton(button =>
+      .addButton(button => {
         button
-          .setIcon('cross')
-          .setTooltip(t.common.cancel)
+          .setButtonText(t.modals.captcha.continueButton)
+          .setCta()
+          .setDisabled(true)
           .onClick(() => {
+            if (this.#didResolve) {
+              return;
+            }
             this.#didResolve = true;
-            this.#canceledSubject.next();
+            // The browser posts its solution to Proton's external-verification API.
+            // Returning the original challenge lets Proton redeem that proof on the
+            // single login retry. Clicking Continue alone never verifies a human.
+            this.#submittedSubject.next({
+              token: externalUrl.searchParams.get('token') ?? '',
+              verificationMethod: 'captcha'
+            });
             this.close();
-          })
-      );
+          });
+        link.addEventListener('click', () => button.setDisabled(false));
+      })
+      .addButton(button => button.setButtonText(t.common.cancel).onClick(() => this.close()));
   }
-
-  readonly #onMessage = (event: MessageEvent<string>): void => {
-    const targetOrigin = new URL(this.captchaUrl).origin;
-    const contentWindow = this.#iframeEl?.contentWindow;
-
-    const { origin, data, source } = event;
-    if (!contentWindow || origin !== targetOrigin || !data || source !== contentWindow) {
-      return;
-    }
-
-    const deserialized = JSON.parse(data) as CaptchaResultMessage;
-
-    if (deserialized.type !== EXPECTED_MESSAGE_TYPE) {
-      return;
-    }
-
-    this.#submittedSubject.next({ token: deserialized.payload.token, verificationMethod: deserialized.payload.type });
-    this.#didResolve = true;
-    this.close();
-  };
 
   public override onClose(): void {
-    window.removeEventListener('message', this.#onMessage, false);
     if (!this.#didResolve) {
+      this.#didResolve = true;
       this.#canceledSubject.next();
     }
-
-    if (this.#iframeEl) {
-      this.#iframeEl.src = 'about:blank';
-      this.#iframeEl = null;
-    }
-  }
-
-  #reloadIframe(): void {
-    if (!this.#iframeEl) {
-      return;
-    }
-
-    this.#iframeEl.src = this.captchaUrl;
+    this.contentEl.empty();
   }
 }

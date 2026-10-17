@@ -18,6 +18,7 @@ import {
 import { getSyncService, initSyncService } from './services/SyncService';
 import { initVaultLogSink } from './services/VaultLogSink';
 import { promptFromModal } from './ui/modal-prompt';
+import { ProtonBrowserSignInModal } from './ui/modals/browser-sign-in-modal';
 import { ProtonDriveCaptchaModal } from './ui/modals/captcha-modal';
 import { ProtonDriveMailboxPasswordModal } from './ui/modals/mailbox-password-modal';
 import { ProtonDriveMasterPasswordModal } from './ui/modals/master-password-modal';
@@ -34,6 +35,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   readonly #logger = getLogger('Main');
   readonly #defaultRemoteVaultRootPath = normalizePath(`${DEFAULT_SYNC_CONTAINER_NAME}/${this.app.vault.getName()}`);
   #statusBarController: SyncStatusBarController | null = null;
+  #browserLoginController: AbortController | null = null;
+  #browserLoginModal: ProtonBrowserSignInModal | null = null;
 
   readonly #subscriptions: Array<Subscription> = [];
 
@@ -90,12 +93,69 @@ export default class ProtonDriveSyncPlugin extends Plugin {
   }
 
   public override async onunload(): Promise<void> {
+    this.#browserLoginController?.abort();
+    this.#browserLoginModal?.finish();
     this.#logger.info('Unloading Proton Drive Sync plugin');
     this.#subscriptions.forEach(subscription => subscription.unsubscribe());
     this.#subscriptions.length = 0;
     this.#statusBarController?.dispose();
     this.#statusBarController = null;
     getProtonSessionService().dispose();
+  }
+
+  public async signInWithBrowser(): Promise<void> {
+    if (this.#browserLoginController) {
+      return;
+    }
+    const { t } = getI18n();
+    const controller = new AbortController();
+    const modal = new ProtonBrowserSignInModal(this.app, controller);
+    this.#browserLoginController = controller;
+    this.#browserLoginModal = modal;
+    modal.open();
+    try {
+      const service = getProtonSessionService();
+      await Effect.runPromise(
+        service
+          .signInViaBrowser(
+            url => modal.showSignInUrl(url),
+            () => promptFromModal(this.app, app => new ProtonDriveMasterPasswordModal(app, 'setup')),
+            () => modal.finish(),
+            controller.signal
+          )
+          .pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                const session = service.getCurrentSession();
+                if (Option.isSome(session)) {
+                  const settings = getObsidianSettingsStore();
+                  settings.set('lastLoginAt', new Date());
+                  settings.set('lastRefreshAt', session.value.lastRefreshAt);
+                  settings.set('sessionExpiresAt', session.value.expiresAt);
+                }
+              })
+            ),
+            Effect.catchTags({
+              BrowserSignInFailure: error =>
+                Effect.sync(() => {
+                  new Notice(error.message, 15000);
+                }),
+              MasterPasswordRequiredError: () =>
+                Effect.sync(() => {
+                  new Notice(t.main.notices.login.masterPasswordRequired);
+                }),
+              SecretEncryptionFailedError: () =>
+                Effect.sync(() => {
+                  new Notice(t.main.notices.login.secureStorageFailed);
+                })
+            })
+          )
+      );
+    } finally {
+      modal.finish();
+      this.#browserLoginController = null;
+      this.#browserLoginModal = null;
+    }
   }
 
   public async signIn(credentials: { email: string; password: string }): Promise<void> {
@@ -132,6 +192,8 @@ export default class ProtonDriveSyncPlugin extends Plugin {
           CaptchaDataNotProvidedError: () => Effect.succeed(new Notice(t.main.notices.login.captchaDataNotProvided)),
           CaptchaRequiredError: () => Effect.succeed(new Notice(t.main.notices.login.captchaRequired)),
           TwoFactorCodeRequiredError: () => Effect.succeed(new Notice(t.main.notices.login.twoFactorRequired)),
+          UnsupportedTwoFactorMethodError: () =>
+            Effect.succeed(new Notice(t.main.notices.login.unsupportedTwoFactor, 15000)),
           EncryptionPasswordRequiredError: () =>
             Effect.succeed(new Notice(t.main.notices.login.mailboxPasswordRequired)),
           MasterPasswordRequiredError: () => Effect.succeed(new Notice(t.main.notices.login.masterPasswordRequired)),
@@ -234,6 +296,9 @@ export default class ProtonDriveSyncPlugin extends Plugin {
       }),
       settingTab.login$.subscribe(credentials => {
         this.signIn(credentials);
+      }),
+      settingTab.browserLogin$.subscribe(() => {
+        void this.signInWithBrowser();
       }),
       settingTab.changeMasterPassword$.subscribe(credentials => {
         this.changeMasterPassword(credentials);

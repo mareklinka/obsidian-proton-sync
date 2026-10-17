@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention */
 import { Data, Effect, Option } from 'effect';
-import { Platform, requestUrl, type RequestUrlResponse } from 'obsidian';
+import { requestUrl, type RequestUrlResponse } from 'obsidian';
 import { BehaviorSubject, distinctUntilChanged } from 'rxjs';
 
 import type {
@@ -15,14 +15,19 @@ import type { CaptchaVerification } from '../../ui/modals/captcha-modal';
 import type { MasterPasswordModalMode } from '../../ui/modals/master-password-modal';
 import { PROTON_BASE_URL } from '../Constants';
 import { deleteJson, getJson, postJson, ProtonApiHttpError } from '../ProtonApiClient';
+import {
+  authenticateInBrowser,
+  BrowserSignInError,
+  type BrowserSignInResult,
+  revokeBrowserSession
+} from './BrowserSignIn';
+import { getExternalCaptchaUrl } from './CaptchaChallenge';
 import type { ProtonSession } from './ProtonSession';
 import type { ProtonAuthInfo, ProtonSrpProofs } from './ProtonSrp';
 import { buildSrpProofs, computeKeyPasswordFromSalt, decodeBase64, encodeBase64 } from './ProtonSrp';
 const AUTH_SCOPE = 'full locked';
 
-// this is only used on Mobile where the CSP policy for frame-ancestors prevents us
-// from properly displaying the captcha challenge
-const CAPTCHA_FALLBACK_APPVERSION = 'Other';
+const AUTH_REQUEST_TIMEOUT_MS = 30_000;
 
 export { POST_SYNC_MEMORY_CLEAR_DELAY_MS } from '../../services/EncryptedSecretStore';
 
@@ -93,6 +98,52 @@ class ProtonSessionService {
 
   public constructor(public readonly appVersionHeader: string) {}
 
+  public signInViaBrowser(
+    onSignInUrl: (url: string) => void,
+    requestMasterPassword: () => Effect.Effect<Option.Option<string>, never>,
+    onBrowserComplete: () => void,
+    signal: AbortSignal
+  ): Effect.Effect<void, BrowserSignInFailure | MasterPasswordRequiredError | SecretEncryptionFailedError> {
+    let browserResult: BrowserSignInResult | undefined;
+    return Effect.gen(this, function* () {
+      this.#authStatusSubject.next('connecting');
+      browserResult = yield* Effect.tryPromise({
+        try: () => authenticateInBrowser(this.appVersionHeader, onSignInUrl, signal),
+        catch: error =>
+          new BrowserSignInFailure({
+            message: error instanceof BrowserSignInError ? error.message : 'Browser sign-in failed.'
+          })
+      });
+      if (signal.aborted) {
+        return yield* new BrowserSignInFailure({ message: 'Browser sign-in cancelled.' });
+      }
+      onBrowserComplete();
+      const masterPassword = yield* this.#resolveMasterPassword(requestMasterPassword());
+      if (signal.aborted) {
+        return yield* new BrowserSignInFailure({ message: 'Browser sign-in cancelled.' });
+      }
+      yield* this.#persistEncryptedSessionData(browserResult.session, browserResult.saltedPassphrases, masterPassword);
+      if (signal.aborted) {
+        yield* this.#encryptedSecretStore.clearSessionData();
+        return yield* new BrowserSignInFailure({ message: 'Browser sign-in cancelled.' });
+      }
+      getObsidianSettingsStore().set('accountEmail', browserResult.accountName);
+      this.#encryptedSecretStore.cancelScheduledLock();
+      this.#authStatusSubject.next('connected');
+    }).pipe(
+      Effect.catchAll(error =>
+        Effect.gen(this, function* () {
+          this.#authStatusSubject.next('error');
+          if (browserResult) {
+            const failedSession = browserResult.session;
+            yield* Effect.promise(() => revokeBrowserSession(this.appVersionHeader, failedSession));
+          }
+          return yield* Effect.fail(error);
+        })
+      )
+    );
+  }
+
   public signIn(
     email: string,
     password: string,
@@ -104,6 +155,7 @@ class ProtonSessionService {
     | CaptchaRequiredError
     | CaptchaDataNotProvidedError
     | TwoFactorCodeRequiredError
+    | UnsupportedTwoFactorMethodError
     | EncryptionPasswordRequiredError
     | MasterPasswordRequiredError
     | SecretEncryptionFailedError,
@@ -119,6 +171,10 @@ class ProtonSessionService {
       authResponse = yield* this.#authenticateWithCaptcha(authInfo, email, proofs, delegates);
 
       yield* this.#verifyServerProof(authResponse.ServerProof, proofs.expectedServerProof);
+
+      if ((authResponse['2FA']?.Enabled ?? 0) > 0 && !this.#requiresTwoFactorCode(authResponse)) {
+        return yield* new UnsupportedTwoFactorMethodError();
+      }
 
       if (this.#requiresTwoFactorCode(authResponse)) {
         const twoFactorCode = yield* this.#resolveTwoFactorCode(delegates.requestTwoFactorCode);
@@ -160,6 +216,7 @@ class ProtonSessionService {
     }).pipe(
       Effect.catchAll(e =>
         Effect.gen(this, function* () {
+          this.#authStatusSubject.next('error');
           if (authResponse) {
             // destroy the session if it was successfully created
             yield* this.#destroySession({
@@ -167,7 +224,6 @@ class ProtonSessionService {
               accessToken: authResponse.AccessToken
             });
           }
-          this.#authStatusSubject.next('error');
           return yield* e;
         })
       )
@@ -202,39 +258,34 @@ class ProtonSessionService {
     ProtonApiCommunicationError | CaptchaRequiredError | CaptchaDataNotProvidedError
   > {
     return Effect.gen(this, function* () {
-      let appVersionHeader = this.appVersionHeader;
       let authResponse: Option.Option<ProtonAuthResponse> = Option.none();
       let captchaData: Option.Option<CaptchaVerification> = Option.none();
 
       while (Option.isNone(authResponse)) {
-        const authResponseRaw = yield* this.#authenticate(authInfo, email, appVersionHeader, proofs, captchaData);
+        const authResponseRaw = yield* this.#authenticate(authInfo, email, this.appVersionHeader, proofs, captchaData);
 
         if (this.#requiresCaptcha(authResponseRaw)) {
-          if (Platform.isMobile) {
-            // on mobile, we can't display the captcha challenge properly,
-            // we try to bypass it by setting a fallback app version
-            appVersionHeader = CAPTCHA_FALLBACK_APPVERSION;
-            continue;
-          } else {
-            // on desktop, the captcha challenge can be handled normally
-            // we elicit the captcha token from the user in a modal
-            const captchaUrl = this.#extractCaptchaUrl(authResponseRaw.json);
-            if (Option.isNone(captchaUrl)) {
-              return yield* new CaptchaDataNotProvidedError();
-            }
-
-            captchaData = yield* delegates.requestCaptchaChallenge(captchaUrl.value);
-
-            if (Option.isNone(captchaData)) {
-              return yield* new CaptchaRequiredError();
-            }
-
-            continue;
+          // At most one user challenge and one login retry on every platform.
+          // Repeated CAPTCHA responses must never create a retry loop.
+          if (Option.isSome(captchaData)) {
+            return yield* new CaptchaRequiredError();
           }
+
+          const captchaUrl = this.#extractCaptchaUrl(authResponseRaw.json);
+          if (Option.isNone(captchaUrl)) {
+            return yield* new CaptchaDataNotProvidedError();
+          }
+          captchaData = yield* delegates.requestCaptchaChallenge(captchaUrl.value);
+          if (Option.isNone(captchaData)) {
+            return yield* new CaptchaRequiredError();
+          }
+          continue;
         }
 
         if (authResponseRaw.status >= 400) {
-          return yield* new ProtonApiCommunicationError();
+          return yield* new ProtonApiCommunicationError({
+            message: formatAuthHttpFailure('/auth/v4', authResponseRaw)
+          });
         }
 
         authResponse = Option.some(authResponseRaw.json as ProtonAuthResponse);
@@ -453,7 +504,7 @@ class ProtonSessionService {
           TwoFactorCode: twoFactorCode
         });
       },
-      catch: () => new ProtonApiCommunicationError()
+      catch: error => new ProtonApiCommunicationError({ message: formatAuthenticatedFailure('/auth/v4/2fa', error) })
     });
   }
 
@@ -483,7 +534,8 @@ class ProtonSessionService {
       return Option.none();
     }
 
-    return Option.some(url);
+    const externalUrl = getExternalCaptchaUrl(url);
+    return externalUrl ? Option.some(externalUrl.toString()) : Option.none();
   }
 
   #requiresTwoFactorCode(authResponse: ProtonAuthResponse): boolean {
@@ -542,21 +594,24 @@ class ProtonSessionService {
   ): Effect.Effect<ProtonSrpProofs, CryptographyError> {
     return Effect.tryPromise({
       try: () => buildSrpProofs(authInfo, email, password),
-      catch: () => new CryptographyError()
+      catch: () => new CryptographyError({ message: 'Password proof generation failed' })
     });
   }
 
   #verifyServerProof(serverProof: string, expected: Uint8Array): Effect.Effect<void, CryptographyError> {
     return Effect.try({
       try: (): void => {
+        if (typeof serverProof !== 'string' || !serverProof) {
+          throw new CryptographyError({ message: 'Authentication response is missing the server proof' });
+        }
         const decoded = decodeBase64(serverProof);
         if (decoded.length !== expected.length) {
-          throw new CryptographyError();
+          throw new CryptographyError({ message: 'Server proof verification failed (length mismatch)' });
         }
 
         for (let index = 0; index < decoded.length; index += 1) {
           if (decoded[index] !== expected[index]) {
-            throw new CryptographyError();
+            throw new CryptographyError({ message: 'Server proof verification failed (proof mismatch)' });
           }
         }
       },
@@ -565,7 +620,7 @@ class ProtonSessionService {
           return error;
         }
 
-        return new CryptographyError();
+        return new CryptographyError({ message: 'Server proof verification failed (invalid response)' });
       }
     });
   }
@@ -579,7 +634,7 @@ class ProtonSessionService {
       const response = yield* this.#requestRaw(path, body, this.appVersionHeader, headers);
 
       if (response.status >= 400) {
-        return yield* new ProtonApiCommunicationError();
+        return yield* new ProtonApiCommunicationError({ message: formatAuthHttpFailure(path, response) });
       }
 
       return response.json as T;
@@ -592,17 +647,24 @@ class ProtonSessionService {
     appVersionHeader: string,
     headers?: Record<string, string>
   ): Effect.Effect<RequestUrlResponse, ProtonApiCommunicationError> {
-    return Effect.promise(() =>
-      requestUrl({
-        url: `${PROTON_BASE_URL}${path}`,
-        method: 'POST',
-        contentType: 'application/json',
-        headers: {
-          'x-pm-appversion': appVersionHeader,
-          ...(headers ?? {})
-        },
-        body: JSON.stringify(body),
-        throw: false
+    return Effect.tryPromise({
+      try: () =>
+        requestUrl({
+          url: `${PROTON_BASE_URL}${path}`,
+          method: 'POST',
+          contentType: 'application/json',
+          headers: {
+            'x-pm-appversion': appVersionHeader,
+            ...(headers ?? {})
+          },
+          body: JSON.stringify(body),
+          throw: false
+        }),
+      catch: () => new ProtonApiCommunicationError({ message: `${path}: network request failed` })
+    }).pipe(
+      Effect.timeoutFail({
+        duration: AUTH_REQUEST_TIMEOUT_MS,
+        onTimeout: () => new ProtonApiCommunicationError({ message: `${path}: request timed out after 30 seconds` })
       })
     );
   }
@@ -628,7 +690,8 @@ class ProtonSessionService {
 
         return map;
       },
-      catch: () => new ProtonApiCommunicationError()
+      catch: error =>
+        new ProtonApiCommunicationError({ message: formatAuthenticatedFailure('/core/v4/keys/salts', error) })
     });
   }
 
@@ -660,6 +723,7 @@ export type ProtonSessionError =
   | ProtonApiCommunicationError
   | CryptographyError
   | TwoFactorCodeRequiredError
+  | UnsupportedTwoFactorMethodError
   | EncryptionPasswordRequiredError
   | MasterPasswordRequiredError
   | CaptchaRequiredError
@@ -677,9 +741,35 @@ function isSessionRejection(error: unknown): boolean {
   return error instanceof ProtonApiHttpError && SESSION_REJECTION_STATUSES.has(error.status);
 }
 
-export class ProtonApiCommunicationError extends Data.TaggedError('ProtonApiCommunicationError') {}
-export class CryptographyError extends Data.TaggedError('CryptographyError') {}
+/** Only the fixed route, HTTP status and numeric API code are safe to display. */
+function formatAuthHttpFailure(path: string, response: RequestUrlResponse): string {
+  const payload: unknown = response.json;
+  const code = typeof payload === 'object' && payload !== null && 'Code' in payload ? payload.Code : undefined;
+  const apiCode = typeof code === 'number' && Number.isSafeInteger(code) ? `, API code ${code}` : '';
+  return `${path}: HTTP ${response.status}${apiCode}`;
+}
+
+function formatAuthenticatedFailure(path: string, error: unknown): string {
+  return error instanceof ProtonApiHttpError
+    ? `${path}: HTTP ${error.status}`
+    : `${path}: network request or response processing failed`;
+}
+
+export class ProtonApiCommunicationError extends Data.TaggedError('ProtonApiCommunicationError')<{
+  message?: string;
+}> {
+  public constructor(options: { message?: string } = {}) {
+    super(options);
+  }
+}
+export class CryptographyError extends Data.TaggedError('CryptographyError')<{ message?: string }> {
+  public constructor(options: { message?: string } = {}) {
+    super(options);
+  }
+}
 export class TwoFactorCodeRequiredError extends Data.TaggedError('TwoFactorCodeRequiredError') {}
+export class UnsupportedTwoFactorMethodError extends Data.TaggedError('UnsupportedTwoFactorMethodError') {}
+export class BrowserSignInFailure extends Data.TaggedError('BrowserSignInFailure')<{ message: string }> {}
 export class EncryptionPasswordRequiredError extends Data.TaggedError('EncryptionPasswordRequiredError') {}
 export class MasterPasswordRequiredError extends Data.TaggedError('MasterPasswordRequiredError') {}
 export class CaptchaRequiredError extends Data.TaggedError('CaptchaRequiredError') {}

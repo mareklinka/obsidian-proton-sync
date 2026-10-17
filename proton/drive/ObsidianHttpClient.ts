@@ -10,6 +10,7 @@ import { requestUrl } from 'obsidian';
 import { getLogger } from '../../services/ConsoleLogger';
 import type { ProtonSession } from '../auth/ProtonSession';
 import { getProtonSessionService } from '../auth/ProtonSessionService';
+import { safeApiDiagnostic } from './SafeApiDiagnostic';
 
 const UNAUTHORIZED_STATUS = 401;
 
@@ -70,6 +71,13 @@ export class ObsidianHttpClient implements ProtonDriveHTTPClient {
     }
 
     const response = await requestUrl(r);
+
+    // Never include request bodies, response messages, identifiers, or credentials.
+    if (isJson && response.status >= 400) {
+      getLogger('ObsidianHttpClient').warn(
+        `Drive request failed: HTTP ${response.status}${safeApiDiagnostic(response.text)}`
+      );
+    }
 
     if (response.status === UNAUTHORIZED_STATUS) {
       // Proton no longer accepts this session - tear the local one down so the
